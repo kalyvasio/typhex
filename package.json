@@ -1,0 +1,50 @@
+{
+  "name": "typhex",
+  "version": "0.1.0",
+  "description": "TypeScript ORM with arrow-function query predicates",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./transformer": {
+      "types": "./dist/transformer/index.d.ts",
+      "import": "./dist/transformer/index.js",
+      "default": "./dist/transformer/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "example": "tsx examples/basic.ts",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "keywords": ["orm", "typescript", "sql", "query-builder"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "acorn": "^8.14.0",
+    "better-sqlite3": "^11.6.0"
+  },
+  "devDependencies": {
+    "@types/acorn": "^4.0.6",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.10.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  }
+}
