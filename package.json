@@ -21,9 +21,15 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "example": "tsx examples/basic.ts",
+    "example:transformer": "npm run build && (npx ts-patch install --silent 2>/dev/null || true) && npx tsc -p tsconfig.example-transformer.json && (mkdir -p examples/out/node_modules && (cd examples/out/node_modules && ln -sfn ../../.. typhex) 2>/dev/null || true) && node examples/out/with-transformer.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
   },
-  "keywords": ["orm", "typescript", "sql", "query-builder"],
+  "keywords": [
+    "orm",
+    "typescript",
+    "sql",
+    "query-builder"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
@@ -36,6 +42,7 @@
     "@types/acorn": "^4.0.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.10.1",
+    "ts-patch": "^3.3.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
