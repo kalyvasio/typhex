@@ -60,5 +60,22 @@ console.log("Users with IDs in [1, 2] (literal):", selectedUsers);
 const notInIds = users.where((u: User) => !((u.id as number) in [2])).toArray();
 console.log("Users with ID not in [2]:", notInIds);
 
+// Select with rest: id first, then all other columns
+const idAndRest = users.select(({ id, ...rest }) => ({ id, ...rest })).toArray();
+console.log("Select id + rest:", idAndRest);
+
+const projected = users.select(({ id, name }) => ({ id, name })).toArray();
+console.log("Select id and name (destructuring):", projected);
+
+const projectedExplicit = users.select((u: User) => ({ id: u.id, name: u.name })).toArray();
+console.log("Select id and name (explicit param):", projectedExplicit);
+
+// Select with aliases (object keys become SQL AS)
+const withAliases = users
+  .select((u: User) => ({ userId: u.id, fullName: u.name, country: u.country }))
+  .where((u: User) => u.country === "US")
+  .toArray();
+console.log("Select with aliases (US only):", withAliases);
+
 driver.close();
 console.log("Done.");

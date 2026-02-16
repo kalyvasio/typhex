@@ -1,0 +1,31 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`select transformer > transforms ({ id, ...rest }) => ({ id, ...rest }) to IR object with rest 1`] = `
+"users.select({ param: "u", paths: [["id"]], aliases: ["id"], rest: true });
+"
+`;
+
+exports[`select transformer > transforms ({ id, name }) => ({ id, name }) to IR object 1`] = `
+"users.select({ param: "u", paths: [["id"], ["name"]], aliases: ["id", "name"] });
+"
+`;
+
+exports[`select transformer > transforms (u) => ({ id: u.id }) single column 1`] = `
+"users.select({ param: "u", paths: [["id"]], aliases: ["id"] });
+"
+`;
+
+exports[`select transformer > transforms (u) => ({ id: u.id, name: u.name }) to IR object 1`] = `
+"users.select({ param: "u", paths: [["id"], ["name"]], aliases: ["id", "name"] });
+"
+`;
+
+exports[`select transformer > transforms (u) => ({ userId: u.id }) single column with alias 1`] = `
+"users.select({ param: "u", paths: [["id"]], aliases: ["userId"] });
+"
+`;
+
+exports[`select transformer > transforms (u) => ({ userId: u.id, fullName: u.name, country: u.country }) with aliases 1`] = `
+"users.select({ param: "u", paths: [["id"], ["name"], ["country"]], aliases: ["userId", "fullName", "country"] });
+"
+`;

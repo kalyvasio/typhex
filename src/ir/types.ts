@@ -69,6 +69,10 @@ export interface IrSelect {
   param: string;
   /** Empty = select all columns for this param */
   paths: string[][];
+  /** Optional output names (SQL AS). Same length as paths; when set, path[i] is selected as aliases[i]. */
+  aliases?: string[];
+  /** If true, select paths plus all other table columns not in paths (e.g. ({ id, ...rest }) => ({ id, ...rest })). */
+  rest?: boolean;
 }
 
 export function isIrNode(node: unknown): node is IrNode {
@@ -83,4 +87,13 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "in" ||
     k === "call"
   );
+}
+
+export function isIrSelect(node: unknown): node is IrSelect {
+  if (node == null || typeof node !== "object") return false;
+  const o = node as Record<string, unknown>;
+  if (typeof o.param !== "string" || !Array.isArray(o.paths)) return false;
+  if (!o.paths.every((p: unknown) => Array.isArray(p) && (p as unknown[]).every((x: unknown) => typeof x === "string"))) return false;
+  if (o.rest !== undefined && typeof o.rest !== "boolean") return false;
+  return true;
 }

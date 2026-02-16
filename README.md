@@ -53,6 +53,7 @@ users.where((u) => u.id in [1, 2, 3]).count();
 - **CRUD operations**: `insert()`, `update()`, `delete()`, `findById()`
 - **Schema migrations**: `db.migrate()` creates tables from your definitions
 - **SQLite driver** included; extensible driver architecture for PostgreSQL, MySQL, etc.
+- **Debug**: set env `TYPHEX_DEBUG=1` (or `true`/`yes`) to log SQL and params to the console.
 
 ## Installation
 

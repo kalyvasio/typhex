@@ -1,90 +1,10 @@
 /**
- * TypeScript transformer: rewrites .where(arrow) to .where(ir, params).
- * Use with ttypescript or ts-patch.
+ * Transformer for .where() calls: converts arrow predicates to IR.
  */
 
 import * as ts from "typescript";
 import type { IrNode } from "../ir/types.js";
-
-// Type checking helpers
-
-function checkSymbolIsTyphex(symbol: ts.Symbol): boolean {
-  const symbolName = symbol.getName();
-  
-  // Only check Table and QueryBuilder symbols
-  if (symbolName !== "Table" && symbolName !== "QueryBuilder") {
-    return false;
-  }
-  
-  // Check declarations to verify source file
-  const declarations = symbol.getDeclarations();
-  if (!declarations || declarations.length === 0) {
-    return false;
-  }
-  
-  // Verify all declarations are from typhex package
-  for (const decl of declarations) {
-    const sourceFile = decl.getSourceFile();
-    const fileName = sourceFile.fileName;
-    
-    // Normalize path separators
-    const normalizedPath = fileName.replace(/\\/g, "/");
-    
-    // Check if file is from our package structure
-    const isTyphexFile = 
-      (normalizedPath.includes("/typhex/") || normalizedPath.includes("/typhex\\")) &&
-      (normalizedPath.includes("/orm/table") || normalizedPath.includes("/orm/query-builder")) &&
-      (normalizedPath.endsWith(".ts") || normalizedPath.endsWith(".js") || normalizedPath.endsWith(".d.ts"));
-    
-    if (!isTyphexFile) {
-      return false; // At least one declaration is not from typhex
-    }
-  }
-  
-  return true; // All declarations are from typhex
-}
-
-function isTyphexType(
-  receiver: ts.Expression,
-  checker: ts.TypeChecker
-): boolean {
-  try {
-    const receiverType = checker.getTypeAtLocation(receiver);
-    
-    // Get the type's symbol - for generic types like Table<T>, this gets the base class
-    let typeSymbol = receiverType.getSymbol();
-    
-    // For generic instantiations, try to get symbol from constructor
-    if (!typeSymbol) {
-      const props = receiverType.getProperties();
-      const constructorProp = props.find(p => p.getName() === "constructor");
-      if (constructorProp) {
-        const constructorType = checker.getTypeOfSymbolAtLocation(constructorProp, receiver);
-        const constructorSig = constructorType.getCallSignatures();
-        if (constructorSig.length > 0) {
-          const returnType = constructorSig[0].getReturnType();
-          typeSymbol = returnType.getSymbol();
-        }
-      }
-    }
-    
-    // Also check alias symbol for type aliases
-    if (!typeSymbol && receiverType.aliasSymbol) {
-      typeSymbol = receiverType.aliasSymbol;
-    }
-    
-    if (!typeSymbol) {
-      return false;
-    }
-    
-    return checkSymbolIsTyphex(typeSymbol);
-  } catch {
-    // If type checking fails, be conservative and skip transformation
-    return false;
-  }
-}
-
-// IR conversion helpers
+import { isTyphexType, memberPath } from "./shared.js";
 
 function binaryOpToString(
   kind: ts.SyntaxKind
@@ -105,26 +25,16 @@ function binaryOpToString(
   return (m[kind] as IrNode extends { op: infer O } ? O : never | "in" | null) ?? null;
 }
 
-function memberPath(
-  expr: ts.PropertyAccessExpression,
-  paramName: string
-): string[] | null {
-  const parts: string[] = [];
-  let current: ts.Expression = expr;
-  while (ts.isPropertyAccessExpression(current)) {
-    parts.unshift(current.name.text);
-    current = current.expression;
-  }
-  if (ts.isIdentifier(current) && current.text === paramName) return parts;
-  return null;
-}
-
 function exprToIr(
   expr: ts.Expression,
   param: ts.BindingName | undefined,
   paramName: string,
   freeVars: Set<string>
 ): IrNode | null {
+  if (ts.isParenthesizedExpression(expr)) {
+    return exprToIr(expr.expression, param, paramName, freeVars);
+  }
+
   if (ts.isBinaryExpression(expr)) {
     const op = expr.operatorToken.kind;
     const opStr = binaryOpToString(op);
@@ -188,6 +98,17 @@ function exprToIr(
         return { kind: "call", method, receiver, args: args as IrNode[] };
       }
     }
+  }
+
+  if (ts.isArrayLiteralExpression(expr)) {
+    const arr: unknown[] = [];
+    for (const e of expr.elements) {
+      if (e.kind === ts.SyntaxKind.SpreadElement) return null;
+      const ir = exprToIr(e as ts.Expression, param, paramName, freeVars);
+      if (!ir || ir.kind !== "const") return null;
+      arr.push(ir.value);
+    }
+    return { kind: "const", value: arr };
   }
 
   return null;
@@ -288,14 +209,13 @@ function valueToExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
 
 // Transformer functions
 
-function tryRewriteWhereCall(
+export function transformWhereCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker
 ): ts.CallExpression | null {
   const expr = call.expression;
   if (!ts.isPropertyAccessExpression(expr)) return null;
-  const name = expr.name.text;
-  if (name !== "where" && name !== "select" && name !== "orderBy") return null;
+  if (expr.name.text !== "where") return null;
   
   // Check if the receiver is a Typhex Table or QueryBuilder
   const receiver = expr.expression;
@@ -316,51 +236,16 @@ function tryRewriteWhereCall(
   const paramsLiteral =
     freeVars.length > 0
       ? ts.factory.createObjectLiteralExpression(
-          freeVars.map(varName =>
+          freeVars.map((varName) =>
             ts.factory.createShorthandPropertyAssignment(ts.factory.createIdentifier(varName))
           )
         )
       : ts.factory.createObjectLiteralExpression([]);
-  const newArgs =
-    name === "where" || name === "select"
-      ? [irLiteral, paramsLiteral]
-      : name === "orderBy"
-        ? [irLiteral]
-        : args;
+
   return ts.factory.updateCallExpression(
     call,
     call.expression,
     call.typeArguments,
-    newArgs
+    [irLiteral, paramsLiteral]
   );
-}
-
-function visit(
-  node: ts.Node,
-  ctx: ts.TransformationContext,
-  checker: ts.TypeChecker
-): ts.Node {
-  if (ts.isCallExpression(node)) {
-    const rewritten = tryRewriteWhereCall(node, checker);
-    if (rewritten) return rewritten;
-  }
-  return ts.visitEachChild(node, n => visit(n, ctx, checker), ctx);
-}
-
-function visitSourceFile(
-  node: ts.SourceFile,
-  ctx: ts.TransformationContext,
-  checker: ts.TypeChecker
-): ts.SourceFile {
-  return ts.visitEachChild(node, n => visit(n, ctx, checker), ctx) as ts.SourceFile;
-}
-
-// Main transformer factory
-
-export function createWhereTransformer(program: ts.Program) {
-  const checker = program.getTypeChecker();
-  
-  return (ctx: ts.TransformationContext): ts.Transformer<ts.SourceFile> => {
-    return (sf: ts.SourceFile) => visitSourceFile(sf, ctx, checker);
-  };
 }
