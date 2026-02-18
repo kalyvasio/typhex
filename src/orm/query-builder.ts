@@ -9,6 +9,49 @@ import type { Table } from "./table.js";
 import type { Driver } from "../driver/types.js";
 import { parseArrowToIr } from "../parser/parse-arrow.js";
 
+/** Default param name for builder-created IR (orderBy, select) when no arrow is involved. */
+const DEFAULT_ROW_PARAM = "u";
+
+const TABLE_ALIAS = "t0";
+
+function collectParamNamesFromNode(node: IrNode, out: Set<string>): void {
+  switch (node.kind) {
+    case "member":
+      out.add(node.param);
+      break;
+    case "binary":
+    case "unary":
+      if (node.kind === "binary") {
+        collectParamNamesFromNode(node.left, out);
+        collectParamNamesFromNode(node.right, out);
+      } else {
+        collectParamNamesFromNode(node.operand, out);
+      }
+      break;
+    case "in":
+      collectParamNamesFromNode(node.left, out);
+      collectParamNamesFromNode(node.right, out);
+      break;
+    case "call":
+      collectParamNamesFromNode(node.receiver, out);
+      for (const a of node.args) collectParamNamesFromNode(a, out);
+      break;
+    default:
+      break;
+  }
+}
+
+function buildParamToAlias(state: QueryState<unknown>): Record<string, string> {
+  const names = new Set<string>();
+  names.add(DEFAULT_ROW_PARAM);
+  if (state.whereIr) collectParamNamesFromNode(state.whereIr, names);
+  for (const o of state.orderBy) names.add(o.param);
+  if (state.selectIr) names.add(state.selectIr.param);
+  const paramToAlias: Record<string, string> = {};
+  for (const p of names) paramToAlias[p] = TABLE_ALIAS;
+  return paramToAlias;
+}
+
 export interface QueryState<T = unknown> {
   table: Table<T>;
   driver: Driver;
@@ -23,67 +66,68 @@ export interface QueryState<T = unknown> {
 export class QueryBuilder<T = unknown> {
   constructor(private state: QueryState<T>) {}
 
+  /** Return a new QueryBuilder with a copy of the current state. Use this to branch and build different queries from the same base. */
+  clone(): QueryBuilder<T> {
+    return new QueryBuilder({
+      table: this.state.table,
+      driver: this.state.driver,
+      whereIr: this.state.whereIr,
+      whereParams: { ...this.state.whereParams },
+      orderBy: [...this.state.orderBy],
+      limitNum: this.state.limitNum,
+      offsetNum: this.state.offsetNum,
+      selectIr: this.state.selectIr,
+    });
+  }
+
   where(
     predicate: IrNode | ((entity: T) => boolean),
-    params?: Record<string, unknown>
+    params?: Record<string, any>
   ): QueryBuilder<T> {
-    let whereIr: IrNode | null = null;
-    let whereParams = { ...this.state.whereParams };
-    if (params) Object.assign(whereParams, params);
+    if (params) Object.assign(this.state.whereParams, params);
 
     if (isIrNode(predicate)) {
-      whereIr = predicate;
+      this.state.whereIr = predicate;
     } else {
       try {
-        whereIr = parseArrowToIr(predicate as (u: unknown) => boolean, {
-          paramName: "u",
+        this.state.whereIr = parseArrowToIr(predicate as (u: any) => boolean, {
           paramKeys: params ? Object.keys(params) : [],
         });
       } catch (e) {
         throw new Error("Failed to parse arrow predicate: " + (e instanceof Error ? e.message : String(e)));
       }
     }
-
-    return new QueryBuilder({
-      ...this.state,
-      whereIr,
-      whereParams,
-    });
+    return this;
   }
 
   orderBy(column: string, direction: "asc" | "desc" = "asc"): QueryBuilder<T> {
-    return new QueryBuilder({
-      ...this.state,
-      orderBy: [
-        ...this.state.orderBy,
-        { param: "u", path: [column], direction },
-      ],
-    });
+    this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path: [column], direction });
+    return this;
   }
 
   limit(n: number): QueryBuilder<T> {
-    return new QueryBuilder({ ...this.state, limitNum: n });
+    this.state.limitNum = n;
+    return this;
   }
 
   offset(n: number): QueryBuilder<T> {
-    return new QueryBuilder({ ...this.state, offsetNum: n });
+    this.state.offsetNum = n;
+    return this;
   }
 
   select(columns: string[]): QueryBuilder<T> {
-    return new QueryBuilder({
-      ...this.state,
-      selectIr: {
-        param: "u",
-        paths: columns.map((c) => [c]),
-      },
-    });
+    this.state.selectIr = {
+      param: DEFAULT_ROW_PARAM,
+      paths: columns.map((c) => [c]),
+    };
+    return this;
   }
 
   toArray(): T[] {
     const table = this.state.table;
     const tableName = table.tableName;
     const columns = table.columnNames;
-    const opts = { tableAlias: "t0", paramToAlias: { u: "t0" } };
+    const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
 
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params: finalParams } = expandInParams(
@@ -104,13 +148,12 @@ export class QueryBuilder<T = unknown> {
   }
 
   first(): T | undefined {
-    const arr = this.limit(1).toArray();
-    return arr[0];
+    return this.clone().limit(1).toArray()[0];
   }
 
   count(): number {
     const table = this.state.table;
-    const opts = { tableAlias: "t0", paramToAlias: { u: "t0" } };
+    const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params } = expandInParams(
       whereResult.sql,
@@ -124,7 +167,7 @@ export class QueryBuilder<T = unknown> {
 
   update(set: Record<string, unknown>): number {
     const table = this.state.table;
-    const opts = { tableAlias: "t0", paramToAlias: { u: "t0" } };
+    const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params: whereParams } = expandInParams(
       whereResult.sql,
@@ -142,7 +185,7 @@ export class QueryBuilder<T = unknown> {
 
   delete(): number {
     const table = this.state.table;
-    const opts = { tableAlias: "t0", paramToAlias: { u: "t0" } };
+    const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params } = expandInParams(
       whereResult.sql,

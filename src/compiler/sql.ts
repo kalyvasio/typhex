@@ -217,13 +217,29 @@ export function bindParams(
   return out;
 }
 
+/** Resolve params without flattening arrays (so one ? can expand to many for IN). */
+function resolveParamsForExpand(
+  params: unknown[],
+  paramValues: Record<string, unknown>
+): unknown[] {
+  const out: unknown[] = [];
+  for (const p of params) {
+    if (isParamSentinel(p)) {
+      out.push(paramValues[p.__param]);
+    } else {
+      out.push(p);
+    }
+  }
+  return out;
+}
+
 /** Flatten IN clause: one ? per array element. Returns final SQL and flat params. */
 export function expandInParams(
   sql: string,
   params: unknown[],
   paramValues: Record<string, unknown>
 ): { sql: string; params: unknown[] } {
-  const resolved = bindParams({ sql, params }, paramValues);
+  const resolved = resolveParamsForExpand(params, paramValues);
   let idx = 0;
   const newParams: unknown[] = [];
   const newSql = sql.replace(/\?/g, () => {
