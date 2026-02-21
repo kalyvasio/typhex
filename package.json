@@ -20,8 +20,6 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "example": "tsx examples/basic.ts",
-    "example:transformer": "npm run build && (npx ts-patch install --silent 2>/dev/null || true) && npx tsc -p tsconfig.example-transformer.json && (mkdir -p examples/out/node_modules && (cd examples/out/node_modules && ln -sfn ../../.. typhex) 2>/dev/null || true) && node examples/out/with-transformer.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage"

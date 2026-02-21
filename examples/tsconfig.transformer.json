@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "out",
+    "noEmit": false,
+    "baseUrl": ".",
+    "paths": { "typhex": ["../dist/index.d.ts"] },
+    "plugins": [{ "transform": "../dist/transformer/index.js" }]
+  },
+  "include": ["with-transformer.ts"],
+  "exclude": ["node_modules"]
+}

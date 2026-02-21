@@ -1,6 +1,6 @@
 /**
  * Basic Typhex ORM usage: arrow-function where + CRUD.
- * Run: npm run example (or npx tsx examples/basic.ts)
+ * See examples/README.md for how to run.
  */
 
 import { Db, createSqliteDriver } from "../src/index.js";

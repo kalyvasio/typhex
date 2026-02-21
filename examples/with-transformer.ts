@@ -1,9 +1,7 @@
 /**
  * Same as basic example but written for the compile-time transformer:
  * closure variables are used in predicates without passing a second argument.
- *
- * Build and run with: npm run example:transformer
- * (Compiles this file with typhex/transformer so .where(ir, { country }) is emitted for you.)
+ * See examples/README.md for how to build and run.
  */
 
 import { Db, createSqliteDriver } from "typhex";

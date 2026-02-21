@@ -1,0 +1,19 @@
+{
+  "name": "typhex-examples",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "typhex": "file:.."
+  },
+  "devDependencies": {
+    "ts-patch": "^3.3.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "scripts": {
+    "basic": "tsx basic.ts",
+    "build:transformer": "cd .. && npm run build && cd examples && npx ts-patch install --silent && npx tsc -p tsconfig.transformer.json",
+    "start:transformer": "node out/with-transformer.js",
+    "transformer": "npm run build:transformer && npm run start:transformer"
+  }
+}
