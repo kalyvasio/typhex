@@ -238,30 +238,7 @@ function irToObjectLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       );
       break;
     case "const":
-      props.push(
-        f.createPropertyAssignment(
-          "value",
-          ir.value === null
-            ? f.createNull()
-            : typeof ir.value === "string"
-              ? f.createStringLiteral(ir.value)
-              : typeof ir.value === "number"
-                ? f.createNumericLiteral(ir.value)
-                : typeof ir.value === "boolean"
-                  ? (ir.value ? f.createTrue() : f.createFalse())
-                  : Array.isArray(ir.value)
-                    ? f.createArrayLiteralExpression(
-                        (ir.value as unknown[]).map(v =>
-                          typeof v === "string"
-                            ? f.createStringLiteral(v)
-                            : typeof v === "number"
-                              ? f.createNumericLiteral(v)
-                              : f.createNull()
-                        )
-                      )
-                    : f.createStringLiteral(String(ir.value))
-        )
-      );
+      props.push(f.createPropertyAssignment("value", valueToExpression(ir.value, f)));
       break;
     case "param":
       props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
@@ -282,6 +259,31 @@ function irToObjectLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       break;
   }
   return f.createObjectLiteralExpression(props);
+}
+
+function valueToExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
+  if (value === null) return f.createNull();
+  switch (typeof value) {
+    case "string":
+      return f.createStringLiteral(value);
+    case "number":
+      return f.createNumericLiteral(value);
+    case "boolean":
+      return value ? f.createTrue() : f.createFalse();
+    default:
+      if (Array.isArray(value)) {
+        return f.createArrayLiteralExpression(
+            (value as unknown[]).map(v =>
+                typeof v === "string"
+                    ? f.createStringLiteral(v)
+                    : typeof v === "number"
+                        ? f.createNumericLiteral(v)
+                        : f.createNull()
+            )
+        );
+      }
+      return f.createStringLiteral(String(value));
+  }
 }
 
 // Transformer functions
