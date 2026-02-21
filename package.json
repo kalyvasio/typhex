@@ -20,10 +20,16 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "example": "tsx examples/basic.ts",
-    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage"
   },
-  "keywords": ["orm", "typescript", "sql", "query-builder"],
+  "keywords": [
+    "orm",
+    "typescript",
+    "sql",
+    "query-builder"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
@@ -36,8 +42,11 @@
     "@types/acorn": "^4.0.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.10.1",
+    "@vitest/coverage-v8": "^2.1.6",
+    "ts-patch": "^3.3.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.6"
   },
   "peerDependencies": {
     "typescript": ">=5.0"

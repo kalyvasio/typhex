@@ -13,7 +13,7 @@ import { createWhereTransformer } from "./where-transformer.js";
 
 export default function (program: ts.Program) {
   return {
-    before: createWhereTransformer(ts),
+    before: createWhereTransformer(program),
   };
 }
 

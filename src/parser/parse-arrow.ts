@@ -44,7 +44,7 @@ export interface ParseOptions {
  * Only supports expression-bodied arrows: (x) => x.age > 18
  */
 export function parseArrowToIr(
-  fn: (...args: unknown[]) => unknown,
+  fn: (...args: any[]) => any,
   options: ParseOptions = {}
 ): IrNode {
   const src = fn.toString();

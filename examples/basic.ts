@@ -1,6 +1,6 @@
 /**
  * Basic Typhex ORM usage: arrow-function where + CRUD.
- * Run: npm run example (or npx tsx examples/basic.ts)
+ * See examples/README.md for how to run.
  */
 
 import { Db, createSqliteDriver } from "../src/index.js";
@@ -32,7 +32,8 @@ users.insert({ name: "Carol", age: 28, country: "US" });
 const adults = users.where((u) => u.age > 18).toArray();
 console.log("Adults:", adults);
 
-// With param (pass closure values as second arg)
+// Closure variable: pass its value as second arg when not using the transformer.
+// With the transformer you can write: users.where((u) => u.country === country)
 const country = "US";
 const fromUS = users.where((u) => u.country === country, { country }).toArray();
 console.log("From US:", fromUS);
@@ -48,6 +49,26 @@ console.log("Count US:", n);
 // Select specific columns
 const names = users.where((u) => u.age > 20).select(["name", "country"]).toArray();
 console.log("Names only:", names);
+
+// String methods: startsWith, endsWith, includes
+const namesStartingWithA = users.where((u) => u.name.startsWith("A")).toArray();
+console.log("Names starting with 'A':", namesStartingWithA);
+
+const namesContainingAl = users.where((u) => u.name.includes("al")).toArray();
+console.log("Names containing 'al':", namesContainingAl);
+
+// Array membership with 'in' operator (array literal)
+const selectedUsers = users.where((u) => u.id in [1, 3]).toArray();
+console.log("Users with IDs in [1, 3]:", selectedUsers);
+
+// Array membership with variable (pass array as param)
+const ids = [1, 2];
+const selectedUsers2 = users.where((u) => u.id in ids, { ids }).toArray();
+console.log("Users with IDs in [1, 2] (variable):", selectedUsers2);
+
+// Not in: negate with !
+const notInIds = users.where((u) => !(u.id in [2])).toArray();
+console.log("Users with ID not in [2]:", notInIds);
 
 // Update
 const updated = users.update((u) => u.name === "Bob", { age: 26 });

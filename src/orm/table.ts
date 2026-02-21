@@ -23,10 +23,10 @@ export class Table<T = Record<string, unknown>> {
     predicate: IrNode | ((entity: T) => boolean),
     params?: Record<string, unknown>
   ): QueryBuilder<T> {
-    return this.all().where(predicate, params);
+    return this.query().where(predicate, params);
   }
 
-  all(): QueryBuilder<T> {
+  query(): QueryBuilder<T> {
     return new QueryBuilder({
       table: this,
       driver: this.driver,
@@ -47,7 +47,7 @@ export class Table<T = Record<string, unknown>> {
       left: { kind: "member", param: "u", path: [pk] },
       right: { kind: "const", value: id },
     };
-    return this.all().where(whereIr).first();
+    return this.query().where(whereIr).first();
   }
 
   insert(row: Partial<T> & Record<string, unknown>): number {
@@ -65,13 +65,13 @@ export class Table<T = Record<string, unknown>> {
     set: Partial<T> & Record<string, unknown>,
     params?: Record<string, unknown>
   ): number {
-    return this.all().where(predicate, params).update(set as Record<string, unknown>);
+    return this.query().where(predicate, params).update(set as Record<string, unknown>);
   }
 
   delete(
     predicate: IrNode | ((entity: T) => boolean),
     params?: Record<string, unknown>
   ): number {
-    return this.all().where(predicate, params).delete();
+    return this.query().where(predicate, params).delete();
   }
 }
