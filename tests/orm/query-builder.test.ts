@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src/orm/query-builder.js";
 import type { Table } from "../../src/orm/table.js";
 import type { Driver } from "../../src/driver/types.js";
-import type { IrNode } from "../../src/ir/types.js";
+import type { IrNode, IrSelect } from "../../src/ir/types.js";
+import { isIrSelect } from "../../src/ir/types.js";
 
 /** Entity shape used in query-builder tests so predicate types like (u: { age: number }) match. */
 type MockEntity = { id?: number; name?: string; age: number; country: string };
@@ -142,6 +143,45 @@ describe("QueryBuilder", () => {
     it("accepts column names and returns this", () => {
       const q = newBuilder();
       expect(q.select(["id", "name"])).toBe(q);
+    });
+
+    it("accepts IrSelect and uses it in SQL", () => {
+      const selectIr: IrSelect = { param: "u", paths: [["id"], ["name"]] };
+      newBuilder().select(selectIr).toArray();
+      expect(driver.query).toHaveBeenCalled();
+      const [sql] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"t0"."id"');
+      expect(sql).toContain('"t0"."name"');
+      expect(sql).not.toContain('"t0"."age"');
+    });
+
+    it("accepts IrSelect with aliases and emits AS in SQL", () => {
+      const selectIr: IrSelect = {
+        param: "u",
+        paths: [["id"], ["name"]],
+        aliases: ["userId", "fullName"],
+      };
+      newBuilder().select(selectIr).toArray();
+      const [sql] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('AS "userId"');
+      expect(sql).toContain('AS "fullName"');
+    });
+
+    it("accepts IrSelect with rest and includes remaining columns", () => {
+      const selectIr: IrSelect = { param: "u", paths: [["id"]], rest: true };
+      newBuilder().select(selectIr).toArray();
+      const [sql] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"t0"."id"');
+      expect(sql).toContain('"t0"."name"');
+      expect(sql).toContain('"t0"."age"');
+    });
+
+    it("treats plain object with param and paths as IrSelect", () => {
+      const selectIr = { param: "u", paths: [["id"]] };
+      expect(isIrSelect(selectIr)).toBe(true);
+      newBuilder().select(selectIr as IrSelect).toArray();
+      const [sql] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"t0"."id"');
     });
   });
 

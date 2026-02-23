@@ -218,6 +218,20 @@ describe("compiler/sql", () => {
       const cols = ["id", "name", "age"];
       expect(compileSelectList(select, cols, opts)).toBe("\"t0\".\"id\", \"t0\".\"name\"");
     });
+
+    it("with rest: explicit paths then remaining columns", () => {
+      const select: IrSelect = { param: "u", paths: [["id"]], aliases: ["id"], rest: true };
+      const cols = ["id", "name", "age"];
+      expect(compileSelectList(select, cols, opts)).toBe(
+        "\"t0\".\"id\" AS \"id\", \"t0\".\"name\", \"t0\".\"age\""
+      );
+    });
+
+    it("with rest and empty paths: all columns", () => {
+      const select: IrSelect = { param: "u", paths: [], rest: true };
+      const cols = ["id", "name"];
+      expect(compileSelectList(select, cols, opts)).toBe("\"t0\".\"id\", \"t0\".\"name\"");
+    });
   });
 
   describe("isParamSentinel", () => {

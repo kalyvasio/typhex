@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   isIrNode,
+  isIrSelect,
   type IrNode,
   type IrBinary,
   type IrMember,
@@ -9,6 +10,7 @@ import {
   type IrUnary,
   type IrIn,
   type IrCall,
+  type IrSelect,
 } from "../../src/ir/types.js";
 
 describe("ir/types", () => {
@@ -81,6 +83,57 @@ describe("ir/types", () => {
 
     it("returns false for object with unknown kind", () => {
       expect(isIrNode({ kind: "unknown" })).toBe(false);
+    });
+  });
+
+  describe("isIrSelect", () => {
+    it("returns true for valid IrSelect with paths", () => {
+      const sel: IrSelect = { param: "u", paths: [["id"], ["name"]] };
+      expect(isIrSelect(sel)).toBe(true);
+    });
+
+    it("returns true for IrSelect with aliases", () => {
+      const sel: IrSelect = {
+        param: "u",
+        paths: [["id"], ["name"]],
+        aliases: ["userId", "userName"],
+      };
+      expect(isIrSelect(sel)).toBe(true);
+    });
+
+    it("returns true for IrSelect with rest", () => {
+      const sel: IrSelect = { param: "u", paths: [["id"]], rest: true };
+      expect(isIrSelect(sel)).toBe(true);
+    });
+
+    it("returns true for IrSelect with empty paths and rest", () => {
+      const sel: IrSelect = { param: "u", paths: [], rest: true };
+      expect(isIrSelect(sel)).toBe(true);
+    });
+
+    it("returns true for IrSelect with empty paths (select all)", () => {
+      const sel: IrSelect = { param: "u", paths: [] };
+      expect(isIrSelect(sel)).toBe(true);
+    });
+
+    it("returns false for null", () => {
+      expect(isIrSelect(null)).toBe(false);
+    });
+
+    it("returns false for non-object", () => {
+      expect(isIrSelect(42)).toBe(false);
+    });
+
+    it("returns false when param is not a string", () => {
+      expect(isIrSelect({ param: 1, paths: [] })).toBe(false);
+    });
+
+    it("returns false when paths is not an array", () => {
+      expect(isIrSelect({ param: "u", paths: "id" })).toBe(false);
+    });
+
+    it("returns false when rest is not boolean", () => {
+      expect(isIrSelect({ param: "u", paths: [], rest: "yes" })).toBe(false);
     });
   });
 });

@@ -1,0 +1,38 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`where transformer > transforms (u) => !(u.id in [2]) 1`] = `
+"users.where({ kind: "unary", op: "!", operand: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [2] } } }, {});
+"
+`;
+
+exports[`where transformer > transforms (u) => u.age >= minAge && u.age <= maxAge with closure vars 1`] = `
+"const minAge = 25;
+const maxAge = 35;
+users.where({ kind: "binary", op: "&&", left: { kind: "binary", op: ">=", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "minAge" } }, right: { kind: "binary", op: "<=", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "maxAge" } } }, { minAge, maxAge });
+"
+`;
+
+exports[`where transformer > transforms (u) => u.country === "US" 1`] = `
+"users.where({ kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["country"] }, right: { kind: "const", value: "US" } }, {});
+"
+`;
+
+exports[`where transformer > transforms (u) => u.id === 1 simple equality 1`] = `
+"users.where({ kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 1 } }, {});
+"
+`;
+
+exports[`where transformer > transforms (u) => u.id in [1, 2] 1`] = `
+"users.where({ kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [1, 2] } }, {});
+"
+`;
+
+exports[`where transformer > transforms (u) => u.name.includes("al") 1`] = `
+"users.where({ kind: "call", method: "includes", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "al" }] }, {});
+"
+`;
+
+exports[`where transformer > transforms (u) => u.name.startsWith("A") 1`] = `
+"users.where({ kind: "call", method: "startsWith", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "A" }] }, {});
+"
+`;

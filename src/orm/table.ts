@@ -5,7 +5,7 @@
 import type { Driver } from "../driver/types.js";
 import type { TableDefinition } from "../schema/types.js";
 import { getColumnNames } from "../schema/types.js";
-import type { IrNode } from "../ir/types.js";
+import type {IrNode, IrSelect} from "../ir/types.js";
 import { QueryBuilder } from "./query-builder.js";
 
 export class Table<T = Record<string, unknown>> {
@@ -24,6 +24,12 @@ export class Table<T = Record<string, unknown>> {
     params?: Record<string, unknown>
   ): QueryBuilder<T> {
     return this.query().where(predicate, params);
+  }
+
+  select(
+      columnsOrIr: string[] | IrSelect | ((entity: T) => Record<string, unknown>)
+  ): QueryBuilder<T> {
+    return this.query().select(columnsOrIr);
   }
 
   query(): QueryBuilder<T> {

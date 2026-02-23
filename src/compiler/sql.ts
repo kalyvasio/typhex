@@ -186,9 +186,22 @@ export function compileSelectList(
   if (!select || select.paths.length === 0) {
     return columns.map((c) => `${base}.${quoteId(c)}`).join(", ");
   }
-  return select.paths
-    .map((path) => `${base}.${path.map(quoteId).join(".")}`)
-    .join(", ");
+  const aliases = select.aliases;
+  const explicitParts = select.paths
+    .map((path, i) => {
+      const col = `${base}.${path.map(quoteId).join(".")}`;
+      if (aliases && aliases[i] !== undefined) {
+        return `${col} AS ${quoteId(aliases[i])}`;
+      }
+      return col;
+    });
+  if (select.rest) {
+    const explicitCols = new Set(select.paths.map((p) => p[0]));
+    const restCols = columns.filter((c) => !explicitCols.has(c));
+    const restParts = restCols.map((c) => `${base}.${quoteId(c)}`);
+    return [...explicitParts, ...restParts].join(", ");
+  }
+  return explicitParts.join(", ");
 }
 
 const PARAM_SENTINEL = "__param" as const;

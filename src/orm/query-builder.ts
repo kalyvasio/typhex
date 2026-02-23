@@ -3,7 +3,7 @@
  */
 
 import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
-import { isIrNode } from "../ir/types.js";
+import { isIrNode, isIrSelect } from "../ir/types.js";
 import { compileWhere, compileOrderBy, compileSelectList, expandInParams } from "../compiler/sql.js";
 import type { Table } from "./table.js";
 import type { Driver } from "../driver/types.js";
@@ -64,6 +64,11 @@ export interface QueryState<T = unknown> {
 }
 
 export class QueryBuilder<T = unknown> {
+  private static readonly isDebugSqlEnabled = ((): boolean => {
+    const debugFlag = process?.env?.TYPHEX_DEBUG;
+    return debugFlag === "1" || debugFlag === "true" || debugFlag === "yes";
+  })();
+
   constructor(private state: QueryState<T>) {}
 
   /** Return a new QueryBuilder with a copy of the current state. Use this to branch and build different queries from the same base. */
@@ -80,9 +85,15 @@ export class QueryBuilder<T = unknown> {
     });
   }
 
+  /** Log SQL query and params to the console on debug mode. */
+  private logSql(sql: string, params: unknown[]): void {
+    console.log("[typhex]", sql);
+    if (params.length > 0) console.log("[typhex] params:", params);
+  }
+
   where(
     predicate: IrNode | ((entity: T) => boolean),
-    params?: Record<string, any>
+    params?: Record<string, unknown>
   ): QueryBuilder<T> {
     if (params) Object.assign(this.state.whereParams, params);
 
@@ -115,11 +126,21 @@ export class QueryBuilder<T = unknown> {
     return this;
   }
 
-  select(columns: string[]): QueryBuilder<T> {
-    this.state.selectIr = {
-      param: DEFAULT_ROW_PARAM,
-      paths: columns.map((c) => [c]),
-    };
+
+  select(
+    columnsOrIr: string[] | IrSelect | ((entity: T) => Record<string, unknown>)
+  ): QueryBuilder<T> {
+    if (typeof columnsOrIr === "function") {
+      throw new Error(
+        "select() with a lambda requires the Typhex transformer (e.g. ts-patch with typhex/transformer)"
+      );
+    }
+    this.state.selectIr = isIrSelect(columnsOrIr)
+      ? columnsOrIr
+      : {
+          param: "u",
+          paths: columnsOrIr.map((c) => [c]),
+        };
     return this;
   }
 
@@ -143,12 +164,13 @@ export class QueryBuilder<T = unknown> {
     const offsetClause = this.state.offsetNum != null ? ` OFFSET ${this.state.offsetNum}` : "";
 
     const sql = `SELECT ${selectList} FROM "${tableName}" AS t0 WHERE ${whereSql}${orderClause}${limitClause}${offsetClause}`;
-    const rows = this.state.driver.query(sql, finalParams) as T[];
-    return rows;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, finalParams);
+    return this.state.driver.query(sql, finalParams) as T[];
   }
 
   first(): T | undefined {
-    return this.clone().limit(1).toArray()[0];
+    const arr = this.limit(1).toArray();
+    return arr[0];
   }
 
   count(): number {
@@ -161,6 +183,7 @@ export class QueryBuilder<T = unknown> {
       this.state.whereParams
     );
     const sql = `SELECT COUNT(*) AS c FROM "${table.tableName}" AS t0 WHERE ${whereSql}`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = this.state.driver.query(sql, params) as [{ c: number }];
     return rows[0]?.c ?? 0;
   }
@@ -179,7 +202,9 @@ export class QueryBuilder<T = unknown> {
     const values = cols.map((c) => set[c]);
     const fixedWhere = whereSql.replace(/"t0"\./g, `"${table.tableName}".`);
     const sql = `UPDATE "${table.tableName}" SET ${assignments} WHERE ${fixedWhere}`;
-    const result = this.state.driver.run(sql, [...values, ...whereParams]);
+    const updateParams = [...values, ...whereParams];
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, updateParams);
+    const result = this.state.driver.run(sql, updateParams);
     return result.changes;
   }
 
@@ -194,6 +219,7 @@ export class QueryBuilder<T = unknown> {
     );
     const fixedWhere = whereSql.replace(/"t0"\./g, `"${table.tableName}".`);
     const sql = `DELETE FROM "${table.tableName}" WHERE ${fixedWhere}`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const result = this.state.driver.run(sql, params);
     return result.changes;
   }
