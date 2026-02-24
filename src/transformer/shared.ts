@@ -3,102 +3,204 @@
  */
 
 import * as ts from "typescript";
+import type { IrNode, IrSelect, IrBinary } from "../ir/types.js";
 
-/** Check if a symbol is from the Typhex package (Table or QueryBuilder). */
+// ---------------------------------------------------------------------------
+// Typhex type detection
+// ---------------------------------------------------------------------------
+
 export function checkSymbolIsTyphex(symbol: ts.Symbol): boolean {
   const symbolName = symbol.getName();
-  
-  // Only check Table and QueryBuilder symbols
-  if (symbolName !== "Table" && symbolName !== "QueryBuilder") {
-    return false;
-  }
-  
-  // Check declarations to verify source file
+  if (symbolName !== "Table" && symbolName !== "QueryBuilder") return false;
+
   const declarations = symbol.getDeclarations();
-  if (!declarations || declarations.length === 0) {
-    return false;
-  }
-  
-  // Verify all declarations are from typhex package
+  if (!declarations || declarations.length === 0) return false;
+
   for (const decl of declarations) {
-    const sourceFile = decl.getSourceFile();
-    const fileName = sourceFile.fileName;
-    
-    // Normalize path separators
-    const normalizedPath = fileName.replace(/\\/g, "/");
-    
-    // Check if file is from our package structure
-    const isTyphexFile = 
+    const normalizedPath = decl.getSourceFile().fileName.replace(/\\/g, "/");
+    const isTyphex =
       (normalizedPath.includes("/typhex/") || normalizedPath.includes("/typhex\\")) &&
       (normalizedPath.includes("/orm/table") || normalizedPath.includes("/orm/query-builder")) &&
       (normalizedPath.endsWith(".ts") || normalizedPath.endsWith(".js") || normalizedPath.endsWith(".d.ts"));
-    
-    if (!isTyphexFile) {
-      return false; // At least one declaration is not from typhex
-    }
+    if (!isTyphex) return false;
   }
-  
-  return true; // All declarations are from typhex
+  return true;
 }
 
-/** Check if an expression is a Typhex Table or QueryBuilder type. */
-export function isTyphexType(
-  receiver: ts.Expression,
-  checker: ts.TypeChecker
-): boolean {
+export function isTyphexType(receiver: ts.Expression, checker: ts.TypeChecker): boolean {
   try {
     const receiverType = checker.getTypeAtLocation(receiver);
-    
-    // Get the type's symbol - for generic types like Table<T>, this gets the base class
     let typeSymbol = receiverType.getSymbol();
-    
-    // For generic instantiations, try to get symbol from constructor
+
     if (!typeSymbol) {
-      const props = receiverType.getProperties();
-      const constructorProp = props.find(p => p.getName() === "constructor");
+      const constructorProp = receiverType.getProperties().find(p => p.getName() === "constructor");
       if (constructorProp) {
-        const constructorType = checker.getTypeOfSymbolAtLocation(constructorProp, receiver);
-        const constructorSig = constructorType.getCallSignatures();
-        if (constructorSig.length > 0) {
-          const returnType = constructorSig[0].getReturnType();
-          typeSymbol = returnType.getSymbol();
-        }
+        const sigs = checker.getTypeOfSymbolAtLocation(constructorProp, receiver).getCallSignatures();
+        if (sigs.length > 0) typeSymbol = sigs[0].getReturnType().getSymbol();
       }
     }
-    
-    // Also check alias symbol for type aliases
-    if (!typeSymbol && receiverType.aliasSymbol) {
-      typeSymbol = receiverType.aliasSymbol;
-    }
-    
-    if (!typeSymbol) {
-      return false;
-    }
-    
-    return checkSymbolIsTyphex(typeSymbol);
+    if (!typeSymbol && receiverType.aliasSymbol) typeSymbol = receiverType.aliasSymbol;
+    return typeSymbol ? checkSymbolIsTyphex(typeSymbol) : false;
   } catch {
-    // If type checking fails, be conservative and skip transformation
     return false;
   }
 }
 
-/** Extract member path from property access expression (e.g. u.foo.bar => ["foo", "bar"]). */
-export function memberPath(
+// ---------------------------------------------------------------------------
+// Member path resolution (supports multiple param names for join predicates)
+// ---------------------------------------------------------------------------
+
+export interface ResolvedMember {
+  param: string;
+  path: string[];
+}
+
+/**
+ * Walk a property access chain and return { param, path }.
+ * Supports multiple param names (e.g. ["u", "posts"]) so (u, posts) => u.id === posts.authorId works.
+ * When paramNames has one entry, param is always that entry.
+ */
+export function resolveMemberPath(
   expr: ts.PropertyAccessExpression,
-  paramName: string
-): string[] | null {
+  paramNames: string[]
+): ResolvedMember | null {
   const parts: string[] = [];
   let current: ts.Expression = expr;
   while (ts.isPropertyAccessExpression(current)) {
     parts.unshift(current.name.text);
     current = current.expression;
   }
-  if (ts.isIdentifier(current) && current.text === paramName) return parts;
+  if (ts.isIdentifier(current) && paramNames.includes(current.text)) {
+    return { param: current.text, path: parts };
+  }
   return null;
 }
 
-/** Unwrap parenthesized expression to get inner object literal if present. */
+/**
+ * Convenience overload: single param name, returns just the path (backward-compatible).
+ */
+export function memberPath(
+  expr: ts.PropertyAccessExpression,
+  paramName: string
+): string[] | null {
+  const result = resolveMemberPath(expr, [paramName]);
+  return result ? result.path : null;
+}
+
+// ---------------------------------------------------------------------------
+// Unwrap parenthesized expression → object literal
+// ---------------------------------------------------------------------------
+
 export function unwrapObjectLiteral(expr: ts.Expression): ts.ObjectLiteralExpression | null {
   const inner = ts.isParenthesizedExpression(expr) ? expr.expression : expr;
   return ts.isObjectLiteralExpression(inner) ? inner : null;
+}
+
+// ---------------------------------------------------------------------------
+// TS SyntaxKind → IR binary op
+// ---------------------------------------------------------------------------
+
+const BINARY_OP_MAP: Record<number, IrBinary["op"] | "in" | undefined> = {
+  [ts.SyntaxKind.AmpersandAmpersandToken]: "&&",
+  [ts.SyntaxKind.BarBarToken]: "||",
+  [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===",
+  [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
+  [ts.SyntaxKind.EqualsEqualsToken]: "==",
+  [ts.SyntaxKind.ExclamationEqualsToken]: "!=",
+  [ts.SyntaxKind.GreaterThanToken]: ">",
+  [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
+  [ts.SyntaxKind.LessThanToken]: "<",
+  [ts.SyntaxKind.LessThanEqualsToken]: "<=",
+  [ts.SyntaxKind.InKeyword]: "in",
+};
+
+export function binaryOpFromSyntaxKind(kind: ts.SyntaxKind): IrBinary["op"] | "in" | null {
+  return BINARY_OP_MAP[kind] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// IR → ts.ObjectLiteralExpression (used by both where and select transformers)
+// ---------------------------------------------------------------------------
+
+function valueToTsExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
+  if (value === null) return f.createNull();
+  switch (typeof value) {
+    case "string":
+      return f.createStringLiteral(value);
+    case "number":
+      return f.createNumericLiteral(value);
+    case "boolean":
+      return value ? f.createTrue() : f.createFalse();
+    default:
+      if (Array.isArray(value)) {
+        return f.createArrayLiteralExpression(
+          (value as unknown[]).map(v => valueToTsExpression(v, f))
+        );
+      }
+      return f.createStringLiteral(String(value));
+  }
+}
+
+export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = [
+    f.createPropertyAssignment("kind", f.createStringLiteral(ir.kind)),
+  ];
+
+  switch (ir.kind) {
+    case "binary":
+      props.push(f.createPropertyAssignment("op", f.createStringLiteral(ir.op)));
+      props.push(f.createPropertyAssignment("left", irNodeToTsLiteral(ir.left)));
+      props.push(f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)));
+      break;
+    case "unary":
+      props.push(f.createPropertyAssignment("op", f.createStringLiteral(ir.op)));
+      props.push(f.createPropertyAssignment("operand", irNodeToTsLiteral(ir.operand)));
+      break;
+    case "member":
+      props.push(f.createPropertyAssignment("param", f.createStringLiteral(ir.param)));
+      props.push(f.createPropertyAssignment("path",
+        f.createArrayLiteralExpression(ir.path.map(p => f.createStringLiteral(p)))
+      ));
+      break;
+    case "const":
+      props.push(f.createPropertyAssignment("value", valueToTsExpression(ir.value, f)));
+      break;
+    case "param":
+      props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
+      break;
+    case "in":
+      props.push(f.createPropertyAssignment("left", irNodeToTsLiteral(ir.left)));
+      props.push(f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)));
+      break;
+    case "call":
+      props.push(f.createPropertyAssignment("method", f.createStringLiteral(ir.method)));
+      props.push(f.createPropertyAssignment("receiver", irNodeToTsLiteral(ir.receiver)));
+      props.push(f.createPropertyAssignment("args",
+        f.createArrayLiteralExpression(ir.args.map(a => irNodeToTsLiteral(a)))
+      ));
+      break;
+  }
+  return f.createObjectLiteralExpression(props);
+}
+
+export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = [
+    f.createPropertyAssignment("param", f.createStringLiteral(sel.param)),
+    f.createPropertyAssignment("paths",
+      f.createArrayLiteralExpression(
+        sel.paths.map(path => f.createArrayLiteralExpression(path.map(p => f.createStringLiteral(p))))
+      )
+    ),
+  ];
+  if (sel.aliases && sel.aliases.length > 0) {
+    props.push(f.createPropertyAssignment("aliases",
+      f.createArrayLiteralExpression(sel.aliases.map(a => f.createStringLiteral(a)))
+    ));
+  }
+  if (sel.rest) {
+    props.push(f.createPropertyAssignment("rest", f.createTrue()));
+  }
+  return f.createObjectLiteralExpression(props);
 }

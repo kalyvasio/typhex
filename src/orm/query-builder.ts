@@ -1,17 +1,17 @@
 /**
- * Query builder: where, select, orderBy, limit, offset, toArray, first, count.
+ * Query builder: the single place where all SQL is built and executed.
+ * Provides both query (select, count) and mutation (insert, update, delete,
+ * create, findById) methods. All methods that hit the database return Promises
+ * (except insert, which is synchronous to support save()).
  */
 
 import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
 import { isIrNode, isIrSelect } from "../ir/types.js";
 import { compileWhere, compileOrderBy, compileSelectList, expandInParams } from "../compiler/sql.js";
-import type { Table } from "./table.js";
 import type { Driver } from "../driver/types.js";
-import { parseArrowToIr } from "../parser/parse-arrow.js";
+import { parseArrowToIr, parseArrowToIrSelect } from "../parser/parse-arrow.js";
 
-/** Default param name for builder-created IR (orderBy, select) when no arrow is involved. */
 const DEFAULT_ROW_PARAM = "u";
-
 const TABLE_ALIAS = "t0";
 
 function collectParamNamesFromNode(node: IrNode, out: Set<string>): void {
@@ -20,13 +20,11 @@ function collectParamNamesFromNode(node: IrNode, out: Set<string>): void {
       out.add(node.param);
       break;
     case "binary":
+      collectParamNamesFromNode(node.left, out);
+      collectParamNamesFromNode(node.right, out);
+      break;
     case "unary":
-      if (node.kind === "binary") {
-        collectParamNamesFromNode(node.left, out);
-        collectParamNamesFromNode(node.right, out);
-      } else {
-        collectParamNamesFromNode(node.operand, out);
-      }
+      collectParamNamesFromNode(node.operand, out);
       break;
     case "in":
       collectParamNamesFromNode(node.left, out);
@@ -53,14 +51,17 @@ function buildParamToAlias(state: QueryState<unknown>): Record<string, string> {
 }
 
 export interface QueryState<T = unknown> {
-  table: Table<T>;
+  tableName: string;
+  columnNames: string[];
   driver: Driver;
+  pkColumn?: string | null;
   whereIr: IrNode | null;
   whereParams: Record<string, unknown>;
   orderBy: IrOrderBy[];
   limitNum: number | null;
   offsetNum: number | null;
   selectIr: IrSelect | null;
+  hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
 }
 
 export class QueryBuilder<T = unknown> {
@@ -71,21 +72,14 @@ export class QueryBuilder<T = unknown> {
 
   constructor(private state: QueryState<T>) {}
 
-  /** Return a new QueryBuilder with a copy of the current state. Use this to branch and build different queries from the same base. */
   clone(): QueryBuilder<T> {
     return new QueryBuilder({
-      table: this.state.table,
-      driver: this.state.driver,
-      whereIr: this.state.whereIr,
+      ...this.state,
       whereParams: { ...this.state.whereParams },
       orderBy: [...this.state.orderBy],
-      limitNum: this.state.limitNum,
-      offsetNum: this.state.offsetNum,
-      selectIr: this.state.selectIr,
     });
   }
 
-  /** Log SQL query and params to the console on debug mode. */
   private logSql(sql: string, params: unknown[]): void {
     console.log("[typhex]", sql);
     if (params.length > 0) console.log("[typhex] params:", params);
@@ -126,101 +120,150 @@ export class QueryBuilder<T = unknown> {
     return this;
   }
 
-
   select(
     columnsOrIr: string[] | IrSelect | ((entity: T) => Record<string, unknown>)
   ): QueryBuilder<T> {
     if (typeof columnsOrIr === "function") {
-      throw new Error(
-        "select() with a lambda requires the Typhex transformer (e.g. ts-patch with typhex/transformer)"
-      );
+      const parsed = parseArrowToIrSelect(columnsOrIr);
+      if (!parsed) {
+        throw new Error(
+          "select(): could not parse lambda at runtime. Use the Typhex transformer for complex selects, or pass column names / IrSelect."
+        );
+      }
+      this.state.selectIr = parsed;
+      return this;
     }
     this.state.selectIr = isIrSelect(columnsOrIr)
       ? columnsOrIr
-      : {
-          param: "u",
-          paths: columnsOrIr.map((c) => [c]),
-        };
+      : { param: "u", paths: columnsOrIr.map((c) => [c]) };
     return this;
   }
 
-  toArray(): T[] {
-    const table = this.state.table;
-    const tableName = table.tableName;
-    const columns = table.columnNames;
-    const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
-
-    const whereResult = compileWhere(this.state.whereIr, opts);
-    const { sql: whereSql, params: finalParams } = expandInParams(
-      whereResult.sql,
-      whereResult.params,
-      this.state.whereParams
-    );
-
-    const selectList = compileSelectList(this.state.selectIr, columns, opts);
-    const orderBySql = compileOrderBy(this.state.orderBy, opts);
-    const orderClause = orderBySql ? ` ORDER BY ${orderBySql}` : "";
-    const limitClause = this.state.limitNum != null ? ` LIMIT ${this.state.limitNum}` : "";
-    const offsetClause = this.state.offsetNum != null ? ` OFFSET ${this.state.offsetNum}` : "";
-
-    const sql = `SELECT ${selectList} FROM "${tableName}" AS t0 WHERE ${whereSql}${orderClause}${limitClause}${offsetClause}`;
-    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, finalParams);
-    return this.state.driver.query(sql, finalParams) as T[];
+  async findById(id: number | string): Promise<T | null> {
+    return this.fetchByPk(id);
   }
 
-  first(): T | undefined {
-    const arr = this.limit(1).toArray();
+  async create(row: Record<string, unknown>): Promise<T> {
+    const lastId = await this.insert(row);
+    const inst = await this.fetchByPk(lastId);
+    if (!inst) throw new Error("create: insert succeeded but row not found");
+    return inst;
+  }
+
+  async updateByPk(id: unknown, set: Record<string, unknown>): Promise<number> {
+    const { pkColumn, tableName, columnNames, driver } = this.state
+    const cols = Object.keys(set).filter((k) => columnNames.includes(k));
+    if (cols.length === 0) return 0;
+    const assignments = cols.map((c) => `"${c}" = ?`).join(", ");
+    const values = cols.map((c) => set[c]);
+    const sql = `UPDATE "${tableName}" SET ${assignments} WHERE "${pkColumn}" = ?`;
+    const params = [...values, id];
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
+    return driver.run(sql, params).changes;
+  }
+
+  async deleteByPk(id: unknown): Promise<number> {
+    const { pkColumn, tableName, driver } = this.state;
+    const sql = `DELETE FROM "${tableName}" WHERE "${pkColumn}" = ?`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, [id]);
+    return driver.run(sql, [id]).changes;
+  }
+
+  async patch(set: Record<string, unknown>): Promise<T | null> {
+    await this.update(set);
+    const fresh = new QueryBuilder<T>({
+      ...this.state,
+      orderBy: [],
+      limitNum: null,
+      offsetNum: null,
+      selectIr: null,
+    });
+    return (await fresh.first()) ?? null;
+  }
+
+  private async fetchByPk(id: unknown): Promise<T | null> {
+    const { pkColumn, tableName, columnNames, driver, hydrate } = this.state
+    const selectList = columnNames.map((c) => `"${c}"`).join(", ");
+    const sql = `SELECT ${selectList} FROM "${tableName}" WHERE "${pkColumn}" = ? LIMIT 1`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, [id]);
+    const rows = driver.query(sql, [id]) as Record<string, unknown>[];
+    if (rows.length === 0) return null;
+    return hydrate ? hydrate(rows[0]) : (rows[0] as T);
+  }
+
+  async insert(row: Record<string, unknown>): Promise<number> {
+    const { tableName, columnNames, driver } = this.state;
+    const cols = columnNames.filter((c) => row[c] !== undefined);
+    const params = cols.map((c) => row[c]);
+    const sql = cols.length === 0
+      ? `INSERT INTO "${tableName}" DEFAULT VALUES`
+      : `INSERT INTO "${tableName}" (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
+    const result = driver.run(sql, params);
+    return result.lastID ?? 0;
+  }
+
+  async toArray(): Promise<T[]> {
+    const rows = this.executeSelect() as Record<string, unknown>[];
+    const { hydrate } = this.state;
+    if (!hydrate) return rows as T[];
+    return Promise.all(rows.map((r) => hydrate(r)));
+  }
+
+  async first(): Promise<T | undefined> {
+    const arr = await this.limit(1).toArray();
     return arr[0];
   }
 
-  count(): number {
-    const table = this.state.table;
+  async count(): Promise<number> {
+    const { tableName } = this.state;
     const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
-    const { sql: whereSql, params } = expandInParams(
-      whereResult.sql,
-      whereResult.params,
-      this.state.whereParams
-    );
-    const sql = `SELECT COUNT(*) AS c FROM "${table.tableName}" AS t0 WHERE ${whereSql}`;
+    const { sql: whereSql, params } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
+    const sql = `SELECT COUNT(*) AS c FROM "${tableName}" AS t0 WHERE ${whereSql}`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = this.state.driver.query(sql, params) as [{ c: number }];
     return rows[0]?.c ?? 0;
   }
 
-  update(set: Record<string, unknown>): number {
-    const table = this.state.table;
+  async update(set: Record<string, unknown>): Promise<number> {
+    const { tableName, columnNames } = this.state;
     const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
-    const { sql: whereSql, params: whereParams } = expandInParams(
-      whereResult.sql,
-      whereResult.params,
-      this.state.whereParams
-    );
-    const cols = Object.keys(set).filter((k) => table.columnNames.includes(k));
+    const { sql: whereSql, params: whereParams } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
+    const cols = Object.keys(set).filter((k) => columnNames.includes(k));
     const assignments = cols.map((c) => `"${c}" = ?`).join(", ");
     const values = cols.map((c) => set[c]);
-    const fixedWhere = whereSql.replace(/"t0"\./g, `"${table.tableName}".`);
-    const sql = `UPDATE "${table.tableName}" SET ${assignments} WHERE ${fixedWhere}`;
+    const fixedWhere = whereSql.replace(/"t0"\./g, `"${tableName}".`);
+    const sql = `UPDATE "${tableName}" SET ${assignments} WHERE ${fixedWhere}`;
     const updateParams = [...values, ...whereParams];
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, updateParams);
-    const result = this.state.driver.run(sql, updateParams);
-    return result.changes;
+    return this.state.driver.run(sql, updateParams).changes;
   }
 
-  delete(): number {
-    const table = this.state.table;
+  async delete(): Promise<number> {
+    const { tableName } = this.state;
     const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
-    const { sql: whereSql, params } = expandInParams(
-      whereResult.sql,
-      whereResult.params,
-      this.state.whereParams
-    );
-    const fixedWhere = whereSql.replace(/"t0"\./g, `"${table.tableName}".`);
-    const sql = `DELETE FROM "${table.tableName}" WHERE ${fixedWhere}`;
+    const { sql: whereSql, params } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
+    const fixedWhere = whereSql.replace(/"t0"\./g, `"${tableName}".`);
+    const sql = `DELETE FROM "${tableName}" WHERE ${fixedWhere}`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
-    const result = this.state.driver.run(sql, params);
-    return result.changes;
+    return this.state.driver.run(sql, params).changes;
+  }
+
+  private executeSelect(): unknown[] {
+    const { tableName, columnNames } = this.state;
+    const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
+    const whereResult = compileWhere(this.state.whereIr, opts);
+    const { sql: whereSql, params: finalParams } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
+    const selectList = compileSelectList(this.state.selectIr, columnNames, opts);
+    const orderBySql = compileOrderBy(this.state.orderBy, opts);
+    const orderClause = orderBySql ? ` ORDER BY ${orderBySql}` : "";
+    const limitClause = this.state.limitNum != null ? ` LIMIT ${this.state.limitNum}` : "";
+    const offsetClause = this.state.offsetNum != null ? ` OFFSET ${this.state.offsetNum}` : "";
+    const sql = `SELECT ${selectList} FROM "${tableName}" AS t0 WHERE ${whereSql}${orderClause}${limitClause}${offsetClause}`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, finalParams);
+    return this.state.driver.query(sql, finalParams);
   }
 }

@@ -1,43 +1,65 @@
 /**
- * Database: driver + table registry + migrations.
+ * Db: connection manager. Sets the global default driver so all entities
+ * resolve it automatically. Provides migrate(), validate(), and close().
  */
 
 import type { Driver } from "../driver/types.js";
-import type { TableDefinition } from "../schema/types.js";
-import { getColumnNames, sqlType } from "../schema/types.js";
-import { Table } from "./table.js";
+import {
+  setDefaultDriver,
+  getRegisteredEntities,
+} from "../entity/global-driver.js";
 
 export class Db {
-  private tables = new Map<string, Table<Record<string, unknown>>>();
-
-  constructor(private driver: Driver) {}
-
-  defineTable<T = Record<string, unknown>>(
-    tableName: string,
-    definition: TableDefinition
-  ): Table<T> {
-    const table = new Table<T>(tableName, definition, this.driver);
-    this.tables.set(tableName, table as Table<Record<string, unknown>>);
-    return table;
+  constructor(private driver: Driver) {
+    setDefaultDriver(driver);
   }
 
-  table<T = Record<string, unknown>>(tableName: string): Table<T> {
-    const t = this.tables.get(tableName);
-    if (!t) throw new Error(`Table not defined: ${tableName}`);
-    return t as Table<T>;
-  }
-
-  /** Create table if not exists (simple migration). */
+  /** CREATE TABLE IF NOT EXISTS for all registered entities. */
   migrate(): void {
-    for (const [name, table] of this.tables) {
-      const cols = getColumnNames(table.definition);
-      const defs = cols.map((c) => `"${c}" ${sqlType(table.definition, c)}`).join(", ");
-      const sql = `CREATE TABLE IF NOT EXISTS "${name}" (${defs})`;
-      this.driver.run(sql);
+    for (const entity of getRegisteredEntities()) {
+      const { _table: name, _schema: schema } = entity.table;
+      const colDefs = Object.entries(schema)
+        .map(([c, def]) => `"${c}" ${def}`)
+        .join(", ");
+      this.driver.run(`CREATE TABLE IF NOT EXISTS "${name}" (${colDefs})`);
     }
   }
 
+  /** Validate all registered entities against the database. Throws on mismatch. */
+  validate(): void {
+    for (const entity of getRegisteredEntities()) {
+      const { _table: name, _schema: schema } = entity.table;
+      const expectedCols = Object.keys(schema);
+
+      const rows = this.driver.query(`PRAGMA table_info("${name}")`) as Array<{
+        name: string;
+        type: string;
+        notnull: number;
+        pk: number;
+      }>;
+
+      if (rows.length === 0) {
+        throw new Error(`validate: table "${name}" does not exist in the database.`);
+      }
+
+      const dbCols = new Map(rows.map((r) => [r.name, r]));
+
+      for (const col of expectedCols) {
+        if (!dbCols.has(col)) {
+          throw new Error(
+            `validate: column "${col}" is defined in Entity("${name}") but does not exist in the table.`
+          );
+        }
+      }
+    }
+  }
+
+  getDriver(): Driver {
+    return this.driver;
+  }
+
   close(): void {
+    setDefaultDriver(null);
     this.driver.close();
   }
 }
