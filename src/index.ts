@@ -3,10 +3,10 @@
  */
 
 export { Db, QueryBuilder } from "./orm/index.js";
-export type { QueryState } from "./orm/index.js";
+export type { DbOptions, QueryState } from "./orm/index.js";
 export type { Driver } from "./driver/types.js";
-export { createSqliteDriver } from "./driver/index.js";
-export type { SqliteDriverOptions } from "./driver/index.js";
+export { createSqliteDriver, createDriver } from "./driver/index.js";
+export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export type { IrNode, IrOrderBy, IrSelect } from "./ir/types.js";
 export { isIrNode, isIrSelect } from "./ir/types.js";
 export { parseArrowToIr, parseArrowToIrSelect } from "./parser/index.js";
@@ -29,3 +29,8 @@ export type {
   RelationOptions,
   JunctionOptions,
 } from "./entity/index.js";
+export type { DiffAction, Dialect, MigrationFile, MigrationRecord } from "./migration/index.js";
+export { diffSchema, generateMigrationFiles, runMigrations, migrationStatus } from "./migration/index.js";
+export type { TyphexConfig } from "./config/types.js";
+export { loadConfig } from "./config/load-config.js";
+export type { LoadConfigOptions } from "./config/load-config.js";

@@ -39,6 +39,7 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
   const db = new Database(options.path);
 
   return {
+    dialect: "sqlite" as const,
     query(sql: string, params: unknown[] = []): unknown[] {
       const stmt = db.prepare(sql);
       const rows = stmt.all(...bindableParams(params)) as unknown[];

@@ -98,11 +98,13 @@ describe("QueryBuilder", () => {
       cloned.limit(10);
       (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
       await base.toArray();
-      const [sqlBase] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(sqlBase).toContain("LIMIT 5");
+      const [sqlBase, paramsBase] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sqlBase).toContain("LIMIT ?");
+      expect(paramsBase).toContain(5);
       await cloned.toArray();
-      const [sqlCloned] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[1];
-      expect(sqlCloned).toContain("LIMIT 10");
+      const [sqlCloned, paramsCloned] = (driver.query as ReturnType<typeof vi.fn>).mock.calls[1];
+      expect(sqlCloned).toContain("LIMIT ?");
+      expect(paramsCloned).toContain(10);
     });
   });
 

@@ -4,3 +4,5 @@ examples/out/
 /dist/
 /node_modules/
 coverage/
+/.idea/
+/examples/test.db

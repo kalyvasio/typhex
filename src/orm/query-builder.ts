@@ -7,7 +7,7 @@
 
 import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
 import { isIrNode, isIrSelect } from "../ir/types.js";
-import { compileWhere, compileOrderBy, compileSelectList, expandInParams } from "../compiler/sql.js";
+import { compileWhere, compileOrderBy, compileSelectList, expandInParams, escapeIdentifier } from "../compiler/sql.js";
 import type { Driver } from "../driver/types.js";
 import { parseArrowToIr, parseArrowToIrSelect } from "../parser/parse-arrow.js";
 
@@ -151,12 +151,13 @@ export class QueryBuilder<T = unknown> {
   }
 
   async updateByPk(id: unknown, set: Record<string, unknown>): Promise<number> {
-    const { pkColumn, tableName, columnNames, driver } = this.state
+    const { pkColumn, tableName, columnNames, driver } = this.state;
+    if (!pkColumn) throw new Error("updateByPk requires pkColumn");
     const cols = Object.keys(set).filter((k) => columnNames.includes(k));
     if (cols.length === 0) return 0;
-    const assignments = cols.map((c) => `"${c}" = ?`).join(", ");
+    const assignments = cols.map((c) => `${escapeIdentifier(c)} = ?`).join(", ");
     const values = cols.map((c) => set[c]);
-    const sql = `UPDATE "${tableName}" SET ${assignments} WHERE "${pkColumn}" = ?`;
+    const sql = `UPDATE ${escapeIdentifier(tableName)} SET ${assignments} WHERE ${escapeIdentifier(pkColumn)} = ?`;
     const params = [...values, id];
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     return driver.run(sql, params).changes;
@@ -164,7 +165,8 @@ export class QueryBuilder<T = unknown> {
 
   async deleteByPk(id: unknown): Promise<number> {
     const { pkColumn, tableName, driver } = this.state;
-    const sql = `DELETE FROM "${tableName}" WHERE "${pkColumn}" = ?`;
+    if (!pkColumn) throw new Error("deleteByPk requires pkColumn");
+    const sql = `DELETE FROM ${escapeIdentifier(tableName)} WHERE ${escapeIdentifier(pkColumn)} = ?`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, [id]);
     return driver.run(sql, [id]).changes;
   }
@@ -182,9 +184,10 @@ export class QueryBuilder<T = unknown> {
   }
 
   private async fetchByPk(id: unknown): Promise<T | null> {
-    const { pkColumn, tableName, columnNames, driver, hydrate } = this.state
-    const selectList = columnNames.map((c) => `"${c}"`).join(", ");
-    const sql = `SELECT ${selectList} FROM "${tableName}" WHERE "${pkColumn}" = ? LIMIT 1`;
+    const { pkColumn, tableName, columnNames, driver, hydrate } = this.state;
+    if (!pkColumn) throw new Error("fetchByPk requires pkColumn");
+    const selectList = columnNames.map((c) => escapeIdentifier(c)).join(", ");
+    const sql = `SELECT ${selectList} FROM ${escapeIdentifier(tableName)} WHERE ${escapeIdentifier(pkColumn)} = ? LIMIT 1`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, [id]);
     const rows = driver.query(sql, [id]) as Record<string, unknown>[];
     if (rows.length === 0) return null;
@@ -196,8 +199,8 @@ export class QueryBuilder<T = unknown> {
     const cols = columnNames.filter((c) => row[c] !== undefined);
     const params = cols.map((c) => row[c]);
     const sql = cols.length === 0
-      ? `INSERT INTO "${tableName}" DEFAULT VALUES`
-      : `INSERT INTO "${tableName}" (${cols.map((c) => `"${c}"`).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
+      ? `INSERT INTO ${escapeIdentifier(tableName)} DEFAULT VALUES`
+      : `INSERT INTO ${escapeIdentifier(tableName)} (${cols.map((c) => escapeIdentifier(c)).join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const result = driver.run(sql, params);
     return result.lastID ?? 0;
@@ -220,7 +223,7 @@ export class QueryBuilder<T = unknown> {
     const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
-    const sql = `SELECT COUNT(*) AS c FROM "${tableName}" AS t0 WHERE ${whereSql}`;
+    const sql = `SELECT COUNT(*) AS c FROM ${escapeIdentifier(tableName)} AS t0 WHERE ${whereSql}`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = this.state.driver.query(sql, params) as [{ c: number }];
     return rows[0]?.c ?? 0;
@@ -232,10 +235,10 @@ export class QueryBuilder<T = unknown> {
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params: whereParams } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
     const cols = Object.keys(set).filter((k) => columnNames.includes(k));
-    const assignments = cols.map((c) => `"${c}" = ?`).join(", ");
+    const assignments = cols.map((c) => `${escapeIdentifier(c)} = ?`).join(", ");
     const values = cols.map((c) => set[c]);
-    const fixedWhere = whereSql.replace(/"t0"\./g, `"${tableName}".`);
-    const sql = `UPDATE "${tableName}" SET ${assignments} WHERE ${fixedWhere}`;
+    const fixedWhere = whereSql.replace(/"t0"\./g, `${escapeIdentifier(tableName)}.`);
+    const sql = `UPDATE ${escapeIdentifier(tableName)} SET ${assignments} WHERE ${fixedWhere}`;
     const updateParams = [...values, ...whereParams];
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, updateParams);
     return this.state.driver.run(sql, updateParams).changes;
@@ -246,8 +249,8 @@ export class QueryBuilder<T = unknown> {
     const opts = { tableAlias: TABLE_ALIAS, paramToAlias: buildParamToAlias(this.state) };
     const whereResult = compileWhere(this.state.whereIr, opts);
     const { sql: whereSql, params } = expandInParams(whereResult.sql, whereResult.params, this.state.whereParams);
-    const fixedWhere = whereSql.replace(/"t0"\./g, `"${tableName}".`);
-    const sql = `DELETE FROM "${tableName}" WHERE ${fixedWhere}`;
+    const fixedWhere = whereSql.replace(/"t0"\./g, `${escapeIdentifier(tableName)}.`);
+    const sql = `DELETE FROM ${escapeIdentifier(tableName)} WHERE ${fixedWhere}`;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     return this.state.driver.run(sql, params).changes;
   }
@@ -260,10 +263,23 @@ export class QueryBuilder<T = unknown> {
     const selectList = compileSelectList(this.state.selectIr, columnNames, opts);
     const orderBySql = compileOrderBy(this.state.orderBy, opts);
     const orderClause = orderBySql ? ` ORDER BY ${orderBySql}` : "";
-    const limitClause = this.state.limitNum != null ? ` LIMIT ${this.state.limitNum}` : "";
-    const offsetClause = this.state.offsetNum != null ? ` OFFSET ${this.state.offsetNum}` : "";
-    const sql = `SELECT ${selectList} FROM "${tableName}" AS t0 WHERE ${whereSql}${orderClause}${limitClause}${offsetClause}`;
-    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, finalParams);
-    return this.state.driver.query(sql, finalParams);
+    let limitClause = "";
+    let offsetClause = "";
+    const params = [...finalParams];
+    if (this.state.limitNum != null) {
+      const n = Math.floor(Number(this.state.limitNum));
+      if (n < 0 || !Number.isFinite(n)) throw new Error("limit must be a non-negative integer");
+      limitClause = " LIMIT ?";
+      params.push(n);
+    }
+    if (this.state.offsetNum != null) {
+      const n = Math.floor(Number(this.state.offsetNum));
+      if (n < 0 || !Number.isFinite(n)) throw new Error("offset must be a non-negative integer");
+      offsetClause = " OFFSET ?";
+      params.push(n);
+    }
+    const sql = `SELECT ${selectList} FROM ${escapeIdentifier(tableName)} AS t0 WHERE ${whereSql}${orderClause}${limitClause}${offsetClause}`;
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
+    return this.state.driver.query(sql, params);
   }
 }
