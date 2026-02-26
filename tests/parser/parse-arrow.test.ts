@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseArrowToIr } from "../../src/parser/parse-arrow.js";
+import { parseArrowToIr, parseArrowToIrSelect } from "../../src/parser/parse-arrow.js";
 
 describe("parser/parse-arrow", () => {
   it("parses simple comparison", () => {
@@ -107,11 +107,17 @@ describe("parser/parse-arrow", () => {
     }
   });
 
-  it("throws for block body arrow", () => {
+  it("parses block body arrow with single return", () => {
     const fn = (u: { age: number }) => {
       return u.age > 18;
     };
-    expect(() => parseArrowToIr(fn)).toThrow();
+    const ir = parseArrowToIr(fn);
+    expect(ir.kind).toBe("binary");
+    if (ir.kind === "binary") {
+      expect(ir.op).toBe(">");
+      expect(ir.left).toEqual({ kind: "member", param: "u", path: ["age"] });
+      expect(ir.right).toEqual({ kind: "const", value: 18 });
+    }
   });
 
   it("throws for unknown identifier", () => {
@@ -149,5 +155,38 @@ describe("parser/parse-arrow", () => {
   it("throws for unsupported binary operator", () => {
     const fn = (u: { a: number; b: number }) => u.a * u.b > 0;
     expect(() => parseArrowToIr(fn)).toThrow("Unsupported binary");
+  });
+});
+
+describe("parser/parseArrowToIrSelect", () => {
+  it("parses (u) => ({ id: u.id, name: u.name })", () => {
+    const fn = (u: { id: number; name: string }) => ({ id: u.id, name: u.name });
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir).toEqual({
+      param: "u",
+      paths: [["id"], ["name"]],
+      aliases: ["id", "name"],
+    });
+  });
+
+  it("parses (u) => ({ userId: u.id })", () => {
+    const fn = (u: { id: number }) => ({ userId: u.id });
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir).toEqual({
+      param: "u",
+      paths: [["id"]],
+      aliases: ["userId"],
+    });
+  });
+
+  it("returns null for non-object return", () => {
+    const fn = (u: { id: number }) => u.id;
+    expect(parseArrowToIrSelect(fn)).toBeNull();
+  });
+
+  it("returns null for computed keys", () => {
+    const key = "id";
+    const fn = (u: Record<string, number>) => ({ [key]: u.id });
+    expect(parseArrowToIrSelect(fn)).toBeNull();
   });
 });

@@ -4,67 +4,52 @@
 
 import * as ts from "typescript";
 import type { IrNode } from "../ir/types.js";
-import { isTyphexType, memberPath } from "./shared.js";
+import {
+  isTyphexType,
+  resolveMemberPath,
+  binaryOpFromSyntaxKind,
+  irNodeToTsLiteral,
+} from "./shared.js";
 
-function binaryOpToString(
-  kind: ts.SyntaxKind
-): IrNode extends { op: infer O } ? O : never | "in" | null {
-  const m: Record<number, string> = {
-    [ts.SyntaxKind.AmpersandAmpersandToken]: "&&",
-    [ts.SyntaxKind.BarBarToken]: "||",
-    [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===",
-    [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
-    [ts.SyntaxKind.EqualsEqualsToken]: "==",
-    [ts.SyntaxKind.ExclamationEqualsToken]: "!=",
-    [ts.SyntaxKind.GreaterThanToken]: ">",
-    [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
-    [ts.SyntaxKind.LessThanToken]: "<",
-    [ts.SyntaxKind.LessThanEqualsToken]: "<=",
-    [ts.SyntaxKind.InKeyword]: "in",
-  };
-  return (m[kind] as IrNode extends { op: infer O } ? O : never | "in" | null) ?? null;
-}
+const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
 
+/**
+ * Convert a TS expression to IR. Returns null for unsupported expressions
+ * (the transformer silently skips them; the runtime parser can still handle them).
+ */
 function exprToIr(
   expr: ts.Expression,
-  param: ts.BindingName | undefined,
-  paramName: string,
+  paramNames: string[],
   freeVars: Set<string>
 ): IrNode | null {
   if (ts.isParenthesizedExpression(expr)) {
-    return exprToIr(expr.expression, param, paramName, freeVars);
+    return exprToIr(expr.expression, paramNames, freeVars);
   }
 
   if (ts.isBinaryExpression(expr)) {
-    const op = expr.operatorToken.kind;
-    const opStr = binaryOpToString(op);
-    if (opStr === "in") {
-      const left = exprToIr(expr.left, param, paramName, freeVars);
-      const right = exprToIr(expr.right, param, paramName, freeVars);
-      if (!left || !right) return null;
-      return { kind: "in", left, right };
-    }
-    if (opStr) {
-      const left = exprToIr(expr.left, param, paramName, freeVars);
-      const right = exprToIr(expr.right, param, paramName, freeVars);
-      if (!left || !right) return null;
-      return { kind: "binary", op: opStr, left, right };
-    }
+    const opStr = binaryOpFromSyntaxKind(expr.operatorToken.kind);
+    if (!opStr) return null;
+    const left = exprToIr(expr.left, paramNames, freeVars);
+    const right = exprToIr(expr.right, paramNames, freeVars);
+    if (!left || !right) return null;
+    if (opStr === "in") return { kind: "in", left, right };
+    return { kind: "binary", op: opStr, left, right };
   }
 
   if (ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken) {
-    const operand = exprToIr(expr.operand, param, paramName, freeVars);
+    const operand = exprToIr(expr.operand, paramNames, freeVars);
     if (!operand) return null;
     return { kind: "unary", op: "!", operand };
   }
 
   if (ts.isPropertyAccessExpression(expr)) {
-    const path = memberPath(expr, paramName);
-    if (path) return { kind: "member", param: paramName, path };
+    const resolved = resolveMemberPath(expr, paramNames);
+    if (resolved) return { kind: "member", param: resolved.param, path: resolved.path };
+    return null;
   }
 
   if (ts.isIdentifier(expr)) {
-    if (expr.text === paramName) return { kind: "member", param: paramName, path: [] };
+    if (paramNames.includes(expr.text)) return { kind: "member", param: expr.text, path: [] };
     freeVars.add(expr.text);
     return { kind: "param", key: expr.text };
   }
@@ -89,22 +74,21 @@ function exprToIr(
     const callee = expr.expression;
     if (ts.isPropertyAccessExpression(callee)) {
       const method = callee.name.text;
-      if (["startsWith", "endsWith", "includes"].includes(method)) {
-        const receiver = exprToIr(callee.expression, param, paramName, freeVars);
-        const args = expr.arguments.map(a =>
-          exprToIr(a as ts.Expression, param, paramName, freeVars)
-        );
+      if (ALLOWED_METHODS.has(method)) {
+        const receiver = exprToIr(callee.expression, paramNames, freeVars);
+        const args = expr.arguments.map(a => exprToIr(a as ts.Expression, paramNames, freeVars));
         if (!receiver || args.some(a => a === null)) return null;
         return { kind: "call", method, receiver, args: args as IrNode[] };
       }
     }
+    return null;
   }
 
   if (ts.isArrayLiteralExpression(expr)) {
     const arr: unknown[] = [];
     for (const e of expr.elements) {
       if (e.kind === ts.SyntaxKind.SpreadElement) return null;
-      const ir = exprToIr(e as ts.Expression, param, paramName, freeVars);
+      const ir = exprToIr(e as ts.Expression, paramNames, freeVars);
       if (!ir || ir.kind !== "const") return null;
       arr.push(ir.value);
     }
@@ -114,100 +98,32 @@ function exprToIr(
   return null;
 }
 
+function extractParamNames(fn: ts.ArrowFunction | ts.FunctionExpression): string[] {
+  return fn.parameters.map(p =>
+    p.name && ts.isIdentifier(p.name) ? p.name.text : "u"
+  );
+}
+
 function arrowToIr(
   fn: ts.ArrowFunction | ts.FunctionExpression
 ): { ir: IrNode; freeVars: string[] } | null {
-  const param = fn.parameters[0]?.name;
-  const paramName = param && ts.isIdentifier(param) ? param.text : "u";
+  const paramNames = extractParamNames(fn);
   const freeVars = new Set<string>();
-  const body = fn.body;
+
   let expr: ts.Expression;
-  if (ts.isBlock(body)) {
-    if (body.statements.length !== 1) return null;
-    const st = body.statements[0];
+  if (ts.isBlock(fn.body)) {
+    if (fn.body.statements.length !== 1) return null;
+    const st = fn.body.statements[0];
     if (!st || !ts.isReturnStatement(st) || !st.expression) return null;
     expr = st.expression;
   } else {
-    expr = body;
+    expr = fn.body;
   }
-  const ir = exprToIr(expr, param, paramName, freeVars);
+
+  const ir = exprToIr(expr, paramNames, freeVars);
   if (!ir) return null;
   return { ir, freeVars: [...freeVars] };
 }
-
-function irToObjectLiteral(ir: IrNode): ts.ObjectLiteralExpression {
-  const f = ts.factory;
-  const props: ts.ObjectLiteralElementLike[] = [];
-  props.push(f.createPropertyAssignment("kind", f.createStringLiteral(ir.kind)));
-  switch (ir.kind) {
-    case "binary":
-      props.push(f.createPropertyAssignment("op", f.createStringLiteral(ir.op)));
-      props.push(f.createPropertyAssignment("left", irToObjectLiteral(ir.left)));
-      props.push(f.createPropertyAssignment("right", irToObjectLiteral(ir.right)));
-      break;
-    case "unary":
-      props.push(f.createPropertyAssignment("op", f.createStringLiteral(ir.op)));
-      props.push(f.createPropertyAssignment("operand", irToObjectLiteral(ir.operand)));
-      break;
-    case "member":
-      props.push(f.createPropertyAssignment("param", f.createStringLiteral(ir.param)));
-      props.push(
-        f.createPropertyAssignment(
-          "path",
-          f.createArrayLiteralExpression(ir.path.map(p => f.createStringLiteral(p)))
-        )
-      );
-      break;
-    case "const":
-      props.push(f.createPropertyAssignment("value", valueToExpression(ir.value, f)));
-      break;
-    case "param":
-      props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
-      break;
-    case "in":
-      props.push(f.createPropertyAssignment("left", irToObjectLiteral(ir.left)));
-      props.push(f.createPropertyAssignment("right", irToObjectLiteral(ir.right)));
-      break;
-    case "call":
-      props.push(f.createPropertyAssignment("method", f.createStringLiteral(ir.method)));
-      props.push(f.createPropertyAssignment("receiver", irToObjectLiteral(ir.receiver)));
-      props.push(
-        f.createPropertyAssignment(
-          "args",
-          f.createArrayLiteralExpression(ir.args.map(a => irToObjectLiteral(a)))
-        )
-      );
-      break;
-  }
-  return f.createObjectLiteralExpression(props);
-}
-
-function valueToExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
-  if (value === null) return f.createNull();
-  switch (typeof value) {
-    case "string":
-      return f.createStringLiteral(value);
-    case "number":
-      return f.createNumericLiteral(value);
-    case "boolean":
-      return value ? f.createTrue() : f.createFalse();
-    default:
-      if (Array.isArray(value)) {
-        return f.createArrayLiteralExpression(
-            (value as unknown[]).map(v =>
-                typeof v === "string"
-                    ? f.createStringLiteral(v)
-                    : typeof v === "number"
-                        ? f.createNumericLiteral(v)
-                        : f.createNull()
-            )
-        );
-      }
-      return f.createStringLiteral(String(value));
-  }
-}
-
-// Transformer functions
 
 export function transformWhereCall(
   call: ts.CallExpression,
@@ -216,13 +132,8 @@ export function transformWhereCall(
   const expr = call.expression;
   if (!ts.isPropertyAccessExpression(expr)) return null;
   if (expr.name.text !== "where") return null;
-  
-  // Check if the receiver is a Typhex Table or QueryBuilder
-  const receiver = expr.expression;
-  if (!isTyphexType(receiver, checker)) {
-    return null; // Not a Typhex type, skip transformation
-  }
-  
+  if (!isTyphexType(expr.expression, checker)) return null;
+
   const args = [...call.arguments];
   if (args.length === 0) return null;
   const first = args[0];
@@ -232,20 +143,14 @@ export function transformWhereCall(
   if (!result) return null;
 
   const { ir, freeVars } = result;
-  const irLiteral = irToObjectLiteral(ir);
-  const paramsLiteral =
-    freeVars.length > 0
-      ? ts.factory.createObjectLiteralExpression(
-          freeVars.map((varName) =>
-            ts.factory.createShorthandPropertyAssignment(ts.factory.createIdentifier(varName))
-          )
-        )
-      : ts.factory.createObjectLiteralExpression([]);
+  const paramsLiteral = freeVars.length > 0
+    ? ts.factory.createObjectLiteralExpression(
+        freeVars.map(v => ts.factory.createShorthandPropertyAssignment(ts.factory.createIdentifier(v)))
+      )
+    : ts.factory.createObjectLiteralExpression([]);
 
   return ts.factory.updateCallExpression(
-    call,
-    call.expression,
-    call.typeArguments,
-    [irLiteral, paramsLiteral]
+    call, call.expression, call.typeArguments,
+    [irNodeToTsLiteral(ir), paramsLiteral]
   );
 }

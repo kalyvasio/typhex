@@ -1,82 +1,69 @@
 /**
- * Basic Typhex ORM usage: arrow-function where + CRUD.
- * See examples/README.md for how to run.
+ * Basic Typhex usage: Entity definition, runtime arrow-function where, CRUD.
+ * Run: npx tsx examples/basic.ts  (from project root)
+ *   or: npm run basic              (from examples/)
  */
 
-import { Db, createSqliteDriver } from "../src/index.js";
+import { Db, Entity, createSqliteDriver } from "../src/index.js";
 
-const driver = createSqliteDriver({ path: ":memory:" });
-const db = new Db(driver);
-
-interface User {
-  id?: number;
-  name: string;
-  age: number;
-  country: string;
-}
-
-const users = db.defineTable<User>("users", {
+const User = Entity("users", {
   id: "integer primary key autoincrement",
   name: "text not null",
-  age: "integer",
-  country: "text",
+  age: "integer not null",
+  country: "text not null",
 });
 
+const db = new Db(createSqliteDriver({ path: ":memory:" }));
 db.migrate();
 
-users.insert({ name: "Alice", age: 30, country: "US" });
-users.insert({ name: "Bob", age: 25, country: "UK" });
-users.insert({ name: "Carol", age: 28, country: "US" });
+await User.create({ name: "Alice", age: 30, country: "US" });
+await User.create({ name: "Bob", age: 25, country: "UK" });
+await User.create({ name: "Carol", age: 28, country: "US" });
 
-// Arrow-function where (parsed at runtime)
-const adults = users.where((u) => u.age > 18).toArray();
+const adults = await User.query().where((u) => u.age > 18).toArray();
 console.log("Adults:", adults);
 
-// Closure variable: pass its value as second arg when not using the transformer.
-// With the transformer you can write: users.where((u) => u.country === country)
 const country = "US";
-const fromUS = users.where((u) => u.country === country, { country }).toArray();
+const fromUS = await User.query().where((u) => u.country === country, { country }).toArray();
 console.log("From US:", fromUS);
 
-// Fluent API
-const first = users.where((u) => u.age >= 25).orderBy("name", "asc").limit(1).first();
+const first = await User.query().where((u) => u.age >= 25).orderBy("name", "asc").limit(1).first();
 console.log("First (age>=25, by name):", first);
 
-// Count
-const n = users.where((u) => u.country === "US").count();
+const n = await User.query().where((u) => u.country === "US").count();
 console.log("Count US:", n);
 
-// Select specific columns
-const names = users.where((u) => u.age > 20).select(["name", "country"]).toArray();
+const names = await User.query().where((u) => u.age > 20).select(["name", "country"]).toArray();
 console.log("Names only:", names);
 
-// String methods: startsWith, endsWith, includes
-const namesStartingWithA = users.where((u) => u.name.startsWith("A")).toArray();
+const namesStartingWithA = await User.query().where((u) => u.name.startsWith("A")).toArray();
 console.log("Names starting with 'A':", namesStartingWithA);
 
-const namesContainingAl = users.where((u) => u.name.includes("al")).toArray();
+const namesContainingAl = await User.query().where((u) => u.name.includes("al")).toArray();
 console.log("Names containing 'al':", namesContainingAl);
 
-// Array membership with 'in' operator (array literal)
-const selectedUsers = users.where((u) => u.id in [1, 3]).toArray();
+const selectedUsers = await User.query().where((u) => u.id in [1, 3]).toArray();
 console.log("Users with IDs in [1, 3]:", selectedUsers);
 
-// Array membership with variable (pass array as param)
 const ids = [1, 2];
-const selectedUsers2 = users.where((u) => u.id in ids, { ids }).toArray();
+const selectedUsers2 = await User.query().where((u) => u.id in ids, { ids }).toArray();
 console.log("Users with IDs in [1, 2] (variable):", selectedUsers2);
 
-// Not in: negate with !
-const notInIds = users.where((u) => !(u.id in [2])).toArray();
+const notInIds = await User.query().where((u) => !(u.id in [2])).toArray();
 console.log("Users with ID not in [2]:", notInIds);
 
-// Update
-const updated = users.update((u) => u.name === "Bob", { age: 26 });
+const updated = await User.query().where((u) => u.name === "Bob").update({ age: 26 });
 console.log("Updated rows:", updated);
 
-// Delete
-const deleted = users.delete((u) => u.country === "UK");
+const deleted = await User.query().where((u) => u.country === "UK").delete();
 console.log("Deleted rows:", deleted);
 
-driver.close();
+const dave = new User({ name: "Dave", age: 35, country: "US" });
+await dave.save();
+console.log("Saved Dave, id:", dave.id);
+
+await dave.delete();
+console.log("Deleted Dave");
+
+db.close();
 console.log("Done.");

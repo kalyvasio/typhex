@@ -1,6 +1,7 @@
 /**
  * Runtime parser: arrow function source → IR.
  * Supports a safe subset: comparisons, &&, ||, !, member access, literals, identifiers (params).
+ * Also supports parsing select lambdas: (u) => ({ id: u.id, name: u.name }) → IrSelect.
  */
 
 import * as acorn from "acorn";
@@ -13,85 +14,159 @@ import type {
   IrParam,
   IrIn,
   IrCall,
+  IrSelect,
 } from "../ir/types.js";
 
 type AcornNode = acorn.Node;
 
-const BINARY_OP_MAP: Record<string, IrBinary["op"] | undefined> = {
-  "&&": "&&",
-  "||": "||",
-  "==": "==",
-  "===": "===",
-  "!=": "!=",
-  "!==": "!==",
-  ">": ">",
-  ">=": ">=",
-  "<": "<",
-  "<=": "<=",
+const BINARY_OPS: Record<string, IrBinary["op"] | undefined> = {
+  "&&": "&&", "||": "||",
+  "==": "==", "===": "===", "!=": "!=", "!==": "!==",
+  ">": ">", ">=": ">=", "<": "<", "<=": "<=",
 };
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
 
 export interface ParseOptions {
-  /** Parameter name expected in the arrow (e.g. "u"). Used for member path. */
   paramName?: string;
-  /** Names of outer variables to treat as param keys (captured in closure). */
+  paramNames?: string[];
   paramKeys?: string[];
 }
 
-/**
- * Parse an arrow function's string representation into IR.
- * Only supports expression-bodied arrows: (x) => x.age > 18
- */
+// ---------------------------------------------------------------------------
+// Public API: parseArrowToIr (where predicates)
+// ---------------------------------------------------------------------------
+
 export function parseArrowToIr(
   fn: (...args: any[]) => any,
   options: ParseOptions = {}
 ): IrNode {
   const src = fn.toString();
-  const expr = extractArrowBodyExpression(src);
-  if (!expr) throw new Error("Could not extract arrow body: " + src);
+  const body = extractArrowBody(src);
+  if (!body) throw new Error("Could not extract arrow body: " + src);
 
-  const ast = acorn.parse(expr, {
-    ecmaVersion: "latest",
-    locations: true,
-  }) as { body: Array<{ expression?: AcornNode }> };
+  const expr = parseExpression(body);
+  const params =
+    options.paramNames ??
+    (options.paramName ? [options.paramName] : inferParamNames(src));
 
-  const statement = ast.body[0];
-  const node = statement && "expression" in statement ? statement.expression : null;
-  if (!node) throw new Error("Expected expression: " + expr);
-
-  const paramName = options.paramName ?? inferParamName(src);
-  const paramKeys = options.paramKeys ?? [];
-
-  return walk(node, paramName, paramKeys);
+  return walk(expr, params, options.paramKeys ?? []);
 }
 
-function extractArrowBodyExpression(src: string): string | null {
-  const trimmed = src.replace(/^\s*async\s+/, "").trim();
-  const arrowIdx = trimmed.indexOf("=>");
-  if (arrowIdx === -1) return null;
-  let body = trimmed.slice(arrowIdx + 2).trim();
-  if (body.startsWith("{")) {
-    // Block body - we don't support
+// ---------------------------------------------------------------------------
+// Public API: parseArrowToIrSelect (select lambdas)
+// ---------------------------------------------------------------------------
+
+export function parseArrowToIrSelect(
+  fn: (...args: any[]) => any
+): IrSelect | null {
+  const src = fn.toString();
+  const body = extractArrowBody(src);
+  if (!body) return null;
+
+  const paramName = inferParamNames(src)[0] ?? "u";
+
+  let exprSrc = body;
+  if (exprSrc.startsWith("(") && exprSrc.endsWith(")")) {
+    exprSrc = exprSrc.slice(1, -1);
+  }
+
+  let ast: { body: Array<{ expression?: AcornNode }> };
+  try {
+    ast = acorn.parse(`(${exprSrc})`, { ecmaVersion: "latest" }) as typeof ast;
+  } catch {
     return null;
   }
-  return body;
+
+  const expr = ast.body[0]?.expression;
+  if (!expr || (expr as { type: string }).type !== "ObjectExpression") return null;
+
+  const obj = expr as AcornNode & { properties: AcornNode[] };
+  const paths: string[][] = [];
+  const aliases: string[] = [];
+
+  for (const raw of obj.properties) {
+    const prop = raw as AcornNode & {
+      type: string;
+      key?: AcornNode & { name?: string; value?: string };
+      value?: AcornNode;
+      computed?: boolean;
+      shorthand?: boolean;
+    };
+    if (prop.type === "SpreadElement") return null;
+    if (prop.type !== "Property") return null;
+    if (prop.computed) return null;
+
+    const keyName = prop.key?.name ?? prop.key?.value;
+    if (typeof keyName !== "string") return null;
+
+    const val = prop.value;
+    if (!val) return null;
+
+    const resolved = resolveMemberFromAcorn(val as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
+    if (!resolved || resolved.path.length === 0) return null;
+
+    paths.push(resolved.path);
+    aliases.push(keyName);
+  }
+
+  if (paths.length === 0) return null;
+  return { param: paramName, paths, aliases };
 }
 
-function inferParamName(src: string): string {
-  const arrowIdx = src.indexOf("=>");
-  if (arrowIdx === -1) return "u";
-  const before = src.slice(0, arrowIdx).trim();
-  const match = before.match(/\(([^)]*)\)/) || before.match(/(\w+)\s*=>/);
-  const params = match ? match[1].split(",").map((p) => p.trim()) : [];
-  return params[0] || "u";
+// ---------------------------------------------------------------------------
+// Arrow body extraction (supports expression and single-return block bodies)
+// ---------------------------------------------------------------------------
+
+function extractArrowBody(src: string): string | null {
+  const idx = src.indexOf("=>");
+  if (idx === -1) return null;
+  const body = src.slice(idx + 2).trim();
+  if (!body.startsWith("{")) return body;
+
+  const inner = body.slice(1, -1).trim();
+  const returnMatch = inner.match(/^return\s+(.+);?\s*$/s);
+  if (!returnMatch) return null;
+  return returnMatch[1].replace(/;\s*$/, "").trim();
 }
 
-function walk(
-  node: AcornNode,
-  paramName: string,
-  paramKeys: string[]
-): IrNode {
+// ---------------------------------------------------------------------------
+// Parameter name inference
+// ---------------------------------------------------------------------------
+
+function inferParamNames(src: string): string[] {
+  const idx = src.indexOf("=>");
+  if (idx === -1) return ["u"];
+
+  let before = src.slice(0, idx).replace(/^\s*async\s+/, "").trim();
+
+  if (before.startsWith("(") && before.endsWith(")")) {
+    before = before.slice(1, -1);
+  }
+  if (!before) return ["u"];
+
+  const names = before.split(",").map(part => part.trim().split(/[\s:]/)[0]).filter(Boolean);
+  return names.length > 0 ? names : ["u"];
+}
+
+// ---------------------------------------------------------------------------
+// Expression parsing helper
+// ---------------------------------------------------------------------------
+
+function parseExpression(exprSrc: string): AcornNode {
+  const ast = acorn.parse(exprSrc, { ecmaVersion: "latest" }) as {
+    body: Array<{ expression?: AcornNode }>;
+  };
+  const expr = ast.body[0]?.expression;
+  if (!expr) throw new Error("Expected expression: " + exprSrc);
+  return expr;
+}
+
+// ---------------------------------------------------------------------------
+// AST walker: acorn Node → IrNode
+// ---------------------------------------------------------------------------
+
+function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
   const n = node as {
     type: string;
     left?: AcornNode;
@@ -109,113 +184,102 @@ function walk(
   };
 
   switch (n.type) {
-    case "BinaryExpression": {
-      const op = n.operator && BINARY_OP_MAP[n.operator];
-      if (!op && n.operator !== "in") {
-        throw new Error("Unsupported binary operator: " + n.operator);
-      }
+    case "BinaryExpression":
+    case "LogicalExpression": {
       if (n.operator === "in") {
         return {
           kind: "in",
-          left: walk(n.left!, paramName, paramKeys),
-          right: walk(n.right!, paramName, paramKeys),
+          left: walk(n.left!, params, paramKeys),
+          right: walk(n.right!, params, paramKeys),
         } as IrIn;
       }
+      const op = BINARY_OPS[n.operator!];
+      if (!op) throw new Error("Unsupported binary operator: " + n.operator);
       return {
         kind: "binary",
         op,
-        left: walk(n.left!, paramName, paramKeys),
-        right: walk(n.right!, paramName, paramKeys),
+        left: walk(n.left!, params, paramKeys),
+        right: walk(n.right!, params, paramKeys),
       } as IrBinary;
     }
-    case "LogicalExpression": {
-      const op = (n.operator === "&&" ? "&&" : "||") as "&&" | "||";
-      return {
-        kind: "binary",
-        op,
-        left: walk(n.left!, paramName, paramKeys),
-        right: walk(n.right!, paramName, paramKeys),
-      } as IrBinary;
-    }
+
     case "UnaryExpression": {
       if (n.operator !== "!") throw new Error("Unsupported unary: " + n.operator);
       return {
         kind: "unary",
         op: "!",
-        operand: walk(n.argument ?? n.operand!, paramName, paramKeys),
+        operand: walk(n.argument ?? n.operand!, params, paramKeys),
       } as IrUnary;
     }
+
     case "MemberExpression": {
-      const path = memberPath(n, paramName);
-      if (path) return { kind: "member", param: paramName, path } as IrMember;
+      const result = resolveMemberFromAcorn(n, params);
+      if (result) return { kind: "member", param: result.param, path: result.path } as IrMember;
       throw new Error("Unsupported member expression");
     }
+
     case "Identifier": {
       const name = n.name ?? "";
-      if (name === paramName) {
-        return { kind: "member", param: paramName, path: [] } as IrMember;
-      }
+      if (params.includes(name)) return { kind: "member", param: name, path: [] } as IrMember;
       if (paramKeys.includes(name)) return { kind: "param", key: name } as IrParam;
       throw new Error("Unknown identifier (not param or entity): " + name);
     }
-    case "Literal": {
+
+    case "Literal":
       return { kind: "const", value: n.value } as IrConst;
-    }
+
     case "CallExpression": {
       const callee = n.callee as {
         type: string;
         object?: AcornNode;
         property?: { name?: string };
-        name?: string;
       };
-      if (callee.type === "MemberExpression") {
-        const method =
-          callee.property && "name" in callee.property
-            ? callee.property.name
-            : undefined;
-        if (!method || !ALLOWED_METHODS.has(method))
-          throw new Error("Unsupported method: " + method);
-        const receiver = walk(callee.object!, paramName, paramKeys);
-        const args = (n.arguments ?? []).map((a) => walk(a as import("acorn").Node, paramName, paramKeys));
-        return { kind: "call", method, receiver, args } as IrCall;
-      }
-      throw new Error("Unsupported call expression");
+      if (callee.type !== "MemberExpression") throw new Error("Unsupported call expression");
+      const method = callee.property?.name;
+      if (!method || !ALLOWED_METHODS.has(method))
+        throw new Error("Unsupported method: " + method);
+      return {
+        kind: "call",
+        method,
+        receiver: walk(callee.object!, params, paramKeys),
+        args: (n.arguments ?? []).map((a) => walk(a as AcornNode, params, paramKeys)),
+      } as IrCall;
     }
+
     case "ArrayExpression": {
       const elements = (n as AcornNode & { elements: AcornNode[] }).elements ?? [];
       const arr = elements.map((e) => {
         if (!e || (e as { type: string }).type === "SpreadElement")
           throw new Error("Unsupported array element");
-        const ir = walk(e, paramName, paramKeys);
+        const ir = walk(e, params, paramKeys);
         if (ir.kind !== "const") throw new Error("IN array must contain literals");
         return ir.value;
       });
       return { kind: "const", value: arr } as IrConst;
     }
+
     default:
       throw new Error("Unsupported node type: " + (n as { type: string }).type);
   }
 }
 
-function memberPath(
-  node: {
-    type: string;
-    object?: AcornNode;
-    property?: AcornNode;
-    computed?: boolean;
-  },
-  paramName: string
-): string[] | null {
+// ---------------------------------------------------------------------------
+// Acorn member path resolution
+// ---------------------------------------------------------------------------
+
+function resolveMemberFromAcorn(
+  node: { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string },
+  params: string[]
+): { param: string; path: string[] } | null {
+  if (node.type === "Identifier" && params.includes(node.name ?? "")) {
+    return { param: node.name!, path: [] };
+  }
   if (node.type !== "MemberExpression") return null;
-  const obj = node.object! as AcornNode & { name?: string };
   const prop = node.property as AcornNode & { name?: string };
   if (node.computed || !prop || prop.type !== "Identifier") return null;
-  const rest =
-    obj.type === "MemberExpression"
-      ? memberPath(obj as unknown as typeof node, paramName)
-      : obj.type === "Identifier" && obj.name === paramName
-        ? []
-        : null;
-  if (rest === null) return null;
-  return [...rest, prop.name!];
+
+  const obj = node.object! as AcornNode & { type: string; name?: string; object?: AcornNode; property?: AcornNode; computed?: boolean };
+  const parent = resolveMemberFromAcorn(obj, params);
+  if (!parent) return null;
+  return { param: parent.param, path: [...parent.path, prop.name!] };
 }

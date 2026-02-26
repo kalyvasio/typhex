@@ -12,15 +12,19 @@ export interface ColumnDef {
 
 export type TableDefinition = Record<string, string | ColumnDef>;
 
+function stripForConstraintCheck(def: string): string {
+  return def.replace(/'[^']*'/g, "").replace(/--[^\n]*/g, "");
+}
+
 /** Normalize to ColumnDef */
 export function normalizeCol(def: string | ColumnDef): ColumnDef {
   if (typeof def === "string") {
-    const lower = def.toLowerCase();
+    const stripped = stripForConstraintCheck(def);
     return {
       type: def,
-      primaryKey: lower.includes("primary key"),
-      autoIncrement: lower.includes("autoincrement"),
-      nullable: !lower.includes("not null"),
+      primaryKey: /\bprimary\s+key\b/i.test(stripped),
+      autoIncrement: /\bautoincrement\b/i.test(stripped),
+      nullable: !/\bnot\s+null\b/i.test(stripped),
     };
   }
   return def;
