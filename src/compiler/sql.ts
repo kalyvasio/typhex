@@ -38,6 +38,11 @@ const DEFAULT_OPTIONS: CompileOptions = {
   placeholder: "?",
 };
 
+/** Escape a SQL identifier (table/column name) for safe interpolation. */
+export function escapeIdentifier(name: string): string {
+  return '"' + String(name).replace(/"/g, '""') + '"';
+}
+
 export function compileWhere(
   node: IrNode | null,
   options: CompileOptions = {}

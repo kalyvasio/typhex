@@ -1,27 +1,92 @@
 /**
  * Db: connection manager. Sets the global default driver so all entities
  * resolve it automatically. Provides migrate(), validate(), and close().
+ *
+ * Also exposes the programmatic migration API: generateMigrations(),
+ * runMigrations(), and migrationStatus().
  */
 
 import type { Driver } from "../driver/types.js";
+import { createDriver } from "../driver/factory.js";
+import { escapeIdentifier } from "../compiler/sql.js";
 import {
   setDefaultDriver,
   getRegisteredEntities,
 } from "../entity/global-driver.js";
+import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
+import { runMigrations as runMig, migrationStatus as migStatus } from "../migration/runner.js";
+import { parseFkDependencies, topoSort } from "../migration/topo-sort.js";
+import type { MigrationFile } from "../migration/types.js";
+import { loadConfig } from "../config/load-config.js";
+
+export type DbOptions =
+  | { driver: Driver; migrationsFolder?: string }
+  | {
+      dialect: "sqlite" | "postgres";
+      database?: string;
+      url?: string;
+      migrationsFolder?: string;
+    };
+
+function isDriver(v: unknown): v is Driver {
+  return (
+    v != null &&
+    typeof v === "object" &&
+    "query" in v &&
+    "run" in v &&
+    "close" in v
+  );
+}
 
 export class Db {
-  constructor(private driver: Driver) {
+  private migrationsFolder: string;
+  private driver: Driver;
+
+  constructor(options: DbOptions | Driver) {
+    const opts: DbOptions = isDriver(options)
+      ? { driver: options, migrationsFolder: "./migrations" }
+      : options;
+    let driver: Driver;
+    if ("driver" in opts) {
+      driver = opts.driver;
+      this.migrationsFolder = opts.migrationsFolder ?? "./migrations";
+    } else {
+      driver = createDriver({
+        dialect: opts.dialect,
+        database: opts.database,
+        url: opts.url,
+      });
+      this.migrationsFolder = opts.migrationsFolder ?? "./migrations";
+    }
+    this.driver = driver;
     setDefaultDriver(driver);
   }
 
-  /** CREATE TABLE IF NOT EXISTS for all registered entities. */
+  /** Create Db from config file. Loads config and creates driver internally. */
+  static async fromConfig(options?: { configPath?: string; cwd?: string }): Promise<Db> {
+    const config = await loadConfig({
+      configPath: options?.configPath,
+      cwd: options?.cwd,
+    });
+    return new Db(config);
+  }
+
+  /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
   migrate(): void {
-    for (const entity of getRegisteredEntities()) {
-      const { _table: name, _schema: schema } = entity.table;
+    const entities = getRegisteredEntities();
+    const deps = parseFkDependencies(entities);
+    const names = entities.map((e) => e.table._table);
+    const sorted = topoSort(names, deps);
+    const byName = new Map(entities.map((e) => [e.table._table, e]));
+
+    for (const name of sorted) {
+      const entity = byName.get(name);
+      if (!entity) continue;
+      const { _schema: schema } = entity.table;
       const colDefs = Object.entries(schema)
-        .map(([c, def]) => `"${c}" ${def}`)
+        .map(([c, def]) => `${escapeIdentifier(c)} ${def}`)
         .join(", ");
-      this.driver.run(`CREATE TABLE IF NOT EXISTS "${name}" (${colDefs})`);
+      this.driver.run(`CREATE TABLE IF NOT EXISTS ${escapeIdentifier(name)} (${colDefs})`);
     }
   }
 
@@ -31,7 +96,7 @@ export class Db {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = this.driver.query(`PRAGMA table_info("${name}")`) as Array<{
+      const rows = this.driver.query(`PRAGMA table_info(${escapeIdentifier(name)})`) as Array<{
         name: string;
         type: string;
         notnull: number;
@@ -52,6 +117,28 @@ export class Db {
         }
       }
     }
+  }
+
+  /**
+   * Diff entity definitions against the database and generate migration files.
+   * Returns the generated files (also written to disk).
+   * Uses driver.dialect for SQL generation.
+   */
+  generateMigrations(dir = this.migrationsFolder): MigrationFile[] {
+    const entities = getRegisteredEntities();
+    const files = generateMigrationFiles(this.driver, entities);
+    if (files.length > 0) writeMigrationFiles(dir, files);
+    return files;
+  }
+
+  /** Apply pending migration scripts from the migrations directory. */
+  runMigrations(dir = this.migrationsFolder) {
+    return runMig(this.driver, dir);
+  }
+
+  /** Show applied and pending migration status. */
+  migrationStatus(dir = this.migrationsFolder) {
+    return migStatus(this.driver, dir);
   }
 
   getDriver(): Driver {

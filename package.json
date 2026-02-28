@@ -17,6 +17,9 @@
       "default": "./dist/transformer/index.js"
     }
   },
+  "bin": {
+    "typhex": "./dist/migration/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -24,12 +27,7 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage"
   },
-  "keywords": [
-    "orm",
-    "typescript",
-    "sql",
-    "query-builder"
-  ],
+  "keywords": ["orm", "typescript", "sql", "query-builder"],
   "license": "MIT",
   "engines": {
     "node": ">=18"
