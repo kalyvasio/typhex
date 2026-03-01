@@ -2,38 +2,37 @@
  * Migration runner: reads .sql files from the migrations directory,
  * skips already-applied ones, executes pending ones in filename order,
  * and records each in the _typhex_migrations tracking table.
+ * Uses dialect's DbMigrations for tracking table DDL and record SQL.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Driver } from "../driver/types.js";
 import type { MigrationRecord } from "./types.js";
+import { getDbMigrations } from "../dbs/index.js";
 
-const TRACKING_TABLE = "_typhex_migrations";
-
-function ensureTrackingTable(driver: Driver): void {
-  driver.run(`
-    CREATE TABLE IF NOT EXISTS "${TRACKING_TABLE}" (
-      "id" integer primary key autoincrement,
-      "name" text not null unique,
-      "applied_at" text not null default (datetime('now'))
-    )
-  `);
+async function ensureTrackingTable(driver: Driver): Promise<void> {
+  const dialect = driver.dialect ?? "sqlite";
+  const migrations = getDbMigrations(dialect);
+  await driver.run(migrations.getTrackingTableDdl());
 }
 
-function getApplied(driver: Driver): Set<string> {
-  ensureTrackingTable(driver);
-  const rows = driver.query(
-    `SELECT "name" FROM "${TRACKING_TABLE}" ORDER BY "id"`
-  ) as Array<{ name: string }>;
+async function getApplied(driver: Driver): Promise<Set<string>> {
+  await ensureTrackingTable(driver);
+  const dialect = driver.dialect ?? "sqlite";
+  const migrations = getDbMigrations(dialect);
+  const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
+  const table = esc("_typhex_migrations");
+  const rows = (await driver.query(
+    `SELECT ${esc("name")} FROM ${table} ORDER BY ${esc("id")}`
+  )) as Array<{ name: string }>;
   return new Set(rows.map((r) => r.name));
 }
 
-function record(driver: Driver, name: string): void {
-  driver.run(
-    `INSERT INTO "${TRACKING_TABLE}" ("name") VALUES (?)`,
-    [name]
-  );
+async function record(driver: Driver, name: string): Promise<void> {
+  const dialect = driver.dialect ?? "sqlite";
+  const migrations = getDbMigrations(dialect);
+  await driver.run(migrations.getRecordMigrationSql(), [name]);
 }
 
 export interface MigrationResult {
@@ -41,16 +40,15 @@ export interface MigrationResult {
   skipped: string[];
 }
 
-export function runMigrations(driver: Driver, dir: string): MigrationResult {
-  ensureTrackingTable(driver);
-  const applied = getApplied(driver);
+export async function runMigrations(driver: Driver, dir: string): Promise<MigrationResult> {
+  const applied = await getApplied(driver);
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".sql"))
     .sort();
 
   const result: MigrationResult = { applied: [], skipped: [] };
 
-  driver.transaction(() => {
+  await driver.transaction(async () => {
     for (const file of files) {
       const name = file.replace(/\.sql$/, "");
       if (applied.has(name)) {
@@ -68,9 +66,9 @@ export function runMigrations(driver: Driver, dir: string): MigrationResult {
         }
       }
       for (const stmt of splitStatements(sql)) {
-        driver.run(stmt);
+        await driver.run(stmt);
       }
-      record(driver, name);
+      await record(driver, name);
       result.applied.push(name);
     }
   });
@@ -78,14 +76,16 @@ export function runMigrations(driver: Driver, dir: string): MigrationResult {
   return result;
 }
 
-export function migrationStatus(
+export async function migrationStatus(
   driver: Driver,
   dir: string
-): { applied: MigrationRecord[]; pending: string[] } {
-  ensureTrackingTable(driver);
-  const appliedRows = driver.query(
-    `SELECT "id", "name", "applied_at" FROM "${TRACKING_TABLE}" ORDER BY "id"`
-  ) as MigrationRecord[];
+): Promise<{ applied: MigrationRecord[]; pending: string[] }> {
+  await ensureTrackingTable(driver);
+  const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
+  const table = esc("_typhex_migrations");
+  const appliedRows = (await driver.query(
+    `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${table} ORDER BY ${esc("id")}`
+  )) as MigrationRecord[];
   const appliedNames = new Set(appliedRows.map((r) => r.name));
 
   let files: string[] = [];

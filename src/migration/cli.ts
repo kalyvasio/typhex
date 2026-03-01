@@ -112,7 +112,7 @@ async function main() {
         console.log("No entities registered. Nothing to generate.");
         return;
       }
-      const files = generateMigrationFiles(driver, entities);
+      const files = await generateMigrationFiles(driver, entities);
       if (files.length === 0) {
         console.log("Schema is up to date. No migrations generated.");
         return;
@@ -121,7 +121,7 @@ async function main() {
       console.log(`Generated ${paths.length} migration(s):`);
       for (const p of paths) console.log(`  ${p}`);
     } finally {
-      driver.close();
+      await driver.close();
     }
   } else if (command === "migrate:run") {
     const driver = createDriver({
@@ -130,7 +130,7 @@ async function main() {
       url: config.url,
     });
     try {
-      const result = runMigrations(driver, dir);
+      const result = await runMigrations(driver, dir);
       if (result.applied.length === 0) {
         console.log("No pending migrations.");
       } else {
@@ -141,7 +141,7 @@ async function main() {
         console.log(`Skipped ${result.skipped.length} (already applied).`);
       }
     } finally {
-      driver.close();
+      await driver.close();
     }
   } else if (command === "migrate:status") {
     const driver = createDriver({
@@ -150,7 +150,7 @@ async function main() {
       url: config.url,
     });
     try {
-      const status = migrationStatus(driver, dir);
+      const status = await migrationStatus(driver, dir);
       if (status.applied.length > 0) {
         console.log("Applied migrations:");
         for (const r of status.applied) {
@@ -167,7 +167,7 @@ async function main() {
         console.log("No migrations found.");
       }
     } finally {
-      driver.close();
+      await driver.close();
     }
   } else {
     console.error(`Unknown command: ${command}`);

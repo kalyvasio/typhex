@@ -7,12 +7,13 @@ export type { DbOptions, QueryState } from "./orm/index.js";
 export type { Driver } from "./driver/types.js";
 export { createSqliteDriver, createDriver } from "./driver/index.js";
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
+export { createPostgresDriver, getDialect } from "./dbs/index.js";
+export type { PostgresDriverOptions } from "./dbs/index.js";
 export type { IrNode, IrOrderBy, IrSelect } from "./ir/types.js";
 export { isIrNode, isIrSelect } from "./ir/types.js";
 export { parseArrowToIr, parseArrowToIrSelect } from "./parser/index.js";
 export type { ParseOptions } from "./parser/index.js";
-export { compileWhere, bindParams, expandInParams } from "./compiler/index.js";
-export type { CompileResult, CompileOptions } from "./compiler/index.js";
+export type { CompileResult, CompileOptions } from "./dbs/index.js";
 export type { TableDefinition, ColumnDef } from "./schema/index.js";
 export { Entity, rel } from "./entity/index.js";
 export type {

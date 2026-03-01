@@ -13,7 +13,7 @@ const User = Entity("users", {
 });
 
 const db = new Db(createSqliteDriver({ path: ":memory:" }));
-db.migrate();
+await db.migrate();
 
 await User.create({ name: "John", age: 40, country: "US" });
 await User.create({ name: "Alice", age: 30, country: "US" });
@@ -53,5 +53,5 @@ const withAliases = await User.query()
   .toArray();
 console.log("Select with aliases (US only):", withAliases);
 
-db.close();
+await db.close();
 console.log("Done.");

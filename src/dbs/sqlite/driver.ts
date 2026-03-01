@@ -1,14 +1,12 @@
 /**
- * SQLite driver using better-sqlite3.
- * Serializes Date/boolean so bound params are valid for SQLite (numbers, strings, bigints, buffers, null).
+ * SQLite driver using better-sqlite3. Async wrapper.
  */
 
 import { createRequire } from "node:module";
-import type { Driver } from "./types.js";
+import type { Driver } from "../types.js";
 
 const require = createRequire(import.meta.url);
 
-/** Convert a value to a type SQLite can bind (number, string, bigint, Buffer, null). */
 function toBindable(value: unknown): unknown {
   if (value === undefined || value === null) return null;
   if (value instanceof Date) return value.toISOString();
@@ -30,7 +28,6 @@ function bindableParams(params: unknown[]): unknown[] {
 }
 
 export interface SqliteDriverOptions {
-  /** Path to database file or ":memory:" */
   path: string;
 }
 
@@ -39,20 +36,20 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
   const db = new Database(options.path);
 
   return {
-    dialect: "sqlite" as const,
+    dialect: "sqlite",
+
     async query(sql: string, params: unknown[] = []): Promise<unknown[]> {
       const stmt = db.prepare(sql);
-      const rows = stmt.all(...bindableParams(params)) as unknown[];
-      return rows;
+      return Promise.resolve(stmt.all(...bindableParams(params)) as unknown[]);
     },
 
     async run(sql: string, params: unknown[] = []): Promise<{ lastID?: number; changes: number }> {
       const stmt = db.prepare(sql);
       const info = stmt.run(...bindableParams(params)) as { lastInsertRowid: number; changes: number };
-      return {
+      return Promise.resolve({
         lastID: info.lastInsertRowid,
         changes: info.changes,
-      };
+      });
     },
 
     async transaction<T>(fn: () => Promise<T>): Promise<T> {

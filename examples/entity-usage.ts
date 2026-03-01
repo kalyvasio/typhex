@@ -50,7 +50,7 @@ class PostEntity extends Post {
 }
 
 const db = new Db(createSqliteDriver({ path: ":memory:" }));
-db.migrate();
+await db.migrate();
 
 const alice = await User.create({
   name: "Alice",
@@ -106,5 +106,5 @@ const newUser = new UserEntity({
 await newUser.save();
 console.log("Saved new user id:", newUser.id);
 
-db.close();
+await db.close();
 console.log("Done.");

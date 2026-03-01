@@ -27,19 +27,26 @@
     "test:watch": "vitest",
     "coverage": "vitest run --coverage"
   },
-  "keywords": ["orm", "typescript", "sql", "query-builder"],
+  "keywords": [
+    "orm",
+    "typescript",
+    "sql",
+    "query-builder"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
     "acorn": "^8.14.0",
-    "better-sqlite3": "^11.6.0"
+    "better-sqlite3": "^11.6.0",
+    "pg": "^8.19.0"
   },
   "devDependencies": {
     "@types/acorn": "^4.0.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.10.1",
+    "@types/pg": "^8.18.0",
     "@vitest/coverage-v8": "^2.1.6",
     "ts-patch": "^3.3.0",
     "tsx": "^4.19.2",

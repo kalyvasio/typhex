@@ -1,0 +1,205 @@
+import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import {
+  createPostgresDriver,
+  postgresDialect,
+  postgresMigrations,
+  getDialect,
+} from "../../src/dbs/index.js";
+import { Entity } from "../../src/entity/entity.js";
+import { Db } from "../../src/orm/db.js";
+import { clearRegistry, setDefaultDriver } from "../../src/entity/global-driver.js";
+
+const connectionString =
+  process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
+
+/** Run PostgreSQL integration tests only when TYPHEX_POSTGRES_URL is set. */
+function hasPostgres(): boolean {
+  return !!process.env.TYPHEX_POSTGRES_URL;
+}
+
+describe("dbs/postgres", () => {
+  beforeAll(() => {
+    clearRegistry();
+  });
+
+  afterAll(() => {
+    setDefaultDriver(null);
+  });
+
+  describe("postgresDialect", () => {
+    it("uses $1, $2 placeholders", () => {
+      expect(postgresDialect.placeholder(1)).toBe("$1");
+      expect(postgresDialect.placeholder(2)).toBe("$2");
+    });
+
+    it("escapes identifiers", () => {
+      expect(postgresDialect.escapeIdentifier("users")).toBe('"users"');
+    });
+
+    it("compiles WHERE with $N placeholders", () => {
+      const ir = {
+        kind: "binary" as const,
+        op: "===" as const,
+        left: { kind: "member" as const, param: "u", path: ["age"] },
+        right: { kind: "const" as const, value: 18 },
+      };
+      const result = postgresDialect.compileWhere(ir, {});
+      expect(result.sql).toContain("$1");
+      expect(result.params).toEqual([18]);
+    });
+
+    it("compileInsert produces INSERT with RETURNING for pk", () => {
+      const { sql, params } = postgresDialect.compileInsert(
+        "users",
+        ["name", "age"],
+        ["Alice", 30],
+        "id"
+      );
+      expect(sql).toContain('INSERT INTO "users"');
+      expect(sql).toContain("$1");
+      expect(sql).toContain("RETURNING \"id\"");
+      expect(params).toEqual(["Alice", 30]);
+    });
+
+    it("compileCount produces SELECT COUNT", () => {
+      const { sql, params } = postgresDialect.compileCount("users", '"t0"."age" = $1', [18]);
+      expect(sql).toContain('SELECT COUNT(*) AS c');
+      expect(sql).toContain('FROM "users"');
+      expect(params).toEqual([18]);
+    });
+
+    it("compileUpdate produces UPDATE with renumbered placeholders", () => {
+      const { sql, params } = postgresDialect.compileUpdate(
+        "users",
+        { name: "Bob" },
+        ["id", "name"],
+        '"t0"."id" = $1',
+        [1]
+      );
+      expect(sql).toContain('UPDATE "users"');
+      expect(sql).toContain('"name" = $1');
+      expect(sql).toContain('"users"."id" = $2');
+      expect(params).toEqual(["Bob", 1]);
+    });
+
+    it("compileDelete produces DELETE", () => {
+      const { sql, params } = postgresDialect.compileDelete("users", '"t0"."id" = $1', [1]);
+      expect(sql).toContain('DELETE FROM "users"');
+      expect(params).toEqual([1]);
+    });
+
+    it("expandPlaceholders expands IN arrays to $1, $2", () => {
+      const sql = '("t0"."id" IN ($1))';
+      const resolved = [[10, 20]];
+      const { sql: outSql, params } = postgresDialect.expandPlaceholders(sql, resolved);
+      expect(outSql).toBe('("t0"."id" IN ($1, $2))');
+      expect(params).toEqual([10, 20]);
+    });
+
+    it("compileSelect produces SELECT with LIMIT/OFFSET", () => {
+      const { sql, params } = postgresDialect.compileSelect({
+        table: "users",
+        selectList: '"t0"."id", "t0"."name"',
+        whereSql: "1=1",
+        whereParams: [],
+        orderBySql: '"t0"."name" ASC',
+        limitNum: 10,
+        offsetNum: 5,
+      });
+      expect(sql).toContain('SELECT "t0"."id", "t0"."name"');
+      expect(sql).toContain('FROM "users"');
+      expect(sql).toContain("ORDER BY");
+      expect(sql).toContain("LIMIT");
+      expect(sql).toContain("OFFSET");
+      expect(params).toEqual([10, 5]);
+    });
+  });
+
+  describe("postgresMigrations", () => {
+    it("generateSql produces valid DDL for add_table", () => {
+      const action = {
+        kind: "add_table" as const,
+        table: "pg_test_users",
+        schema: {
+          id: "SERIAL PRIMARY KEY",
+          name: "VARCHAR(255) NOT NULL",
+        },
+      };
+      const sql = postgresMigrations.generateSql(action);
+      expect(sql).toContain("CREATE TABLE");
+      expect(sql).toContain('"pg_test_users"');
+      expect(sql).toContain("SERIAL");
+    });
+
+    it("getTrackingTableDdl produces Postgres DDL", () => {
+      const ddl = postgresMigrations.getTrackingTableDdl();
+      expect(ddl).toContain("_typhex_migrations");
+      expect(ddl).toContain("SERIAL");
+      expect(ddl).toContain("DEFAULT NOW()");
+    });
+
+    it("getRecordMigrationSql uses $1 placeholder", () => {
+      const sql = postgresMigrations.getRecordMigrationSql();
+      expect(sql).toContain("INSERT INTO");
+      expect(sql).toContain("$1");
+    });
+  });
+
+  describe("getDialect", () => {
+    it("returns postgres dialect for postgres", () => {
+      const d = getDialect("postgres");
+      expect(d.name).toBe("postgres");
+    });
+  });
+
+  describe("createPostgresDriver (integration)", () => {
+    it(
+      "connects and runs queries",
+      async () => {
+        if (!hasPostgres()) return;
+        const driver = createPostgresDriver({ connectionString });
+        try {
+          const rows = await driver.query("SELECT 1 as x");
+          expect(rows).toHaveLength(1);
+          expect((rows[0] as { x: number }).x).toBe(1);
+        } finally {
+          await driver.close();
+        }
+      },
+      { skip: !hasPostgres() }
+    );
+
+    it(
+      "Entity CRUD with PostgreSQL",
+      async () => {
+        clearRegistry();
+        const User = Entity("pg_test_users", {
+          id: "SERIAL PRIMARY KEY",
+          name: "VARCHAR(255) NOT NULL",
+          age: "INTEGER NOT NULL",
+        });
+
+        const driver = createPostgresDriver({ connectionString });
+        const db = new Db(driver);
+        setDefaultDriver(driver);
+
+        try {
+          await driver.run('DROP TABLE IF EXISTS "pg_test_users"');
+          await db.migrate();
+
+          const u = await User.create({ name: "Alice", age: 30 });
+          expect(u.id).toBe(1);
+
+          const found = await User.query().where((u) => u.name === "Alice").first();
+          expect(found?.name).toBe("Alice");
+
+          const count = await User.query().count();
+          expect(count).toBe(1);
+        } finally {
+          await db.close();
+        }
+      },
+      { skip: !hasPostgres() }
+    );
+  });
+});
