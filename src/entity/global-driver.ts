@@ -30,6 +30,10 @@ export function getRegisteredEntities(): readonly RegisteredEntity[] {
   return entityRegistry;
 }
 
+export function getEntityByTableName(tableName: string): RegisteredEntity | undefined {
+  return entityRegistry.find((e) => e.table._table === tableName);
+}
+
 export function clearRegistry(): void {
   entityRegistry.length = 0;
 }

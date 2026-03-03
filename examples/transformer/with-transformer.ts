@@ -15,10 +15,10 @@ const User = Entity("users", {
 const db = new Db(createSqliteDriver({ path: ":memory:" }));
 await db.migrate();
 
-await User.create({ name: "John", age: 40, country: "US" });
-await User.create({ name: "Alice", age: 30, country: "US" });
-await User.create({ name: "Bob", age: 25, country: "UK" });
-await User.create({ name: "Carol", age: 28, country: "US" });
+await User.query().insert({ name: "John", age: 40, country: "US" });
+await User.query().insert({ name: "Alice", age: 30, country: "US" });
+await User.query().insert({ name: "Bob", age: 25, country: "UK" });
+await User.query().insert({ name: "Carol", age: 28, country: "US" });
 
 const country = "US";
 const fromUS = await User.query().where((u) => u.country === country).toArray();
@@ -27,7 +27,7 @@ console.log("From US (closure, no params arg):", fromUS);
 const minAge = 25;
 const maxAge = 35;
 const inAgeRange = await User.query()
-  .where((u) => u.age >= minAge && u.age <= maxAge)
+  .where((u) => u.age != null && u.age >= minAge && u.age <= maxAge)
   .orderBy("name", "asc")
   .toArray();
 console.log("Age 25–35:", inAgeRange);

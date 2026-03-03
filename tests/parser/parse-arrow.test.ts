@@ -162,21 +162,31 @@ describe("parser/parseArrowToIrSelect", () => {
   it("parses (u) => ({ id: u.id, name: u.name })", () => {
     const fn = (u: { id: number; name: string }) => ({ id: u.id, name: u.name });
     const ir = parseArrowToIrSelect(fn);
-    expect(ir).toEqual({
-      param: "u",
-      paths: [["id"], ["name"]],
-      aliases: ["id", "name"],
-    });
+    expect(ir?.param).toBe("u");
+    expect(ir?.paths).toEqual([["id"], ["name"]]);
+    expect(ir?.aliases).toEqual(["id", "name"]);
   });
 
   it("parses (u) => ({ userId: u.id })", () => {
     const fn = (u: { id: number }) => ({ userId: u.id });
     const ir = parseArrowToIrSelect(fn);
-    expect(ir).toEqual({
-      param: "u",
-      paths: [["id"]],
-      aliases: ["userId"],
+    expect(ir?.param).toBe("u");
+    expect(ir?.paths).toEqual([["id"]]);
+    expect(ir?.aliases).toEqual(["userId"]);
+  });
+
+  it("parses nested relation select (p) => ({ id: p.id, author: { id: p.author.id, name: p.author.name } })", () => {
+    const fn = (p: { id: number; author: { id: number; name: string } }) => ({
+      id: p.id,
+      author: { id: p.author.id, name: p.author.name },
     });
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir?.param).toBe("p");
+    expect(ir?.paths).toEqual([["id"]]);
+    expect(ir?.aliases).toEqual(["id"]);
+    expect(ir?.relations).toEqual([
+      { name: "author", outputKey: "author", subPaths: [["id"], ["name"]] },
+    ]);
   });
 
   it("returns null for non-object return", () => {
@@ -188,5 +198,42 @@ describe("parser/parseArrowToIrSelect", () => {
     const key = "id";
     const fn = (u: Record<string, number>) => ({ [key]: u.id });
     expect(parseArrowToIrSelect(fn)).toBeNull();
+  });
+
+  it("parses relation query chain u.posts.query().select((p) => ({ id: p.id, title: p.title }))", () => {
+    const fn = (u: any) => ({
+      id: u.id,
+      posts: u.posts.query().select((p: any) => ({ id: p.id, title: p.title })),
+    });
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir?.param).toBe("u");
+    expect(ir?.paths).toEqual([["id"]]);
+    expect(ir?.relations).toHaveLength(1);
+    expect(ir?.relations?.[0]).toMatchObject({
+      name: "posts",
+      outputKey: "posts",
+      subPaths: [["id"], ["title"]],
+    });
+  });
+
+  it("parses relation query chain with where and orderBy", () => {
+    const fn = (u: any) => ({
+      id: u.id,
+      posts: u.posts
+        .query()
+        .where((p: any) => p.published === true)
+        .orderBy("title", "asc")
+        .limit(5)
+        .select((p: any) => ({ id: p.id })),
+    });
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir?.relations?.[0]).toMatchObject({
+      name: "posts",
+      outputKey: "posts",
+      subPaths: [["id"]],
+      limitNum: 5,
+    });
+    expect(ir?.relations?.[0].whereIr).toBeDefined();
+    expect(ir?.relations?.[0].orderBy).toEqual([{ param: "u", path: ["title"], direction: "asc" }]);
   });
 });

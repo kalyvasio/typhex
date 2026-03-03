@@ -1,17 +1,88 @@
 /**
  * Entity(table, schema, relations) — the only supported way to define entities.
- * Returns a class whose instances are InferTable<TSchema> & EntityBase.
+ * Returns a class whose instances are Row<TSchema, TRels>.
  */
 
 import type { Driver } from "../driver/types.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
 import { QueryBuilder } from "../orm/query-builder.js";
-import { whereColumnEq } from "../orm/query-helpers.js";
-import type { InferTable, InferInsert } from "./schema-inference.js";
-import type { RelationsMap } from "./relations.js";
+import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
+import type { InferTable, InferInsert, Flatten, Materialized, MaterializeShape } from "./schema-inference.js";
+import type { RelationDef, RelationsMap, RelationQueryable, RelationQueryBuilder, ManyRelation } from "./relations.js";
 import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDriver, registerEntity } from "./global-driver.js";
+
+/** Loaded value for a relation (data only when E is a concrete entity class; when E is unknown or any, use queryable type so subclass declare can narrow). */
+/** When E is concrete: use EntityInstance<E>[]/E so type flows from rel.oneToMany(() => Employee) without declare. When E is unknown (circular refs): use broad type so declare provides. */
+export type RelationLoadedValue<R> =
+  R extends RelationDef<infer E, infer TType>
+    ? E extends AnyEntityClass
+      ? unknown extends E
+        ? TType extends "one-to-many" | "many-to-many"
+          ? RelationQueryBuilder<any> & EntityBase[]
+          : EntityBase
+        : TType extends "one-to-many" | "many-to-many"
+          ? ManyRelation<EntityInstance<E>>
+          : EntityInstance<E>
+      : TType extends "one-to-many" | "many-to-many"
+        ? RelationQueryBuilder<any> & EntityBase[]
+        : EntityBase
+    : never;
+
+/** Unified row type: materialized columns + loaded relation data + EntityBase. */
+export type Row<TShape extends Record<string, unknown>, TRels extends RelationsMap = {}> =
+  Flatten<MaterializeShape<TShape> & { [K in keyof TRels]: RelationLoadedValue<TRels[K]> }> & EntityBase;
+
+/** Canonical static entity contract used across entity/query/relation type layers. */
+export type AnyEntityClass = (new (...args: any[]) => any) & { table: TableDef<any, any> };
+
+/** Extract schema/relations from an entity class. */
+export type EntitySchema<E extends AnyEntityClass> = E["table"] extends TableDef<infer S, any> ? S : never;
+export type EntityRelations<E extends AnyEntityClass> = E["table"] extends TableDef<any, infer R> ? R : never;
+
+/** Canonical materialized fields and relation targets. */
+export type EntityFields<E extends AnyEntityClass> = Materialized<EntitySchema<E>>;
+/** Instance type of the related entity. When relation target is entity class E, yields EntityInstance<E>. */
+export type RelationTarget<R> = R extends RelationDef<infer E, any> ? (E extends AnyEntityClass ? EntityInstance<E> : E) : never;
+
+/** Relation properties with .query() — use only as select callback parameter (SelectRow). */
+export type EntityRelationProps<E extends AnyEntityClass> = {
+  [K in keyof EntityRelations<E>]: RelationQueryable<EntityRelations<E>[K]>;
+};
+
+/** Loaded relation properties (data only, no .query()) for entity instances. */
+export type EntityRelationPropsLoaded<E extends AnyEntityClass> = {
+  [K in keyof EntityRelations<E>]: RelationLoadedValue<EntityRelations<E>[K]>;
+};
+
+/** Table-derived instance type (used when E is not a class or as fallback). */
+type EntityInstanceFromTable<E extends AnyEntityClass> = Flatten<EntityFields<E> & EntityRelationPropsLoaded<E>> & EntityBase;
+
+/** Table-derived select row type. */
+type SelectRowFromTable<E extends AnyEntityClass> = Flatten<EntityFields<E> & EntityRelationProps<E>> & EntityBase;
+
+/** Loaded entity instance. Uses InstanceType<E> when E is a class so subclass declare (OneToMany etc.) flows through. */
+export type EntityInstance<E extends AnyEntityClass> =
+  E extends new (...args: any[]) => infer R
+    ? R extends EntityBase
+      ? R
+      : EntityInstanceFromTable<E>
+    : EntityInstanceFromTable<E>;
+
+/** Row type in select(u => ...) callback. Uses InstanceType<E> when E is a class so subclass declare flows through. */
+export type SelectRow<E extends AnyEntityClass> =
+  E extends new (...args: any[]) => infer R
+    ? R extends EntityBase
+      ? R
+      : SelectRowFromTable<E>
+    : SelectRowFromTable<E>;
+
+/** Backward-compatible alias for entity instance extraction. */
+export type EntityRow<E> = E extends AnyEntityClass ? EntityInstance<E> : never;
+
+/** Resolve entity class from instance type (e.g. Post) or pass-through if already a class. Use for OneToMany<Post> with import type. */
+export type EntityClassOf<T> = T extends EntityInstance<infer E> ? E : (T extends AnyEntityClass ? T : never);
 
 function hasPrimaryKey(def: string): boolean {
   const stripped = def
@@ -39,22 +110,17 @@ function createTableDef<TTable extends string, TSchema extends Record<string, st
   };
 }
 
+/** Entity class type: 3 params only (table, schema def, relations). Use .query() for insert, findByPk, where, etc. */
 export type EntityClass<
   TTable extends string,
   TSchema extends Record<string, string>,
-  TRels extends RelationsMap,
-  TInstance = InferTable<TSchema> & EntityBase,
-> = (new (data?: Partial<InferTable<TSchema>>) => TInstance) & {
+  TRels extends RelationsMap = {},
+> = (new (data?: Partial<InferTable<TSchema>>) => Row<Materialized<TSchema>, TRels>) & {
   table: TableDef<TSchema, TRels>;
   _driver: Driver | null;
   useDriver(driver: Driver): void;
-  query<C extends new (...args: any[]) => any>(this: C, driver?: Driver): QueryBuilder<InstanceType<C>>;
-  findById<C extends new (...args: any[]) => any>(this: C, id: number, driver?: Driver): Promise<InstanceType<C> | null>;
-  create<C extends new (...args: any[]) => any>(this: C, data: InferInsert<TSchema>, driver?: Driver): Promise<InstanceType<C>>;
+  query<C extends AnyEntityClass>(this: C, driver?: Driver): QueryBuilder<C, EntityInstance<C>>;
 };
-
-export type EntityInstance<E> =
-  E extends EntityClass<any, infer S, any> ? InferTable<S> & EntityBase : never;
 
 /**
  * Define an entity. Schema keys and SQL-like type strings are inferred so that
@@ -63,7 +129,7 @@ export type EntityInstance<E> =
 export function Entity<
   TTable extends string,
   const TSchema extends Record<string, string>,
-  TRels extends RelationsMap = Record<string, never>,
+  const TRels extends RelationsMap = {},
 >(
   tableName: TTable,
   schema: TSchema,
@@ -92,6 +158,7 @@ export function Entity<
       limitNum: null as null,
       offsetNum: null as null,
       selectIr: null as null,
+      relations: rels as RelationsMap,
     };
   }
 
@@ -110,11 +177,18 @@ export function Entity<
       EntityClassImpl._driver = driver;
     }
 
+    private static _resolveRelations(Ctor: any): RelationsMap {
+      const classRels = Ctor.relations as RelationsMap | undefined;
+      return classRels && Object.keys(classRels).length > 0 ? classRels : rels as RelationsMap;
+    }
+
     static query(this: new (data?: any) => any, driverOverride?: Driver) {
       const d = resolveDriver(driverOverride);
       const Ctor = this;
+      const effectiveRels = EntityClassImpl._resolveRelations(Ctor);
       return new QueryBuilder({
         ...baseState(d),
+        relations: effectiveRels,
         async hydrate(row: Record<string, unknown>) {
           const inst = new Ctor(row);
           inst._isNew = false;
@@ -122,61 +196,27 @@ export function Entity<
           await runHook(inst, "afterLoad");
           return inst;
         },
-      });
-    }
-
-    static async findById(this: new (data?: any) => any, id: number, driverOverride?: Driver): Promise<any> {
-      const row = await (this as any).query(driverOverride).where(whereColumnEq(pk, id)).first();
-      return row ?? null;
-    }
-
-    static async create(this: new (data?: any) => any, data: any, driverOverride?: Driver): Promise<any> {
-      const qb = (this as any).query(driverOverride);
-      const lastId = await qb.insert(data as Record<string, unknown>);
-      const inst = await qb.where(whereColumnEq(pk, lastId)).first();
-      if (!inst) throw new Error("create: insert succeeded but row not found");
-      return inst;
+      }) as unknown as QueryBuilder<any, EntityRow<typeof Ctor>>;
     }
 
     constructor(data?: Partial<InferTable<TSchema>>) {
       const row = (data ?? {}) as Record<string, unknown>;
-      for (const c of cols) {
-        if (row[c] !== undefined) (this as Record<string, unknown>)[c] = row[c];
+      for (const key of Object.keys(row)) {
+        if (row[key] !== undefined) (this as Record<string, unknown>)[key] = row[key];
       }
       this._isNew = (this as any)[pk] === undefined;
-      this._dirty = new Set(Object.keys(row));
+      this._dirty = new Set(Object.keys(row).filter((k) => cols.includes(k)));
     }
 
-    async save(): Promise<this> {
-      const self = this as any;
-      await runHook(self, "beforeSave");
-      if (self._isNew) {
-        await runHook(self, "beforeCreate");
-        const qb = new QueryBuilder(baseState(resolveDriver()));
-        const row: Record<string, unknown> = {};
-        for (const c of cols) if (self[c] !== undefined) row[c] = self[c];
-        self[pk] = await qb.insert(row);
-        self._isNew = false;
-        self._dirty = new Set();
-        await runHook(self, "afterCreate");
-      } else if (self._dirty?.size > 0) {
-        await runHook(self, "beforeUpdate");
-        const qb = new QueryBuilder(baseState(resolveDriver()));
-        const set: Record<string, unknown> = {};
-        for (const c of self._dirty) if (cols.includes(c)) set[c] = self[c];
-        await qb.where(whereColumnEq(pk, self[pk])).update(set);
-        self._dirty = new Set();
-        await runHook(self, "afterUpdate");
-      }
-      await runHook(self, "afterSave");
-      return this;
-    }
-
-    async delete(): Promise<void> {
-      const self = this as any;
-      await runHook(self, "beforeDelete");
-      await new QueryBuilder(baseState(resolveDriver())).where(whereColumnEq(pk, self[pk])).delete();
-      await runHook(self, "afterDelete");
+    query(driverOverride?: Driver): SingleRowQueryBuilder<this> {
+      return new SingleRowQueryBuilder<this>(
+        this as unknown as Record<string, unknown>,
+        (d) => baseState(d),
+        () => resolveDriver(driverOverride),
+        runHook,
+        pk,
+        cols,
+      );
     }
   }
 

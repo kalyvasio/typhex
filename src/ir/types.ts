@@ -65,6 +65,21 @@ export interface IrOrderBy {
   direction: OrderDirection;
 }
 
+/** Relation to load: name, output key, optional sub-paths and query options. */
+export interface IrSelectRelation {
+  name: string;
+  outputKey: string;
+  /** Columns to select from target; undefined = all columns. */
+  subPaths?: string[][];
+  /** Optional: filter for the relation sub-query. */
+  whereIr?: IrNode;
+  whereParams?: Record<string, unknown>;
+  /** Optional: order for the relation sub-query. */
+  orderBy?: IrOrderBy[];
+  limitNum?: number | null;
+  offsetNum?: number | null;
+}
+
 export interface IrSelect {
   param: string;
   /** Empty = select all columns for this param */
@@ -73,6 +88,8 @@ export interface IrSelect {
   aliases?: string[];
   /** If true, select paths plus all other table columns not in paths (e.g. ({ id, ...rest }) => ({ id, ...rest })). */
   rest?: boolean;
+  /** Relations to load (manyToOne, oneToOne, oneToMany, manyToMany). Loaded via separate queries. */
+  relations?: IrSelectRelation[];
 }
 
 export function isIrNode(node: unknown): node is IrNode {
@@ -95,5 +112,17 @@ export function isIrSelect(node: unknown): node is IrSelect {
   if (typeof o.param !== "string" || !Array.isArray(o.paths)) return false;
   if (!o.paths.every((p: unknown) => Array.isArray(p) && (p as unknown[]).every((x: unknown) => typeof x === "string"))) return false;
   if (o.rest !== undefined && typeof o.rest !== "boolean") return false;
+  if (o.relations !== undefined) {
+    if (!Array.isArray(o.relations)) return false;
+    if (!o.relations.every((r: unknown) => {
+      const x = r as Record<string, unknown>;
+      return x && typeof x.name === "string" && typeof x.outputKey === "string" &&
+        (x.subPaths === undefined || (Array.isArray(x.subPaths) && x.subPaths.every((p: unknown) =>
+          Array.isArray(p) && (p as unknown[]).every((s: unknown) => typeof s === "string")))) &&
+        (x.whereIr === undefined || isIrNode(x.whereIr)) &&
+        (x.orderBy === undefined || (Array.isArray(x.orderBy) && x.orderBy.every((o: unknown) =>
+          typeof o === "object" && o !== null && "param" in o && "path" in o && "direction" in o)));
+    })) return false;
+  }
   return true;
 }

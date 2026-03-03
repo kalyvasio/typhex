@@ -13,6 +13,8 @@ export type ColumnDef = string | { [K in Dialect]?: string };
 export interface CompileResult {
   sql: string;
   params: unknown[];
+  /** When true, execution via driver.query() returns the inserted row (e.g. INSERT ... RETURNING *). */
+  returningRow?: boolean;
 }
 
 export interface CompileOptions {

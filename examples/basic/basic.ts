@@ -1,10 +1,10 @@
 /**
  * Basic Typhex usage: Entity definition, runtime arrow-function where, CRUD.
- * Run: npx tsx examples/basic.ts  (from project root)
- *   or: npm run basic              (from examples/)
+ * Run: npx tsx examples/basic/basic.ts  (from project root)
+ *   or: npm run basic  (from examples/)
  */
 
-import { Db, Entity, createSqliteDriver } from "../src/index.js";
+import { Db, Entity, createSqliteDriver } from "../../src/index.js";
 
 const User = Entity("users", {
   id: "integer primary key autoincrement",
@@ -16,9 +16,9 @@ const User = Entity("users", {
 const db = new Db(createSqliteDriver({ path: ":memory:" }));
 await db.migrate();
 
-await User.create({ name: "Alice", age: 30, country: "US" });
-await User.create({ name: "Bob", age: 25, country: "UK" });
-await User.create({ name: "Carol", age: 28, country: "US" });
+await User.query().insert({ name: "Alice", age: 30, country: "US" });
+await User.query().insert({ name: "Bob", age: 25, country: "UK" });
+await User.query().insert({ name: "Carol", age: 28, country: "US" });
 
 const adults = await User.query().where((u) => u.age > 18).toArray();
 console.log("Adults:", adults);
@@ -59,10 +59,10 @@ const deleted = await User.query().where((u) => u.country === "UK").delete();
 console.log("Deleted rows:", deleted);
 
 const dave = new User({ name: "Dave", age: 35, country: "US" });
-await dave.save();
+await dave.query().save();
 console.log("Saved Dave, id:", dave.id);
 
-await dave.delete();
+await dave.query().delete();
 console.log("Deleted Dave");
 
 await db.close();
