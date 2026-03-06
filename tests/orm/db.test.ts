@@ -19,29 +19,29 @@ describe("Db", () => {
   });
 
   describe("constructor", () => {
-    it("sets the global default driver", () => {
+    it("sets the global default driver", async () => {
       expect(getDefaultDriver()).toBeNull();
       const driver = freshDriver();
       const db = new Db(driver);
       expect(getDefaultDriver()).toBe(driver);
-      db.close();
+      await db.close();
     });
   });
 
   describe("getDriver()", () => {
-    it("returns the underlying driver", () => {
+    it("returns the underlying driver", async () => {
       const driver = freshDriver();
       const db = new Db(driver);
       expect(db.getDriver()).toBe(driver);
-      db.close();
+      await db.close();
     });
   });
 
   describe("close()", () => {
-    it("clears the global default driver", () => {
+    it("clears the global default driver", async () => {
       const db = new Db(freshDriver());
       expect(getDefaultDriver()).not.toBeNull();
-      db.close();
+      await db.close();
       expect(getDefaultDriver()).toBeNull();
     });
   });
@@ -53,10 +53,10 @@ describe("Db", () => {
         name: "text not null",
       });
       const db = new Db(freshDriver());
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice" });
       expect(await User.query().count()).toBe(1);
-      db.close();
+      await db.close();
     });
 
     it("is idempotent (IF NOT EXISTS)", async () => {
@@ -65,43 +65,43 @@ describe("Db", () => {
         name: "text not null",
       });
       const db = new Db(freshDriver());
-      db.migrate();
-      db.migrate();
+      await db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice" });
       expect(await User.query().count()).toBe(1);
-      db.close();
+      await db.close();
     });
   });
 
   describe("validate()", () => {
-    it("passes when schema matches the database", () => {
+    it("passes when schema matches the database", async () => {
       Entity("val_users2", {
         id: "integer primary key autoincrement",
         name: "text not null",
       });
       const db = new Db(freshDriver());
-      db.migrate();
-      expect(() => db.validate()).not.toThrow();
-      db.close();
+      await db.migrate();
+      await expect(db.validate()).resolves.not.toThrow();
+      await db.close();
     });
 
-    it("throws when table does not exist", () => {
+    it("throws when table does not exist", async () => {
       Entity("val_ghost2", { id: "integer primary key" });
       const db = new Db(freshDriver());
-      expect(() => db.validate()).toThrow("does not exist");
-      db.close();
+      await expect(db.validate()).rejects.toThrow("does not exist");
+      await db.close();
     });
 
-    it("throws when a column is missing from the database", () => {
+    it("throws when a column is missing from the database", async () => {
       const driver = freshDriver();
-      driver.run(`CREATE TABLE "val_partial2" ("id" integer primary key)`);
+      await driver.run(`CREATE TABLE "val_partial2" ("id" integer primary key)`);
       Entity("val_partial2", {
         id: "integer primary key",
         name: "text",
       });
       const db = new Db(driver);
-      expect(() => db.validate()).toThrow('column "name"');
-      db.close();
+      await expect(db.validate()).rejects.toThrow('column "name"');
+      await db.close();
     });
   });
 });

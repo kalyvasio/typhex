@@ -1,16 +1,15 @@
 /**
  * Migration generator: takes DiffActions, groups them by table, orders them
  * topologically, and writes timestamped .sql files.
+ * Uses dialect's DbMigrations for diff and SQL generation.
  */
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { Driver } from "../driver/types.js";
-import { escapeIdentifier } from "../compiler/sql.js";
-import type { Dialect } from "../dialect.js";
 import type { DiffAction, MigrationFile } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
-import { diffSchema } from "./diff.js";
+import { getDbMigrations } from "../dbs/index.js";
 import { parseFkDependencies, topoSort } from "./topo-sort.js";
 
 function timestamp(): string {
@@ -43,54 +42,6 @@ function scriptName(ts: string, seq: number, action: DiffAction): string {
   }
 }
 
-/** Transform SQLite column definition to PostgreSQL where applicable. */
-function toPostgresDef(def: string): string {
-  return def
-    .replace(/\binteger\s+primary\s+key\s+autoincrement\b/gi, "SERIAL PRIMARY KEY")
-    .replace(/\bbigint\s+primary\s+key\s+autoincrement\b/gi, "BIGSERIAL PRIMARY KEY");
-}
-
-/** Extract base type for PostgreSQL ALTER COLUMN TYPE. SERIAL maps to integer. */
-function pgAlterType(newDef: string): string {
-  const def = toPostgresDef(newDef);
-  if (/^SERIAL\b/i.test(def)) return "integer";
-  if (/^BIGSERIAL\b/i.test(def)) return "bigint";
-  const m = def.match(/^(integer|bigint|text|varchar|boolean|real|numeric|timestamp|date)\b/i);
-  return m ? m[1] : def.split(/\s/)[0] ?? def;
-}
-
-function generateSqlForDialect(action: DiffAction, dialect: Dialect): string {
-  switch (action.kind) {
-    case "add_table": {
-      const cols = Object.entries(action.schema).map(([c, def]) => {
-        const colDef = dialect === "postgres" ? toPostgresDef(def) : def;
-        return `  ${escapeIdentifier(c)} ${colDef}`;
-      });
-      return `CREATE TABLE ${escapeIdentifier(action.table)} (\n${cols.join(",\n")}\n);`;
-    }
-    case "drop_table":
-      return `DROP TABLE IF EXISTS ${escapeIdentifier(action.table)};`;
-    case "add_column": {
-      const def = dialect === "postgres" ? toPostgresDef(action.definition) : action.definition;
-      return `ALTER TABLE ${escapeIdentifier(action.table)} ADD COLUMN ${escapeIdentifier(action.column)} ${def};`;
-    }
-    case "drop_column":
-      if (dialect === "postgres") {
-        return `ALTER TABLE ${escapeIdentifier(action.table)} DROP COLUMN IF EXISTS ${escapeIdentifier(action.column)};`;
-      }
-      return `ALTER TABLE ${escapeIdentifier(action.table)} DROP COLUMN ${escapeIdentifier(action.column)};`;
-    case "alter_column":
-      if (dialect === "postgres") {
-        const pgType = pgAlterType(action.newDef);
-        return `ALTER TABLE ${escapeIdentifier(action.table)} ALTER COLUMN ${escapeIdentifier(action.column)} TYPE ${pgType};`;
-      }
-      return (
-        `-- SQLite does not support ALTER COLUMN. Recreate the table to change column type.\n` +
-        `-- Column "${action.column}" on "${action.table}": ${action.oldDef} → ${action.newDef}`
-      );
-  }
-}
-
 interface GroupedActions {
   table: string;
   actions: DiffAction[];
@@ -106,13 +57,13 @@ function groupByTable(actions: DiffAction[]): GroupedActions[] {
   return Array.from(map.entries()).map(([table, actions]) => ({ table, actions }));
 }
 
-export function generateMigrationFiles(
+export async function generateMigrationFiles(
   driver: Driver,
-  entities: readonly RegisteredEntity[],
-  dialect?: Dialect
-): MigrationFile[] {
-  const resolvedDialect = dialect ?? (driver.dialect ?? "sqlite");
-  const actions = diffSchema(driver, entities);
+  entities: readonly RegisteredEntity[]
+): Promise<MigrationFile[]> {
+  const dialect = driver.dialect ?? "sqlite";
+  const migrations = getDbMigrations(dialect);
+  const actions = await migrations.diffSchema(driver, entities);
   if (actions.length === 0) return [];
 
   const groups = groupByTable(actions);
@@ -133,14 +84,14 @@ export function generateMigrationFiles(
       const action = group.actions[0];
       files.push({
         name: scriptName(ts, seq, action),
-        sql: generateSqlForDialect(action, resolvedDialect),
+        sql: migrations.generateSql(action),
       });
       seq++;
     } else {
       for (const action of group.actions) {
         files.push({
           name: scriptName(ts, seq, action),
-          sql: generateSqlForDialect(action, resolvedDialect),
+          sql: migrations.generateSql(action),
         });
         seq++;
       }

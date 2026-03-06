@@ -1,45 +1,43 @@
 /**
- * Migration system demo: generate, run, and inspect migration scripts.
- * Run: npx tsx examples/migrations.ts
+ * PostgreSQL migration demo: generate and run migrations against Postgres.
+ * Run: TYPHEX_POSTGRES_URL=postgresql://user:pass@localhost:5432/mydb npx tsx examples/postgres-migrations.ts
  *
  * This example:
- *  1. Defines entities with FK relationships
- *  2. Generates ordered migration .sql files (users → posts → comments)
+ *  1. Defines entities with PostgreSQL column types (SERIAL, VARCHAR, etc.)
+ *  2. Generates migration .sql files for Postgres
  *  3. Applies them to the database
- *  4. Adds a column to an entity and generates an alter migration
- *  5. Shows migration status
+ *  4. Shows migration status
  */
 
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Db, Entity, createSqliteDriver } from "../src/index.js";
+import { Db, Entity, createPostgresDriver } from "../src/index.js";
 import { clearRegistry } from "../src/entity/global-driver.js";
 
-const migDir = mkdtempSync(join(tmpdir(), "typhex-example-mig-"));
+const connectionString =
+  process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
+
+const migDir = mkdtempSync(join(tmpdir(), "typhex-pg-mig-"));
 console.log("Migrations directory:", migDir);
+console.log("PostgreSQL:", connectionString.replace(/:[^:@]+@/, ":****@"));
 
-// --- Step 1: Define entities with FK relationships ---
+// --- Step 1: Define entities with PostgreSQL column types ---
 
-const User = Entity("users", {
-  id: "integer primary key autoincrement",
-  name: "text not null",
-  email: "text",
+const User = Entity("pg_users", {
+  id: "SERIAL PRIMARY KEY",
+  name: "VARCHAR(255) NOT NULL",
+  email: "VARCHAR(255)",
 });
 
-const Post = Entity("posts", {
-  id: "integer primary key autoincrement",
-  user_id: "integer not null references users(id)",
-  title: "text not null",
+const Post = Entity("pg_posts", {
+  id: "SERIAL PRIMARY KEY",
+  user_id: "INTEGER NOT NULL REFERENCES pg_users(id)",
+  title: "VARCHAR(500) NOT NULL",
 });
 
-const Comment = Entity("comments", {
-  id: "integer primary key autoincrement",
-  post_id: "integer not null references posts(id)",
-  body: "text not null",
-});
-
-const db = new Db(createSqliteDriver({ path: ":memory:" }));
+const driver = createPostgresDriver({ connectionString });
+const db = new Db(driver);
 
 // --- Step 2: Generate initial migration scripts ---
 
@@ -68,33 +66,26 @@ for (const name of runResult.applied) {
 // Verify tables exist
 await User.create({ name: "Alice", email: "alice@example.com" });
 await Post.create({ user_id: 1, title: "Hello World" });
-await Comment.create({ post_id: 1, body: "Great post!" });
-console.log("\nInserted test data: 1 user, 1 post, 1 comment");
+console.log("\nInserted test data: 1 user, 1 post");
 
 const userCount = await User.query().count();
 const postCount = await Post.query().count();
-const commentCount = await Comment.query().count();
-console.log(`Counts — users: ${userCount}, posts: ${postCount}, comments: ${commentCount}`);
+console.log(`Counts — users: ${userCount}, posts: ${postCount}`);
 
 // --- Step 4: Schema change — add a column ---
 
-console.log("\n=== Step 4: Add 'age' column to users ===");
+console.log("\n=== Step 4: Add 'age' column to pg_users ===");
 clearRegistry();
-Entity("users", {
-  id: "integer primary key autoincrement",
-  name: "text not null",
-  email: "text",
-  age: "integer",
+Entity("pg_users", {
+  id: "SERIAL PRIMARY KEY",
+  name: "VARCHAR(255) NOT NULL",
+  email: "VARCHAR(255)",
+  age: "INTEGER",
 });
-Entity("posts", {
-  id: "integer primary key autoincrement",
-  user_id: "integer not null references users(id)",
-  title: "text not null",
-});
-Entity("comments", {
-  id: "integer primary key autoincrement",
-  post_id: "integer not null references posts(id)",
-  body: "text not null",
+Entity("pg_posts", {
+  id: "SERIAL PRIMARY KEY",
+  user_id: "INTEGER NOT NULL REFERENCES pg_users(id)",
+  title: "VARCHAR(500) NOT NULL",
 });
 
 const alterFiles = await db.generateMigrations(migDir);

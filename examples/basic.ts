@@ -14,7 +14,7 @@ const User = Entity("users", {
 });
 
 const db = new Db(createSqliteDriver({ path: ":memory:" }));
-db.migrate();
+await db.migrate();
 
 await User.create({ name: "Alice", age: 30, country: "US" });
 await User.create({ name: "Bob", age: 25, country: "UK" });
@@ -65,5 +65,5 @@ console.log("Saved Dave, id:", dave.id);
 await dave.delete();
 console.log("Deleted Dave");
 
-db.close();
+await db.close();
 console.log("Done.");

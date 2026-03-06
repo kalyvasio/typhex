@@ -7,6 +7,7 @@ import type { Driver } from "../driver/types.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
 import { QueryBuilder } from "../orm/query-builder.js";
+import { whereColumnEq } from "../orm/query-helpers.js";
 import type { InferTable, InferInsert } from "./schema-inference.js";
 import type { RelationsMap } from "./relations.js";
 import type { TableDef, EntityBase } from "./types.js";
@@ -125,11 +126,16 @@ export function Entity<
     }
 
     static async findById(this: new (data?: any) => any, id: number, driverOverride?: Driver): Promise<any> {
-      return (this as any).query(driverOverride).findById(id);
+      const row = await (this as any).query(driverOverride).where(whereColumnEq(pk, id)).first();
+      return row ?? null;
     }
 
     static async create(this: new (data?: any) => any, data: any, driverOverride?: Driver): Promise<any> {
-      return (this as any).query(driverOverride).create(data as Record<string, unknown>);
+      const qb = (this as any).query(driverOverride);
+      const lastId = await qb.insert(data as Record<string, unknown>);
+      const inst = await qb.where(whereColumnEq(pk, lastId)).first();
+      if (!inst) throw new Error("create: insert succeeded but row not found");
+      return inst;
     }
 
     constructor(data?: Partial<InferTable<TSchema>>) {
@@ -158,7 +164,7 @@ export function Entity<
         const qb = new QueryBuilder(baseState(resolveDriver()));
         const set: Record<string, unknown> = {};
         for (const c of self._dirty) if (cols.includes(c)) set[c] = self[c];
-        await qb.updateByPk(self[pk], set);
+        await qb.where(whereColumnEq(pk, self[pk])).update(set);
         self._dirty = new Set();
         await runHook(self, "afterUpdate");
       }
@@ -169,7 +175,7 @@ export function Entity<
     async delete(): Promise<void> {
       const self = this as any;
       await runHook(self, "beforeDelete");
-      await new QueryBuilder(baseState(resolveDriver())).deleteByPk(self[pk]);
+      await new QueryBuilder(baseState(resolveDriver())).where(whereColumnEq(pk, self[pk])).delete();
       await runHook(self, "afterDelete");
     }
   }

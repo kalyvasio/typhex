@@ -21,7 +21,7 @@ describe("Db migration API (integration)", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("generateMigrations creates ordered .sql files for new entities", () => {
+  it("generateMigrations creates ordered .sql files for new entities", async () => {
     Entity("users", {
       id: "integer primary key autoincrement",
       name: "text not null",
@@ -33,8 +33,8 @@ describe("Db migration API (integration)", () => {
     });
 
     const db = new Db(createSqliteDriver({ path: ":memory:" }));
-    const files = db.generateMigrations(tmpDir);
-    db.close();
+    const files = await db.generateMigrations(tmpDir);
+    await db.close();
 
     expect(files.length).toBe(2);
 
@@ -55,61 +55,61 @@ describe("Db migration API (integration)", () => {
     });
 
     const db = new Db(createSqliteDriver({ path: ":memory:" }));
-    db.generateMigrations(tmpDir);
-    const result = db.runMigrations(tmpDir);
+    await db.generateMigrations(tmpDir);
+    const result = await db.runMigrations(tmpDir);
 
     expect(result.applied).toHaveLength(1);
     expect(result.applied[0]).toMatch(/add_accounts_table/);
 
-    const rows = db.getDriver().query(`SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`);
+    const rows = await db.getDriver().query(`SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`);
     expect(rows).toHaveLength(1);
 
-    db.close();
+    await db.close();
   });
 
-  it("generateMigrations returns empty when up to date", () => {
+  it("generateMigrations returns empty when up to date", async () => {
     Entity("tags", { id: "integer primary key", name: "text" });
     const db = new Db(createSqliteDriver({ path: ":memory:" }));
-    db.migrate();
+    await db.migrate();
 
-    const files = db.generateMigrations(tmpDir);
+    const files = await db.generateMigrations(tmpDir);
     expect(files).toHaveLength(0);
     expect(readdirSync(tmpDir)).toHaveLength(0);
-    db.close();
+    await db.close();
   });
 
-  it("generateMigrations detects added columns after initial migrate", () => {
+  it("generateMigrations detects added columns after initial migrate", async () => {
     Entity("users", { id: "integer primary key", name: "text" });
     const driver = createSqliteDriver({ path: ":memory:" });
     const db = new Db(driver);
-    db.migrate();
+    await db.migrate();
 
     clearRegistry();
     Entity("users", { id: "integer primary key", name: "text", age: "integer" });
 
-    const files = db.generateMigrations(tmpDir);
+    const files = await db.generateMigrations(tmpDir);
     expect(files).toHaveLength(1);
     expect(files[0].name).toMatch(/add_age_column_on_users$/);
     expect(files[0].sql).toContain("ADD COLUMN");
 
-    db.close();
+    await db.close();
   });
 
-  it("migrationStatus shows pending and applied", () => {
+  it("migrationStatus shows pending and applied", async () => {
     Entity("items", { id: "integer primary key", label: "text" });
     const db = new Db(createSqliteDriver({ path: ":memory:" }));
-    db.generateMigrations(tmpDir);
+    await db.generateMigrations(tmpDir);
 
-    const before = db.migrationStatus(tmpDir);
+    const before = await db.migrationStatus(tmpDir);
     expect(before.applied).toHaveLength(0);
     expect(before.pending).toHaveLength(1);
 
-    db.runMigrations(tmpDir);
-    const after = db.migrationStatus(tmpDir);
+    await db.runMigrations(tmpDir);
+    const after = await db.migrationStatus(tmpDir);
     expect(after.applied).toHaveLength(1);
     expect(after.pending).toHaveLength(0);
 
-    db.close();
+    await db.close();
   });
 
   it("migrate() orders tables by FK dependencies", async () => {
@@ -129,18 +129,18 @@ describe("Db migration API (integration)", () => {
     });
 
     const driver = createSqliteDriver({ path: ":memory:" });
-    driver.run("PRAGMA foreign_keys = ON");
+    await driver.run("PRAGMA foreign_keys = ON");
     const db = new Db(driver);
 
-    expect(() => db.migrate()).not.toThrow();
+    await expect(db.migrate()).resolves.not.toThrow();
 
-    const tables = (driver.query(
+    const tables = ((await driver.query(
       `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
-    ) as Array<{ name: string }>).map((r) => r.name);
+    )) as Array<{ name: string }>).map((r) => r.name);
     expect(tables).toContain("users");
     expect(tables).toContain("posts");
     expect(tables).toContain("comments");
 
-    db.close();
+    await db.close();
   });
 });

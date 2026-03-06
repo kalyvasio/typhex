@@ -24,36 +24,36 @@ describe("Entity()", () => {
     db = new Db(freshDriver());
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await db.close();
   });
 
   describe("factory", () => {
-    it("returns a constructable class with table metadata", () => {
+    it("returns a constructable class with table metadata", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       expect(User.table._table).toBe("users");
       expect(User.table._schema).toEqual(userSchema);
     });
 
-    it("constructor assigns column values from data", () => {
+    it("constructor assigns column values from data", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = new User({ name: "Alice", age: 30 });
       expect((u as any).name).toBe("Alice");
       expect((u as any).age).toBe(30);
     });
 
-    it("marks instances without pk as _isNew", () => {
+    it("marks instances without pk as _isNew", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = new User({ name: "Alice" });
       expect(u._isNew).toBe(true);
     });
 
-    it("marks instances with pk as not _isNew", () => {
+    it("marks instances with pk as not _isNew", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = new User({ id: 1, name: "Alice" } as any);
       expect(u._isNew).toBe(false);
     });
@@ -62,7 +62,7 @@ describe("Entity()", () => {
   describe("create()", () => {
     it("inserts a row and returns a hydrated instance", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = await User.create({ name: "Alice", age: 30 });
       expect((u as any).id).toBe(1);
       expect((u as any).name).toBe("Alice");
@@ -71,7 +71,7 @@ describe("Entity()", () => {
 
     it("auto-increments ids", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const a = await User.create({ name: "Alice", age: 30 });
       const b = await User.create({ name: "Bob", age: 25 });
       expect((a as any).id).toBe(1);
@@ -80,15 +80,15 @@ describe("Entity()", () => {
   });
 
   describe("query()", () => {
-    it("returns a QueryBuilder", () => {
+    it("returns a QueryBuilder", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       expect(User.query()).toBeInstanceOf(QueryBuilder);
     });
 
     it("toArray returns all rows as entity instances", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 25 });
       const all = await User.query().toArray();
@@ -99,7 +99,7 @@ describe("Entity()", () => {
 
     it("where filters rows", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 20 });
       const adults = await User.query().where((u) => u.age > 25).toArray();
@@ -109,7 +109,7 @@ describe("Entity()", () => {
 
     it("count returns number of matching rows", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 20 });
       expect(await User.query().count()).toBe(2);
@@ -118,7 +118,7 @@ describe("Entity()", () => {
 
     it("first returns single row or undefined", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       expect(await User.query().first()).toBeUndefined();
       await User.create({ name: "Alice", age: 30 });
       const first = await User.query().first();
@@ -128,7 +128,7 @@ describe("Entity()", () => {
 
     it("orderBy sorts results", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Charlie", age: 35 });
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 25 });
@@ -139,7 +139,7 @@ describe("Entity()", () => {
 
     it("limit restricts result count", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 25 });
       await User.create({ name: "Carol", age: 28 });
@@ -151,7 +151,7 @@ describe("Entity()", () => {
   describe("findById()", () => {
     it("returns instance when found", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       const found = await User.findById(1);
       expect(found).not.toBeNull();
@@ -161,7 +161,7 @@ describe("Entity()", () => {
 
     it("returns null when not found", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const found = await User.findById(999);
       expect(found).toBeNull();
     });
@@ -170,7 +170,7 @@ describe("Entity()", () => {
   describe("save()", () => {
     it("inserts when _isNew", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = new User({ name: "Alice", age: 30 });
       expect(u._isNew).toBe(true);
       await u.save();
@@ -181,7 +181,7 @@ describe("Entity()", () => {
 
     it("updates when dirty fields exist", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = await User.create({ name: "Alice", age: 30 });
       (u as any).name = "Alice Updated";
       u._dirty = new Set(["name"]);
@@ -192,7 +192,7 @@ describe("Entity()", () => {
 
     it("returns this for chaining", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = new User({ name: "Alice", age: 30 });
       const result = await u.save();
       expect(result).toBe(u);
@@ -202,7 +202,7 @@ describe("Entity()", () => {
   describe("delete()", () => {
     it("removes the row from the database", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       const u = await User.create({ name: "Alice", age: 30 });
       expect(await User.query().count()).toBe(1);
       await u.delete();
@@ -213,7 +213,7 @@ describe("Entity()", () => {
   describe("query-builder update/delete", () => {
     it("update modifies matching rows", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 25 });
       const changed = await User.query().where((u) => u.name === "Bob").update({ age: 26 });
@@ -224,7 +224,7 @@ describe("Entity()", () => {
 
     it("delete removes matching rows", async () => {
       const User = Entity("users", userSchema);
-      db.migrate();
+      await db.migrate();
       await User.create({ name: "Alice", age: 30 });
       await User.create({ name: "Bob", age: 25 });
       const deleted = await User.query().where((u) => u.name === "Bob").delete();
@@ -242,13 +242,13 @@ describe("Entity subclassing", () => {
     db = new Db(freshDriver());
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await db.close();
   });
 
   it("subclass instances have custom getters", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     class UserEntity extends Base {
       get displayName() {
@@ -262,7 +262,7 @@ describe("Entity subclassing", () => {
 
   it("query() hydrates rows as subclass instances", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     class UserEntity extends Base {
       get upper() {
@@ -278,7 +278,7 @@ describe("Entity subclassing", () => {
 
   it("findById hydrates as subclass", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     class UserEntity extends Base {
       get tag() { return `user:${(this as any).id}`; }
@@ -298,13 +298,13 @@ describe("lifecycle hooks", () => {
     db = new Db(freshDriver());
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await db.close();
   });
 
   it("beforeSave is called on save", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     let hookCalled = false;
     class UserEntity extends Base {
@@ -318,7 +318,7 @@ describe("lifecycle hooks", () => {
 
   it("afterSave is called after save", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     let hookCalled = false;
     class UserEntity extends Base {
@@ -332,7 +332,7 @@ describe("lifecycle hooks", () => {
 
   it("beforeCreate and afterCreate are called on insert", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     const calls: string[] = [];
     class UserEntity extends Base {
@@ -347,7 +347,7 @@ describe("lifecycle hooks", () => {
 
   it("beforeUpdate and afterUpdate are called on update", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     const calls: string[] = [];
     class UserEntity extends Base {
@@ -364,7 +364,7 @@ describe("lifecycle hooks", () => {
 
   it("beforeDelete and afterDelete are called on delete", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     const calls: string[] = [];
     class UserEntity extends Base {
@@ -379,7 +379,7 @@ describe("lifecycle hooks", () => {
 
   it("afterLoad is called by findById", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     let hookCalled = false;
     class UserEntity extends Base {
@@ -393,7 +393,7 @@ describe("lifecycle hooks", () => {
 
   it("afterLoad is called for query hydration", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     let calls = 0;
     class UserEntity extends Base {
@@ -410,7 +410,7 @@ describe("lifecycle hooks", () => {
 
   it("findById awaits async afterLoad", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     let loadedName = "";
     class UserEntity extends Base {
@@ -428,7 +428,7 @@ describe("lifecycle hooks", () => {
 
   it("query hydration awaits async afterLoad", async () => {
     const Base = Entity("users", userSchema);
-    db.migrate();
+    await db.migrate();
 
     const loaded: string[] = [];
     class UserEntity extends Base {

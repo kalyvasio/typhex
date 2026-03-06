@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src/orm/query-builder.js";
+import { whereColumnEq } from "../../src/orm/query-helpers.js";
 import type { Driver } from "../../src/driver/types.js";
 import type { IrNode, IrSelect } from "../../src/ir/types.js";
 import { isIrSelect } from "../../src/ir/types.js";
@@ -8,6 +9,7 @@ type MockEntity = { id?: number; name?: string; age: number; country: string };
 
 function createMockDriver(): Driver {
   return {
+    dialect: "sqlite",
     query: vi.fn().mockReturnValue([]),
     run: vi.fn().mockReturnValue({ lastID: 1, changes: 0 }),
     transaction: vi.fn((fn) => fn()),
@@ -272,7 +274,7 @@ describe("QueryBuilder", () => {
     });
   });
 
-  describe("findById", () => {
+  describe("where().first() (pk lookup)", () => {
     function newBuilderWithPk(d: Driver): QueryBuilder<MockEntity> {
       return new QueryBuilder<MockEntity>({
         tableName: "users",
@@ -290,19 +292,18 @@ describe("QueryBuilder", () => {
 
     it("returns row when found", async () => {
       (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: "Alice", age: 30 }]);
-      const row = await newBuilderWithPk(driver).findById(1);
+      const row = await newBuilderWithPk(driver).where(whereColumnEq("id", 1)).first();
       expect(row).toEqual({ id: 1, name: "Alice", age: 30 });
     });
 
-    it("returns null when not found", async () => {
+    it("returns undefined when not found", async () => {
       (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
-      const row = await newBuilderWithPk(driver).findById(999);
-      expect(row).toBeNull();
+      const row = await newBuilderWithPk(driver).where(whereColumnEq("id", 999)).first();
+      expect(row).toBeUndefined();
     });
-
   });
 
-  describe("create (QB)", () => {
+  describe("where().update() (pk update)", () => {
     function newBuilderWithPk(d: Driver): QueryBuilder<MockEntity> {
       return new QueryBuilder<MockEntity>({
         tableName: "users",
@@ -318,58 +319,25 @@ describe("QueryBuilder", () => {
       });
     }
 
-    it("inserts and re-fetches the row", async () => {
-      (driver.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 7, changes: 1 });
-      (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 7, name: "Bob", age: 25 }]);
-      const row = await newBuilderWithPk(driver).create({ name: "Bob", age: 25 });
-      expect(row).toEqual({ id: 7, name: "Bob", age: 25 });
-      expect(driver.run).toHaveBeenCalled();
-      expect(driver.query).toHaveBeenCalled();
-    });
-
-    it("throws when re-fetch returns empty", async () => {
-      (driver.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 1, changes: 1 });
-      (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
-      await expect(newBuilderWithPk(driver).create({ name: "Ghost" })).rejects.toThrow("row not found");
-    });
-  });
-
-  describe("updateByPk", () => {
-    function newBuilderWithPk(d: Driver): QueryBuilder<MockEntity> {
-      return new QueryBuilder<MockEntity>({
-        tableName: "users",
-        columnNames: ["id", "name", "age"],
-        driver: d,
-        pkColumn: "id",
-        whereIr: null,
-        whereParams: {},
-        orderBy: [],
-        limitNum: null,
-        offsetNum: null,
-        selectIr: null,
-      });
-    }
-
-    it("builds direct UPDATE ... WHERE pk = ? SQL", async () => {
+    it("builds UPDATE ... WHERE pk = ? SQL", async () => {
       (driver.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
-      const changes = await newBuilderWithPk(driver).updateByPk(1, { name: "Updated" });
+      const changes = await newBuilderWithPk(driver).where(whereColumnEq("id", 1)).update({ name: "Updated" });
       expect(changes).toBe(1);
       const [sql, params] = (driver.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('UPDATE "users"');
       expect(sql).toContain('"name" = ?');
-      expect(sql).toContain('WHERE "id" = ?');
+      expect(sql).toMatch(/"id"\s*=\s*\?/);
       expect(params).toEqual(["Updated", 1]);
     });
 
     it("returns 0 when set is empty", async () => {
-      const changes = await newBuilderWithPk(driver).updateByPk(1, {});
+      const changes = await newBuilderWithPk(driver).where(whereColumnEq("id", 1)).update({});
       expect(changes).toBe(0);
       expect(driver.run).not.toHaveBeenCalled();
     });
-
   });
 
-  describe("deleteByPk", () => {
+  describe("where().delete() (pk delete)", () => {
     function newBuilderWithPk(d: Driver): QueryBuilder<MockEntity> {
       return new QueryBuilder<MockEntity>({
         tableName: "users",
@@ -385,16 +353,15 @@ describe("QueryBuilder", () => {
       });
     }
 
-    it("builds direct DELETE ... WHERE pk = ? SQL", async () => {
+    it("builds DELETE ... WHERE pk = ? SQL", async () => {
       (driver.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
-      const changes = await newBuilderWithPk(driver).deleteByPk(5);
+      const changes = await newBuilderWithPk(driver).where(whereColumnEq("id", 5)).delete();
       expect(changes).toBe(1);
       const [sql, params] = (driver.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('DELETE FROM "users"');
-      expect(sql).toContain('WHERE "id" = ?');
+      expect(sql).toMatch(/"id"\s*=\s*\?/);
       expect(params).toEqual([5]);
     });
-
   });
 
   describe("patch", () => {

@@ -12,11 +12,6 @@ export default defineConfig({
       exclude: [
         "src/**/*.d.ts",
         "src/**/index.ts",
-        "src/index.ts",
-        "src/driver/sqlite.ts",
-        "src/driver/types.ts",
-        "src/transformer/**",
-        "src/orm/db.ts",
         "dist",
         "node_modules",
       ],

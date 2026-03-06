@@ -8,7 +8,7 @@
 
 import type { Driver } from "../driver/types.js";
 import { createDriver } from "../driver/factory.js";
-import { escapeIdentifier } from "../compiler/sql.js";
+import { getDialect } from "../dbs/index.js";
 import {
   setDefaultDriver,
   getRegisteredEntities,
@@ -72,7 +72,9 @@ export class Db {
   }
 
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
-  migrate(): void {
+  async migrate(): Promise<void> {
+    const dialect = getDialect(this.driver.dialect ?? "sqlite");
+    const esc = dialect.escapeIdentifier.bind(dialect);
     const entities = getRegisteredEntities();
     const deps = parseFkDependencies(entities);
     const names = entities.map((e) => e.table._table);
@@ -84,19 +86,21 @@ export class Db {
       if (!entity) continue;
       const { _schema: schema } = entity.table;
       const colDefs = Object.entries(schema)
-        .map(([c, def]) => `${escapeIdentifier(c)} ${def}`)
+        .map(([c, def]) => `${esc(c)} ${def}`)
         .join(", ");
-      this.driver.run(`CREATE TABLE IF NOT EXISTS ${escapeIdentifier(name)} (${colDefs})`);
+      await this.driver.run(`CREATE TABLE IF NOT EXISTS ${esc(name)} (${colDefs})`);
     }
   }
 
   /** Validate all registered entities against the database. Throws on mismatch. */
-  validate(): void {
+  async validate(): Promise<void> {
+    const dialect = getDialect(this.driver.dialect ?? "sqlite");
+    const esc = dialect.escapeIdentifier.bind(dialect);
     for (const entity of getRegisteredEntities()) {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = this.driver.query(`PRAGMA table_info(${escapeIdentifier(name)})`) as Array<{
+      const rows = (await this.driver.query(`PRAGMA table_info(${esc(name)})`)) as Array<{
         name: string;
         type: string;
         notnull: number;
@@ -124,20 +128,20 @@ export class Db {
    * Returns the generated files (also written to disk).
    * Uses driver.dialect for SQL generation.
    */
-  generateMigrations(dir = this.migrationsFolder): MigrationFile[] {
+  async generateMigrations(dir = this.migrationsFolder): Promise<MigrationFile[]> {
     const entities = getRegisteredEntities();
-    const files = generateMigrationFiles(this.driver, entities);
+    const files = await generateMigrationFiles(this.driver, entities);
     if (files.length > 0) writeMigrationFiles(dir, files);
     return files;
   }
 
   /** Apply pending migration scripts from the migrations directory. */
-  runMigrations(dir = this.migrationsFolder) {
+  async runMigrations(dir = this.migrationsFolder) {
     return runMig(this.driver, dir);
   }
 
   /** Show applied and pending migration status. */
-  migrationStatus(dir = this.migrationsFolder) {
+  async migrationStatus(dir = this.migrationsFolder) {
     return migStatus(this.driver, dir);
   }
 
@@ -145,8 +149,8 @@ export class Db {
     return this.driver;
   }
 
-  close(): void {
+  async close(): Promise<void> {
     setDefaultDriver(null);
-    this.driver.close();
+    await this.driver.close();
   }
 }

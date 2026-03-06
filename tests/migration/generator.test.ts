@@ -18,18 +18,18 @@ describe("generateMigrationFiles", () => {
     driver = createSqliteDriver({ path: ":memory:" });
   });
 
-  afterEach(() => {
-    driver.close();
+  afterEach(async () => {
+    await driver.close();
   });
 
-  it("returns empty array when schema is in sync", () => {
-    driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
-    const files = generateMigrationFiles(driver, [entity("users", { id: "integer primary key", name: "text" })]);
+  it("returns empty array when schema is in sync", async () => {
+    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
+    const files = await generateMigrationFiles(driver, [entity("users", { id: "integer primary key", name: "text" })]);
     expect(files).toHaveLength(0);
   });
 
-  it("generates add_table script for new entities", () => {
-    const files = generateMigrationFiles(driver, [
+  it("generates add_table script for new entities", async () => {
+    const files = await generateMigrationFiles(driver, [
       entity("users", { id: "integer primary key", name: "text not null" }),
     ]);
     expect(files).toHaveLength(1);
@@ -38,9 +38,9 @@ describe("generateMigrationFiles", () => {
     expect(files[0].sql).toContain('"users"');
   });
 
-  it("generates add_column script", () => {
-    driver.run(`CREATE TABLE "users" ("id" integer primary key)`);
-    const files = generateMigrationFiles(driver, [
+  it("generates add_column script", async () => {
+    await driver.run(`CREATE TABLE "users" ("id" integer primary key)`);
+    const files = await generateMigrationFiles(driver, [
       entity("users", { id: "integer primary key", email: "text" }),
     ]);
     expect(files).toHaveLength(1);
@@ -48,13 +48,13 @@ describe("generateMigrationFiles", () => {
     expect(files[0].sql).toContain("ADD COLUMN");
   });
 
-  it("orders tables by FK dependencies", () => {
+  it("orders tables by FK dependencies", async () => {
     const entities = [
       entity("comments", { id: "integer primary key", post_id: "integer references posts(id)" }),
       entity("posts", { id: "integer primary key", user_id: "integer references users(id)" }),
       entity("users", { id: "integer primary key", name: "text" }),
     ];
-    const files = generateMigrationFiles(driver, entities);
+    const files = await generateMigrationFiles(driver, entities);
     const names = files.map((f) => f.name);
     const usersIdx = names.findIndex((n) => n.includes("users"));
     const postsIdx = names.findIndex((n) => n.includes("posts"));
@@ -63,8 +63,8 @@ describe("generateMigrationFiles", () => {
     expect(postsIdx).toBeLessThan(commentsIdx);
   });
 
-  it("generates timestamped sequential names", () => {
-    const files = generateMigrationFiles(driver, [
+  it("generates timestamped sequential names", async () => {
+    const files = await generateMigrationFiles(driver, [
       entity("users", { id: "integer primary key" }),
       entity("posts", { id: "integer primary key" }),
     ]);
