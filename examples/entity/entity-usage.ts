@@ -1,9 +1,9 @@
 /**
  * Entity() usage: schema-inferred types, relations, lifecycle hooks, save/delete.
- * Run from examples/: npm run entity   or   npx tsx entity-usage.ts
+ * Run: npm run entity  or  npx tsx examples/entity/entity-usage.ts
  */
 
-import { Db, Entity, rel, createSqliteDriver } from "../src/index.js";
+import { Db, Entity, rel, createSqliteDriver } from "../../src/index.js";
 
 const User = Entity("users", {
   id: "integer primary key autoincrement",
@@ -52,7 +52,7 @@ class PostEntity extends Post {
 const db = new Db(createSqliteDriver({ path: ":memory:" }));
 await db.migrate();
 
-const alice = await User.create({
+const alice = await User.query().insert({
   name: "Alice",
   email: "alice@example.com",
   age: 30,
@@ -60,20 +60,20 @@ const alice = await User.create({
 });
 console.log("Created user:", alice.name, "id:", alice.id);
 
-const bob = await User.create({
+const bob = await User.query().insert({
   name: "Bob",
   age: 25,
   createdAt: new Date(),
 });
 
-const post1 = await Post.create({
+const post1 = await Post.query().insert({
   title: "First post",
   body: "Hello world.",
   authorId: alice.id!,
   published: true,
   createdAt: new Date(),
 });
-const post2 = await Post.create({
+const post2 = await Post.query().insert({
   title: "Draft",
   body: "Work in progress...",
   authorId: bob.id!,
@@ -94,7 +94,7 @@ console.log("user displayname:", user?.displayName ?? "n/a");
 const firstPost = await Post.query().where((p) => p.published === true).first();
 console.log("First published post:", firstPost?.title ?? "none");
 
-const found = await User.findById(alice.id!);
+const found = await User.query().findByPk(alice.id!);
 console.log("Found by id:", found?.name ?? "null");
 
 const newUser = new UserEntity({
@@ -103,7 +103,7 @@ const newUser = new UserEntity({
   age: 28,
   createdAt: new Date(),
 });
-await newUser.save();
+await newUser.query().save();
 console.log("Saved new user id:", newUser.id);
 
 await db.close();

@@ -1,14 +1,12 @@
 /**
  * PostgreSQL example. Requires a running PostgreSQL instance.
- *
- * Run with: npx tsx examples/postgres.ts
+ * Run: npx tsx examples/postgres/postgres.ts
  *
  * Set connection via env:
  *   TYPHEX_POSTGRES_URL=postgresql://user:pass@localhost:5432/mydb
- *   or use host, port, database, user, password options
  */
 
-import { Db, Entity, createPostgresDriver } from "../src/index.js";
+import { Db, Entity, createPostgresDriver } from "../../src/index.js";
 
 const User = Entity("pg_users", {
   id: "SERIAL PRIMARY KEY",
@@ -25,9 +23,9 @@ const db = new Db(driver);
 
 await db.migrate();
 
-await User.create({ name: "Alice", age: 30, country: "US" });
-await User.create({ name: "Bob", age: 25, country: "UK" });
-await User.create({ name: "Carol", age: 28, country: "US" });
+await User.query().insert({ name: "Alice", age: 30, country: "US" });
+await User.query().insert({ name: "Bob", age: 25, country: "UK" });
+await User.query().insert({ name: "Carol", age: 28, country: "US" });
 
 const adults = await User.query().where((u) => u.age > 18).toArray();
 console.log("Adults:", adults);
@@ -70,10 +68,10 @@ const updated = await User.query()
 console.log("Updated rows:", updated);
 
 const dave = new User({ name: "Dave", age: 35, country: "US" });
-await dave.save();
+await dave.query().save();
 console.log("Saved Dave, id:", dave.id);
 
-await dave.delete();
+await dave.query().delete();
 console.log("Deleted Dave");
 
 await db.close();

@@ -20,3 +20,21 @@ export function whereColumnEq(
     right: { kind: "const", value },
   };
 }
+
+/** Build IR for: column IN array. Used for batch relation loading. */
+export function whereColumnIn(
+  column: string,
+  values: unknown[],
+  param = DEFAULT_ROW_PARAM
+): IrNode {
+  return {
+    kind: "in",
+    left: { kind: "member", param, path: [column] },
+    right: { kind: "const", value: values },
+  };
+}
+
+/** Combine two IR nodes with AND. Used when relation has both base filter and user where. */
+export function whereAnd(left: IrNode, right: IrNode): IrNode {
+  return { kind: "binary", op: "&&", left, right };
+}

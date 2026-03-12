@@ -54,7 +54,7 @@ describe("Db", () => {
       });
       const db = new Db(freshDriver());
       await db.migrate();
-      await User.create({ name: "Alice" });
+      await User.query().insert({ name: "Alice" });
       expect(await User.query().count()).toBe(1);
       await db.close();
     });
@@ -67,7 +67,7 @@ describe("Db", () => {
       const db = new Db(freshDriver());
       await db.migrate();
       await db.migrate();
-      await User.create({ name: "Alice" });
+      await User.query().insert({ name: "Alice" });
       expect(await User.query().count()).toBe(1);
       await db.close();
     });

@@ -48,17 +48,18 @@ describe("dbs/postgres", () => {
       expect(result.params).toEqual([18]);
     });
 
-    it("compileInsert produces INSERT with RETURNING for pk", () => {
-      const { sql, params } = postgresDialect.compileInsert(
+    it("compileInsert produces INSERT with RETURNING * and returningRow", () => {
+      const result = postgresDialect.compileInsert(
         "users",
         ["name", "age"],
         ["Alice", 30],
         "id"
       );
-      expect(sql).toContain('INSERT INTO "users"');
-      expect(sql).toContain("$1");
-      expect(sql).toContain("RETURNING \"id\"");
-      expect(params).toEqual(["Alice", 30]);
+      expect(result.sql).toContain('INSERT INTO "users"');
+      expect(result.sql).toContain("$1");
+      expect(result.sql).toContain("RETURNING *");
+      expect(result.params).toEqual(["Alice", 30]);
+      expect(result.returningRow).toBe(true);
     });
 
     it("compileCount produces SELECT COUNT", () => {
@@ -187,7 +188,7 @@ describe("dbs/postgres", () => {
           await driver.run('DROP TABLE IF EXISTS "pg_test_users"');
           await db.migrate();
 
-          const u = await User.create({ name: "Alice", age: 30 });
+          const u = await User.query().insert({ name: "Alice", age: 30 });
           expect(u.id).toBe(1);
 
           const found = await User.query().where((u) => u.name === "Alice").first();

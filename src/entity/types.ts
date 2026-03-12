@@ -1,9 +1,11 @@
 /**
- * TableDef (serializable table descriptor) and EntityBase (instance interface).
+ * TableDef (serializable table descriptor) and EntityBase.
  */
 
 import type { InferTable, InferInsert } from "./schema-inference.js";
 import type { RelationsMap } from "./relations.js";
+import type { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
+import type { Driver } from "../driver/types.js";
 
 export interface TableDef<
   TSchema extends Record<string, string>,
@@ -20,16 +22,5 @@ export interface EntityBase {
   _isNew: boolean;
   _dirty: ReadonlySet<string>;
 
-  save(): Promise<this>;
-  delete(): Promise<void>;
-
-  beforeSave?(): void | Promise<void>;
-  afterSave?(): void | Promise<void>;
-  beforeCreate?(): void | Promise<void>;
-  afterCreate?(): void | Promise<void>;
-  beforeUpdate?(): void | Promise<void>;
-  afterUpdate?(): void | Promise<void>;
-  afterLoad?(): void | Promise<void>;
-  beforeDelete?(): void | Promise<void>;
-  afterDelete?(): void | Promise<void>;
+  query(driver?: Driver): SingleRowQueryBuilder<this>;
 }

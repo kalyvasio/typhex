@@ -6,6 +6,7 @@
 export type SQLTypeMap = {
   integer: number;
   int: number;
+  serial: number;
   smallint: number;
   tinyint: number;
   real: number;
@@ -27,6 +28,7 @@ export type SQLTypeMap = {
   json: unknown;
   jsonb: unknown;
   bigint: bigint;
+  bigserial: bigint;
 };
 
 /** Remove parenthesized part e.g. varchar(255) → varchar */
@@ -51,6 +53,7 @@ export type IsGenerated<S extends string> =
   Lowercase<S> extends `${string}autoincrement${string}` ? true
   : Lowercase<S> extends `${string}auto_increment${string}` ? true
   : Lowercase<S> extends `${string}generated${string}` ? true
+  : Lowercase<ExtractSQLBase<S>> extends "serial" | "bigserial" ? true
   : false;
 
 /** Column has DEFAULT in schema → can be omitted on INSERT */
@@ -60,17 +63,26 @@ export type HasDefault<S extends string> =
 export type InferColumnType<S extends string> =
   IsNotNull<S> extends true ? SQLToTS<S> : SQLToTS<S> | null;
 
-/** Strip readonly from all properties (const TSchema can make inferred types readonly). */
-type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+/** Force TypeScript to expand an intersection/mapped type into a flat object for readable tooltips. */
+export type Flatten<T> = { [K in keyof T]: T[K] } & {};
+
+/** Mutable view of T; used so instance/row types display as writable property types (e.g. id: number) not schema strings. */
+export type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+
+/** Materialized field types from schema strings (id: number, name: string, etc.). */
+export type Materialized<T extends Record<string, string>> = Mutable<{
+  readonly [K in keyof T]: InferColumnType<T[K]>;
+}>;
+
+/** Accept either schema literals or already-materialized shapes. */
+export type MaterializeShape<T extends Record<string, unknown>> =
+  T extends Record<string, string> ? Materialized<T> : Mutable<T>;
 
 /**
  * Inferred row type from schema: one type per column, all writable.
- * Represents a *full* row (all columns). When you select specific columns, the runtime
- * result has only those keys; the type system could use Pick<InferTable<TSchema>, "id" | "name">
- * for that in the future.
  */
-export type InferTable<T extends Record<string, string>> = Mutable<{
-  [K in keyof T]: InferColumnType<T[K]>;
+export type InferTable<T extends Record<string, string>> = Flatten<{
+  -readonly [K in keyof T]: InferColumnType<T[K]>;
 }>;
 
 /** Column can be omitted on INSERT (generated, nullable, or has default). */
@@ -83,7 +95,7 @@ type OptionalOnInsert<S extends string> =
 /**
  * Shape for INSERT / create(): generated, nullable, and default columns are optional.
  */
-export type InferInsert<T extends Record<string, string>> = Mutable<
-  { [K in keyof T as OptionalOnInsert<T[K]> extends true ? K : never]?: InferColumnType<T[K]> } &
-  { [K in keyof T as OptionalOnInsert<T[K]> extends true ? never : K]: InferColumnType<T[K]> }
+export type InferInsert<T extends Record<string, string>> = Flatten<
+  { -readonly [K in keyof T as OptionalOnInsert<T[K]> extends true ? K : never]?: InferColumnType<T[K]> } &
+  { -readonly [K in keyof T as OptionalOnInsert<T[K]> extends true ? never : K]: InferColumnType<T[K]> }
 >;

@@ -15,6 +15,8 @@ import type {
   IrIn,
   IrCall,
   IrSelect,
+  IrSelectRelation,
+  IrOrderBy,
 } from "../ir/types.js";
 
 type AcornNode = acorn.Node;
@@ -71,9 +73,10 @@ export function parseArrowToIrSelect(
     exprSrc = exprSrc.slice(1, -1);
   }
 
+  const fullSrc = `(${exprSrc})`;
   let ast: { body: Array<{ expression?: AcornNode }> };
   try {
-    ast = acorn.parse(`(${exprSrc})`, { ecmaVersion: "latest" }) as typeof ast;
+    ast = acorn.parse(fullSrc, { ecmaVersion: "latest", locations: true }) as typeof ast;
   } catch {
     return null;
   }
@@ -84,6 +87,7 @@ export function parseArrowToIrSelect(
   const obj = expr as AcornNode & { properties: AcornNode[] };
   const paths: string[][] = [];
   const aliases: string[] = [];
+  const relations: IrSelectRelation[] = [];
 
   for (const raw of obj.properties) {
     const prop = raw as AcornNode & {
@@ -103,15 +107,154 @@ export function parseArrowToIrSelect(
     const val = prop.value;
     if (!val) return null;
 
-    const resolved = resolveMemberFromAcorn(val as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
-    if (!resolved || resolved.path.length === 0) return null;
+    const valType = (val as { type: string }).type;
 
-    paths.push(resolved.path);
-    aliases.push(keyName);
+    if (valType === "ObjectExpression") {
+      const sub = parseRelationSubSelect(val as AcornNode & { properties: AcornNode[] }, paramName);
+      if (!sub) return null;
+      relations.push({ name: sub.relation, outputKey: keyName, subPaths: sub.subPaths });
+    } else if (valType === "CallExpression") {
+      const rel = parseRelationQueryChain(val as AcornNode & { callee: AcornNode; arguments: AcornNode[] }, paramName, keyName, fullSrc);
+      if (!rel) return null;
+      relations.push(rel);
+    } else {
+      const resolved = resolveMemberFromAcorn(val as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
+      if (!resolved || resolved.path.length === 0) return null;
+      paths.push(resolved.path);
+      aliases.push(keyName);
+    }
   }
 
-  if (paths.length === 0) return null;
-  return { param: paramName, paths, aliases };
+  if (paths.length === 0 && relations.length === 0) return null;
+  const result: IrSelect = { param: paramName, paths, aliases };
+  if (relations.length > 0) result.relations = relations;
+  return result;
+}
+
+/** Parse nested object like { id: p.author.id, name: p.author.name } → relation "author" with subPaths. */
+function parseRelationSubSelect(
+  obj: { properties: AcornNode[] },
+  paramName: string
+): { relation: string; subPaths: string[][] } | null {
+  const subPaths: string[][] = [];
+  let relation: string | null = null;
+
+  for (const raw of obj.properties) {
+    const prop = raw as AcornNode & {
+      type: string;
+      key?: AcornNode & { name?: string };
+      value?: AcornNode;
+      computed?: boolean;
+    };
+    if (prop.type !== "Property" || prop.computed) return null;
+
+    const keyName = prop.key?.name ?? (prop.key as { value?: string })?.value;
+    if (typeof keyName !== "string") return null;
+
+    const val = prop.value;
+    if (!val) return null;
+
+    const resolved = resolveMemberFromAcorn(val as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
+    if (!resolved || resolved.path.length < 2) return null;
+
+    const rel = resolved.path[0];
+    const subPath = resolved.path.slice(1);
+    if (relation !== null && relation !== rel) return null;
+    relation = rel;
+    subPaths.push(subPath);
+  }
+
+  if (!relation || subPaths.length === 0) return null;
+  return { relation, subPaths };
+}
+
+const RELATION_QUERY_METHODS = new Set(["query", "where", "orderBy", "limit", "offset", "select"]);
+
+/** Parse relation.query().where().orderBy().limit().offset().select() chain → IrSelectRelation. */
+function parseRelationQueryChain(
+  node: AcornNode & { type: string; callee: AcornNode; arguments: AcornNode[] },
+  parentParamName: string,
+  outputKey: string,
+  source: string
+): IrSelectRelation | null {
+  const methods: { name: string; args: AcornNode[] }[] = [];
+  let current: AcornNode | null = node;
+
+  while (current && (current as { type: string }).type === "CallExpression") {
+    const call = current as AcornNode & { callee: AcornNode & { type: string; object?: AcornNode; property?: AcornNode & { name?: string } }; arguments: AcornNode[] };
+    const callee = call.callee as AcornNode & { type: string; object?: AcornNode; property?: AcornNode & { name?: string } };
+    if (callee.type !== "MemberExpression") return null;
+    const prop = callee.property as AcornNode & { name?: string };
+    const methodName = prop?.name;
+    if (!methodName || !RELATION_QUERY_METHODS.has(methodName)) return null;
+    methods.push({ name: methodName, args: call.arguments ?? [] });
+    current = (callee as { object?: AcornNode }).object ?? null;
+  }
+
+  if (!current || (current as { type: string }).type !== "MemberExpression") return null;
+  const resolved = resolveMemberFromAcorn(current as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [parentParamName]);
+  if (!resolved || resolved.path.length !== 1) return null;
+
+  const relation = resolved.path[0];
+  const result: IrSelectRelation = { name: relation, outputKey };
+
+  for (const m of methods) {
+    if (m.name === "query") {
+      if (m.args.length !== 0) return null;
+    } else if (m.name === "where") {
+      if (m.args.length !== 1 || (m.args[0] as { type: string }).type !== "ArrowFunctionExpression") return null;
+      const arg = m.args[0] as AcornNode & { start?: number; end?: number };
+      const argSrc = typeof arg.start === "number" && typeof arg.end === "number" ? source.slice(arg.start, arg.end) : null;
+      if (!argSrc) return null;
+      try {
+        const whereFn = new Function("return " + argSrc)();
+        const paramNames = inferParamNames(argSrc);
+        const whereIr = parseArrowToIr(whereFn, { paramNames });
+        result.whereIr = whereIr;
+        result.whereParams = {};
+      } catch {
+        return null;
+      }
+    } else if (m.name === "orderBy") {
+      if (m.args.length < 1 || m.args.length > 2) return null;
+      const col = (m.args[0] as AcornNode & { type: string; value?: string }).type === "Literal"
+        ? String((m.args[0] as { value?: string }).value)
+        : null;
+      if (!col) return null;
+      const dir = m.args.length === 2 && (m.args[1] as { value?: string }).value === "desc" ? "desc" : "asc";
+      result.orderBy = result.orderBy ?? [];
+      result.orderBy.push({ param: "u", path: [col], direction: dir });
+    } else if (m.name === "limit") {
+      if (m.args.length !== 1) return null;
+      const n = (m.args[0] as AcornNode & { type: string; value?: number }).type === "Literal"
+        ? Number((m.args[0] as { value?: number }).value)
+        : NaN;
+      if (!Number.isFinite(n) || n < 0) return null;
+      result.limitNum = Math.floor(n);
+    } else if (m.name === "offset") {
+      if (m.args.length !== 1) return null;
+      const n = (m.args[0] as AcornNode & { type: string; value?: number }).type === "Literal"
+        ? Number((m.args[0] as { value?: number }).value)
+        : NaN;
+      if (!Number.isFinite(n) || n < 0) return null;
+      result.offsetNum = Math.floor(n);
+    } else if (m.name === "select") {
+      if (m.args.length !== 1 || (m.args[0] as { type: string }).type !== "ArrowFunctionExpression") return null;
+      const arg = m.args[0] as AcornNode & { start?: number; end?: number };
+      const argSrc = typeof arg.start === "number" && typeof arg.end === "number" ? source.slice(arg.start, arg.end) : null;
+      if (!argSrc) return null;
+      try {
+        const selectFn = new Function("return " + argSrc)();
+        const sub = parseArrowToIrSelect(selectFn);
+        if (!sub || !sub.paths.length) return null;
+        result.subPaths = sub.paths;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------

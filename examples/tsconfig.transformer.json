@@ -8,6 +8,6 @@
     "paths": { "typhex": ["../dist/index.d.ts"] },
     "plugins": [{ "transform": "../dist/transformer/index.js" }]
   },
-  "include": ["with-transformer.ts"],
+  "include": ["transformer/with-transformer.ts"],
   "exclude": ["node_modules"]
 }

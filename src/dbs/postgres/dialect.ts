@@ -179,13 +179,12 @@ export const postgresDialect: DialectImpl = {
   compileInsert(table: string, columns: string[], values: unknown[], pk?: string): CompileResult {
     const esc = quoteId;
     if (columns.length === 0) {
-      const sql = pk ? `INSERT INTO ${esc(table)} DEFAULT VALUES RETURNING ${esc(pk)}` : `INSERT INTO ${esc(table)} DEFAULT VALUES`;
-      return { sql, params: [] };
+      const returning = pk ? " RETURNING *" : "";
+      return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES${returning}`, params: [], returningRow: !!pk };
     }
     const ph = columns.map((_, i) => `$${i + 1}`).join(", ");
-    let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})`;
-    if (pk) sql += ` RETURNING ${esc(pk)}`;
-    return { sql, params: values };
+    const sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})${pk ? " RETURNING *" : ""}`;
+    return { sql, params: values, returningRow: !!pk };
   },
 
   compileCount(table: string, whereSql: string, whereParams: unknown[]): CompileResult {

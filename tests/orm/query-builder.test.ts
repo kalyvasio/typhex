@@ -20,8 +20,9 @@ function createMockDriver(): Driver {
 function newBuilder(driver: Driver, columnNames = ["id", "name", "age"]): QueryBuilder<MockEntity> {
   return new QueryBuilder<MockEntity>({
     tableName: "users",
-    columnNames,
+    columnNames: [...columnNames, "country"],
     driver,
+    pkColumn: "id",
     whereIr: null,
     whereParams: {},
     orderBy: [],
@@ -170,6 +171,7 @@ describe("QueryBuilder", () => {
 
   describe("insert", () => {
     it("builds INSERT and calls driver.run", async () => {
+      (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: "Alice", age: null, country: null }]);
       await newBuilder(driver).insert({ name: "Alice" });
       expect(driver.run).toHaveBeenCalled();
       const [sql, params] = (driver.run as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -177,13 +179,16 @@ describe("QueryBuilder", () => {
       expect(params).toContain("Alice");
     });
 
-    it("returns lastID from driver", async () => {
+    it("returns hydrated instance with id from driver", async () => {
       (driver.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 42, changes: 1 });
-      const id = await newBuilder(driver).insert({ name: "Bob" });
-      expect(id).toBe(42);
+      (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 42, name: "Bob", age: null, country: null }]);
+      const row = await newBuilder(driver).insert({ name: "Bob" });
+      expect(row).toBeDefined();
+      expect((row as MockEntity).id).toBe(42);
     });
 
     it("uses DEFAULT VALUES when all fields are undefined", async () => {
+      (driver.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: null, age: null, country: null }]);
       await newBuilder(driver).insert({ id: undefined, name: undefined, age: undefined } as unknown as Record<string, unknown>);
       const [sql, params] = (driver.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("DEFAULT VALUES");
