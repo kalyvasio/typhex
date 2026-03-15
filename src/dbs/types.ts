@@ -4,6 +4,7 @@
 
 import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
+import type { RelationJoinInfo } from "../orm/relation-joins.js";
 
 export type Dialect = "sqlite" | "postgres";
 
@@ -20,6 +21,10 @@ export interface CompileResult {
 export interface CompileOptions {
   tableAlias?: string;
   paramToAlias?: Record<string, string>;
+  /** Map "param.relationKey" (e.g. "p.author") to joined table alias (e.g. "t1") */
+  relationPathToAlias?: Record<string, string>;
+  /** One-to-many relations in where: compile as EXISTS. Key "param.relationKey" -> EXISTS subquery info. */
+  oneToManyExists?: Record<string, { targetTable: string; fkColumn: string; mainPk: string; alias: string }>;
 }
 
 export interface DbColumnInfo {
@@ -55,6 +60,7 @@ export interface CompileSelectOpts {
   orderBySql: string;
   limitNum: number | null;
   offsetNum: number | null;
+  joinsSql?: string;
 }
 
 /** Resolve __param sentinels to actual values. Shared by all dialects. */
@@ -90,10 +96,11 @@ export interface DialectImpl {
   compileSelectList(select: IrSelect | null, columns: string[], opts: CompileOptions): string;
   toColumnDef(def: ColumnDef): string;
   compileInsert(table: string, columns: string[], values: unknown[], pk?: string): CompileResult;
-  compileCount(table: string, whereSql: string, whereParams: unknown[]): CompileResult;
+  compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult;
   compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult;
   compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult;
   compileSelect(opts: CompileSelectOpts): CompileResult;
+  buildJoinClause(join: RelationJoinInfo): string;
 }
 
 /** DB-specific migrations: diff, DDL generation, and runner support. */

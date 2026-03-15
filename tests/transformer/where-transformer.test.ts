@@ -48,4 +48,8 @@ describe("where transformer", () => {
   it("transforms (u) => u.id === 1 simple equality", () => {
     expect(transform("users.where((u) => u.id === 1);")).toMatchSnapshot();
   });
+
+  it("transforms (d) => d.employees.some((e) => e.name === 'Alice')", () => {
+    expect(transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));")).toMatchSnapshot();
+  });
 });

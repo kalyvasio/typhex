@@ -14,6 +14,7 @@ import type {
   IrParam,
   IrIn,
   IrCall,
+  IrExists,
   IrSelect,
   IrSelectRelation,
   IrOrderBy,
@@ -88,16 +89,24 @@ export function parseArrowToIrSelect(
   const paths: string[][] = [];
   const aliases: string[] = [];
   const relations: IrSelectRelation[] = [];
+  let rest = false;
 
   for (const raw of obj.properties) {
     const prop = raw as AcornNode & {
       type: string;
+      argument?: AcornNode & { name?: string };
       key?: AcornNode & { name?: string; value?: string };
       value?: AcornNode;
       computed?: boolean;
       shorthand?: boolean;
     };
-    if (prop.type === "SpreadElement") return null;
+    if (prop.type === "SpreadElement") {
+      if (prop.argument && (prop.argument as { type?: string; name?: string }).type === "Identifier" && (prop.argument as { name?: string }).name === paramName) {
+        rest = true;
+        continue;
+      }
+      return null;
+    }
     if (prop.type !== "Property") return null;
     if (prop.computed) return null;
 
@@ -125,9 +134,10 @@ export function parseArrowToIrSelect(
     }
   }
 
-  if (paths.length === 0 && relations.length === 0) return null;
+  if (paths.length === 0 && relations.length === 0 && !rest) return null;
   const result: IrSelect = { param: paramName, paths, aliases };
   if (relations.length > 0) result.relations = relations;
+  if (rest) result.rest = true;
   return result;
 }
 
@@ -379,6 +389,33 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
       };
       if (callee.type !== "MemberExpression") throw new Error("Unsupported call expression");
       const method = callee.property?.name;
+      if (method === "some" && n.arguments?.length === 1) {
+        const receiverResolved = resolveMemberFromAcorn(callee.object as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, params);
+        if (receiverResolved && receiverResolved.path.length >= 1) {
+          const arg = n.arguments[0] as AcornNode & { type: string; params?: AcornNode[]; body?: AcornNode };
+          if (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression") {
+            const innerParam = (arg.params?.[0] as AcornNode & { name?: string })?.name ?? "e";
+            const innerBody = arg.body as AcornNode & { type: string; body?: AcornNode[] };
+            let innerExpr: AcornNode;
+            if (innerBody?.type === "BlockStatement" && innerBody.body?.[0]) {
+              const ret = innerBody.body[0] as { expression?: AcornNode };
+              if (!ret.expression) throw new Error("Unsupported .some() callback: need return");
+              innerExpr = ret.expression;
+            } else {
+              innerExpr = innerBody;
+            }
+            if (!innerExpr) throw new Error("Unsupported .some() callback body");
+            const innerWhere = walk(innerExpr, [innerParam], paramKeys);
+            return {
+              kind: "exists",
+              rootParam: receiverResolved.param,
+              relationKey: receiverResolved.path[0],
+              innerParam,
+              innerWhere,
+            } as IrExists;
+          }
+        }
+      }
       if (!method || !ALLOWED_METHODS.has(method))
         throw new Error("Unsupported method: " + method);
       return {

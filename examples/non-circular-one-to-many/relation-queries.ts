@@ -15,6 +15,7 @@ await Employee.query().insert({ name: "Alice", departmentId: engineering.id });
 await Employee.query().insert({ name: "Bob", departmentId: engineering.id });
 await Employee.query().insert({ name: "Carol", departmentId: sales.id });
 
+console.log("\n=== select with one-to-many relation ===");
 const departmentsWithEmployees = await Department.query()
   .select(d => ({
     id: d.id,

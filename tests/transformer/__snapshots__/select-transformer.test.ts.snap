@@ -10,6 +10,11 @@ exports[`select transformer > transforms ({ id, name }) => ({ id, name }) to IR 
 "
 `;
 
+exports[`select transformer > transforms (c) => ({ ...c, company: c.company }) to IR object with rest and relation 1`] = `
+"contacts.select({ param: "c", paths: [["company"]], aliases: ["company"], rest: true });
+"
+`;
+
 exports[`select transformer > transforms (u) => ({ id: u.id }) single column 1`] = `
 "users.select({ param: "u", paths: [["id"]], aliases: ["id"] });
 "

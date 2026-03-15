@@ -10,7 +10,8 @@ export type IrNode =
   | IrConst
   | IrParam
   | IrCall
-  | IrIn;
+  | IrIn
+  | IrExists;
 
 export interface IrBinary {
   kind: "binary";
@@ -47,6 +48,15 @@ export interface IrIn {
   kind: "in";
   left: IrNode;
   right: IrNode; // IrConst with array value or IrParam
+}
+
+/** EXISTS subquery for one-to-many: relation.some(e => predicate). */
+export interface IrExists {
+  kind: "exists";
+  rootParam: string;
+  relationKey: string;
+  innerParam: string;
+  innerWhere: IrNode;
 }
 
 export interface IrCall {
@@ -102,7 +112,8 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "const" ||
     k === "param" ||
     k === "in" ||
-    k === "call"
+    k === "call" ||
+    k === "exists"
   );
 }
 

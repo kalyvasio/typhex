@@ -89,6 +89,48 @@ describe("dbs/sqlite", () => {
       expect(result.params).toEqual([18]);
     });
 
+    it("compiles WHERE with relation path when relationPathToAlias provided", () => {
+      const ir = {
+        kind: "binary" as const,
+        op: "===" as const,
+        left: { kind: "member" as const, param: "c", path: ["company", "name"] },
+        right: { kind: "const" as const, value: "Acme" },
+      };
+      const result = sqliteDialect.compileWhere(ir, {
+        relationPathToAlias: { "c.company": "t1" },
+      });
+      expect(result.sql).toContain('"t1"."name"');
+      expect(result.params).toEqual(["Acme"]);
+    });
+
+    it("compileSelect emits LEFT JOIN for relation joins", () => {
+      const result = sqliteDialect.compileSelect({
+        table: "contacts",
+        selectList: '"t0"."id", "t1"."name" AS "company_name"',
+        whereSql: "1=1",
+        whereParams: [],
+        orderBySql: "",
+        limitNum: null,
+        offsetNum: null,
+        joinsSql: ' LEFT JOIN "companies" AS "t1" ON "t0"."companyId" = "t1"."id"',
+      });
+      expect(result.sql).toContain("LEFT JOIN");
+      expect(result.sql).toContain('"companies"');
+    });
+
+    it("compileSelectList uses relation alias for relation paths", () => {
+      const select = {
+        param: "c",
+        paths: [["id"], ["company", "name"]] as string[][],
+        aliases: ["id", "company_name"],
+      };
+      const result = sqliteDialect.compileSelectList(select, ["id", "name", "companyId"], {
+        relationPathToAlias: { "c.company": "t1" },
+      });
+      expect(result).toContain('"t1"."name"');
+      expect(result).toContain("company_name");
+    });
+
     it("expandPlaceholders expands IN arrays to multiple ?", () => {
       const sql = '("t0"."id" IN (?))';
       const resolved = [[10, 20]];

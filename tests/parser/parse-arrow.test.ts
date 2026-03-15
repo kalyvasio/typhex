@@ -71,6 +71,23 @@ describe("parser/parse-arrow", () => {
     }
   });
 
+  it("parses relation.some() for one-to-many EXISTS", () => {
+    const fn = (d: { employees: { name: string }[] }) => d.employees.some((e) => e.name === "Alice");
+    const ir = parseArrowToIr(fn, { paramNames: ["d"] });
+    expect(ir.kind).toBe("exists");
+    if (ir.kind === "exists") {
+      expect(ir.rootParam).toBe("d");
+      expect(ir.relationKey).toBe("employees");
+      expect(ir.innerParam).toBe("e");
+      expect(ir.innerWhere.kind).toBe("binary");
+      if (ir.innerWhere.kind === "binary") {
+        expect(ir.innerWhere.op).toBe("===");
+        expect((ir.innerWhere.left as { path: string[] }).path).toEqual(["name"]);
+        expect((ir.innerWhere.right as { value: unknown }).value).toBe("Alice");
+      }
+    }
+  });
+
   it("parses includes call", () => {
     const fn = (u: { name: string }) => u.name.includes("al");
     const ir = parseArrowToIr(fn);
@@ -173,6 +190,15 @@ describe("parser/parseArrowToIrSelect", () => {
     expect(ir?.param).toBe("u");
     expect(ir?.paths).toEqual([["id"]]);
     expect(ir?.aliases).toEqual(["userId"]);
+  });
+
+  it("parses (c) => ({ ...c, company: c.company }) with spread of param", () => {
+    const fn = (c: { id: number; name: string; company: unknown }) => ({ ...c, company: c.company });
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir?.param).toBe("c");
+    expect(ir?.paths).toEqual([["company"]]);
+    expect(ir?.aliases).toEqual(["company"]);
+    expect(ir?.rest).toBe(true);
   });
 
   it("parses nested relation select (p) => ({ id: p.id, author: { id: p.author.id, name: p.author.name } })", () => {

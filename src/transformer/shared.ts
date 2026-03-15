@@ -177,8 +177,14 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       props.push(f.createPropertyAssignment("method", f.createStringLiteral(ir.method)));
       props.push(f.createPropertyAssignment("receiver", irNodeToTsLiteral(ir.receiver)));
       props.push(f.createPropertyAssignment("args",
-        f.createArrayLiteralExpression(ir.args.map(a => irNodeToTsLiteral(a)))
+        f.createArrayLiteralExpression(ir.args.map((a) => irNodeToTsLiteral(a)))
       ));
+      break;
+    case "exists":
+      props.push(f.createPropertyAssignment("rootParam", f.createStringLiteral(ir.rootParam)));
+      props.push(f.createPropertyAssignment("relationKey", f.createStringLiteral(ir.relationKey)));
+      props.push(f.createPropertyAssignment("innerParam", f.createStringLiteral(ir.innerParam)));
+      props.push(f.createPropertyAssignment("innerWhere", irNodeToTsLiteral(ir.innerWhere)));
       break;
   }
   return f.createObjectLiteralExpression(props);

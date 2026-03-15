@@ -45,7 +45,17 @@ Loads related entities via `select()`: `select(p => ({ id: p.id, author: p.autho
 
 ---
 
-## 4. PostgreSQL
+## 4. Relation where (JOIN)
+
+Filter by related entity properties via JOIN. When a relation is used in `where()` (e.g. `c.company.name === "Acme"`), typhex emits a JOIN instead of failing. If the same relation is in `select()`, it reuses the joined data (no redundant whereIn fetch).
+
+```bash
+npx tsx examples/relation-where/relation-where.ts
+```
+
+---
+
+## 5. PostgreSQL
 
 Basic CRUD with PostgreSQL. Requires a running Postgres instance.
 
@@ -57,7 +67,7 @@ Or: `npx tsx examples/postgres/postgres.ts`
 
 ---
 
-## 5. Migrations (SQLite)
+## 6. Migrations (SQLite)
 
 Generate, run, and inspect migration scripts for SQLite.
 
@@ -69,7 +79,7 @@ Or: `npx tsx examples/migrations/migrations.ts`
 
 ---
 
-## 6. PostgreSQL migrations
+## 7. PostgreSQL migrations
 
 Generate and run migrations against Postgres.
 
@@ -81,7 +91,7 @@ Or: `npx tsx examples/postgres-migrations/postgres-migrations.ts`
 
 ---
 
-## 7. Transformer (compile-time)
+## 8. Transformer (compile-time)
 
 TypeScript transformer: predicates compiled to IR at build time. Closure variables auto-captured; no second argument to `.where()`.
 
