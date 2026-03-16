@@ -15,6 +15,16 @@
       "types": "./dist/transformer/index.d.ts",
       "import": "./dist/transformer/index.js",
       "default": "./dist/transformer/index.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "import": "./dist/sqlite.js",
+      "default": "./dist/sqlite.js"
+    },
+    "./postgres": {
+      "types": "./dist/postgres.d.ts",
+      "import": "./dist/postgres.js",
+      "default": "./dist/postgres.js"
     }
   },
   "bin": {

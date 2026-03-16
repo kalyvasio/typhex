@@ -17,9 +17,77 @@ import type {
   IrExists,
   IrSelect,
   IrSelectRelation,
+  IrOrderBy,
+  IrAggregate,
 } from "../ir/types.js";
 
 type AcornNode = acorn.Node;
+
+// ---------------------------------------------------------------------------
+// Public API: parseArrowToGroupByPaths (groupBy lambdas)
+// ---------------------------------------------------------------------------
+
+function resolveAcornMemberPath(node: any, paramName: string): string[] | null {
+  if (node.type === "Identifier" && node.name === paramName) return [];
+  if (node.type !== "MemberExpression") return null;
+  if (node.computed) return null;
+  const prop = node.property?.name;
+  if (!prop) return null;
+  const parent = resolveAcornMemberPath(node.object, paramName);
+  if (!parent) return null;
+  return [...parent, prop];
+}
+
+export function parseArrowToGroupByPaths(fn: (...args: any[]) => any): Array<string[] | number> {
+  const src = fn.toString();
+  const idx = src.indexOf("=>");
+  if (idx === -1) return [];
+  const body = src.slice(idx + 2).trim();
+  const paramName = src.slice(0, idx).replace(/[()]/g, "").trim() || "u";
+
+  try {
+    const ast = acorn.parse(body, { ecmaVersion: "latest" }) as any;
+    const expr = ast.body[0]?.expression;
+
+    // () => 1  or  o => 2  (single numeric literal → positional)
+    if (expr?.type === "Literal" && typeof expr.value === "number") {
+      return [expr.value];
+    }
+
+    // o => o.category  (single member path)
+    if (expr?.type === "MemberExpression") {
+      const path = resolveAcornMemberPath(expr, paramName);
+      if (path && path.length > 0) return [path];
+    }
+
+    // o => [o.category, o.status, 1]  (array of members and/or positionals)
+    if (expr?.type === "ArrayExpression") {
+      const entries: Array<string[] | number> = [];
+      for (const el of (expr.elements ?? [])) {
+        if (el.type === "Literal" && typeof el.value === "number") {
+          entries.push(el.value);
+        } else {
+          const path = resolveAcornMemberPath(el, paramName);
+          if (path && path.length > 0) entries.push(path);
+        }
+      }
+      return entries;
+    }
+  } catch {}
+  return [];
+}
+
+const AGGREGATE_FUNC_MAP: Record<string, string> = {
+  "groupconcat": "GROUP_CONCAT",
+  "stringagg":   "STRING_AGG",
+  "arrayagg":    "ARRAY_AGG",
+  "jsonagg":     "JSON_AGG",
+};
+const AGGREGATE_IR_FUNCS = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG"]);
+
+function toIrFuncName(rawName: string): string {
+  return AGGREGATE_FUNC_MAP[rawName.toLowerCase()] ?? rawName.toUpperCase();
+}
 
 const BINARY_OPS: Record<string, IrBinary["op"] | undefined> = {
   "&&": "&&", "||": "||",
@@ -82,13 +150,64 @@ export function parseArrowToIrSelect(
   }
 
   const expr = ast.body[0]?.expression;
-  if (!expr || (expr as { type: string }).type !== "ObjectExpression") return null;
+  if (!expr) return null;
+
+  const exprType = (expr as { type: string }).type;
+
+  // p => p  →  select *
+  if (exprType === "Identifier" && (expr as AcornNode & { name?: string }).name === paramName) {
+    return { param: paramName, paths: [], aliases: [], rest: true };
+  }
+
+  // p => p.id  or  p => p.author.name  →  single column
+  if (exprType === "MemberExpression") {
+    const resolved = resolveMemberFromAcorn(expr as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
+    if (!resolved || resolved.path.length === 0) return null;
+    const alias = resolved.path[resolved.path.length - 1];
+    return { param: paramName, paths: [resolved.path], aliases: [alias] };
+  }
+
+  // p => count(p.id) / groupConcat(p.name, ", ")  →  single aggregate
+  if (exprType === "CallExpression") {
+    const callNode = expr as AcornNode & { callee: AcornNode & { type: string; name?: string }; arguments: AcornNode[] };
+    const callee = callNode.callee;
+    if (callee.type === "Identifier") {
+      const rawName = callee.name ?? "";
+      const funcName = toIrFuncName(rawName);
+      if (AGGREGATE_IR_FUNCS.has(funcName)) {
+        const argNode = callNode.arguments?.[0];
+        let arg: IrNode | null = null;
+        let isDistinct = false;
+        if (argNode) {
+          const argN = argNode as { type: string; callee?: { type: string; name?: string }; arguments?: AcornNode[] };
+          if (argN.type === "CallExpression" && argN.callee?.type === "Identifier" && argN.callee.name === "distinct") {
+            isDistinct = true;
+            const inner = argN.arguments?.[0] ?? null;
+            if (inner) { try { arg = walk(inner as AcornNode, [paramName], []); } catch { arg = null; } }
+          } else {
+            try { arg = walk(argNode as AcornNode, [paramName], []); } catch { arg = null; }
+          }
+        }
+        let separator: string | undefined;
+        if ((funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") && (callNode.arguments?.length ?? 0) >= 2) {
+          const sepNode = callNode.arguments[1] as { type: string; value?: unknown };
+          if (sepNode.type === "Literal" && typeof sepNode.value === "string") separator = sepNode.value;
+        }
+        const alias = rawName.toLowerCase();
+        return { param: paramName, paths: [], aliases: [], aggregates: [{ kind: "aggregate", func: funcName as IrAggregate["func"], arg, alias, ...(isDistinct ? { distinct: true } : {}), ...(separator !== undefined ? { separator } : {}) }] };
+      }
+    }
+    return null;
+  }
+
+  if (exprType !== "ObjectExpression") return null;
 
   const obj = expr as AcornNode & { properties: AcornNode[] };
   const paths: string[][] = [];
   const aliases: string[] = [];
   const relations: IrSelectRelation[] = [];
   let rest = false;
+  const aggregates: IrAggregate[] = [];
 
   for (const raw of obj.properties) {
     const prop = raw as AcornNode & {
@@ -122,6 +241,36 @@ export function parseArrowToIrSelect(
       if (!sub) return null;
       relations.push({ name: sub.relation, outputKey: keyName, subPaths: sub.subPaths });
     } else if (valType === "CallExpression") {
+      // Check if it's an aggregate function call (SUM, AVG, MIN, MAX, COUNT, groupConcat)
+      const callNode = val as AcornNode & { callee: AcornNode & { type: string; name?: string }; arguments: AcornNode[] };
+      const callee = callNode.callee as AcornNode & { type: string; name?: string };
+      if (callee.type === "Identifier") {
+        const rawName = callee.name ?? "";
+        const funcName = toIrFuncName(rawName);
+        if (AGGREGATE_IR_FUNCS.has(funcName)) {
+          const argNode = callNode.arguments?.[0];
+          let arg: IrNode | null = null;
+          let isDistinct = false;
+          if (argNode) {
+            const argN = argNode as { type: string; callee?: { type: string; name?: string }; arguments?: AcornNode[] };
+            if (argN.type === "CallExpression" && argN.callee?.type === "Identifier" && argN.callee.name === "distinct") {
+              isDistinct = true;
+              const inner = argN.arguments?.[0] ?? null;
+              if (inner) { try { arg = walk(inner as AcornNode, [paramName], []); } catch { arg = null; } }
+            } else {
+              try { arg = walk(argNode as AcornNode, [paramName], []); } catch { arg = null; }
+            }
+          }
+          let separator: string | undefined;
+          if ((funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") && (callNode.arguments?.length ?? 0) >= 2) {
+            const sepNode = callNode.arguments[1] as { type: string; value?: unknown };
+            if (sepNode.type === "Literal" && typeof sepNode.value === "string") separator = sepNode.value;
+          }
+          aggregates.push({ kind: "aggregate", func: funcName as IrAggregate["func"], arg, alias: keyName, ...(isDistinct ? { distinct: true } : {}), ...(separator !== undefined ? { separator } : {}) });
+          continue;
+        }
+      }
+      // Fall through to relation query chain handling
       const rel = parseRelationQueryChain(val as AcornNode & { callee: AcornNode; arguments: AcornNode[] }, paramName, keyName, fullSrc);
       if (!rel) return null;
       relations.push(rel);
@@ -133,10 +282,11 @@ export function parseArrowToIrSelect(
     }
   }
 
-  if (paths.length === 0 && relations.length === 0 && !rest) return null;
+  if (paths.length === 0 && relations.length === 0 && !rest && aggregates.length === 0) return null;
   const result: IrSelect = { param: paramName, paths, aliases };
   if (relations.length > 0) result.relations = relations;
   if (rest) result.rest = true;
+  if (aggregates.length > 0) result.aggregates = aggregates;
   return result;
 }
 
@@ -388,7 +538,55 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
         type: string;
         object?: AcornNode;
         property?: { name?: string };
+        name?: string;
       };
+
+      // Detect aggregate functions: SUM(expr), AVG(expr), MIN(expr), MAX(expr), COUNT(expr), groupConcat/stringAgg/arrayAgg/jsonAgg
+      if (callee.type === "Identifier") {
+        const rawName = callee.name ?? "";
+        const funcName = toIrFuncName(rawName);
+        if (AGGREGATE_IR_FUNCS.has(funcName)) {
+          const argNode = n.arguments?.length ? n.arguments[0] : null;
+          let arg: IrNode | null = null;
+          let isDistinct = false;
+
+          if (argNode) {
+            const argN = argNode as { type: string; callee?: { type: string; name?: string }; arguments?: AcornNode[] };
+            // Detect distinct(field) wrapper: count(distinct(p.id))
+            if (argN.type === "CallExpression" && argN.callee?.type === "Identifier" && argN.callee.name === "distinct") {
+              const inner = argN.arguments?.[0] ?? null;
+              if (inner) {
+                try {
+                  arg = walk(inner as AcornNode, params, paramKeys);
+                  isDistinct = true;
+                } catch {
+                  throw new Error(`Unsupported DISTINCT aggregate expression in ${rawName}(): could not parse distinct(...) argument`);
+                }
+              } else {
+                throw new Error(`Unsupported DISTINCT aggregate expression in ${rawName}(): missing inner argument`);
+              }
+            } else {
+              try { arg = walk(argNode as AcornNode, params, paramKeys); } catch { arg = null; }
+            }
+          }
+
+          // Extract separator for GROUP_CONCAT / STRING_AGG
+          let separator: string | undefined;
+          if ((funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") && (n.arguments?.length ?? 0) >= 2) {
+            const sepNode = n.arguments![1] as { type: string; value?: unknown };
+            if (sepNode.type === "Literal" && typeof sepNode.value === "string") separator = sepNode.value;
+          }
+
+          return {
+            kind: "aggregate",
+            func: funcName as IrAggregate["func"],
+            arg,
+            ...(isDistinct ? { distinct: true } : {}),
+            ...(separator !== undefined ? { separator } : {}),
+          } as IrAggregate;
+        }
+      }
+
       if (callee.type !== "MemberExpression") throw new Error("Unsupported call expression");
       const method = callee.property?.name;
       if ((method === "some" || method === "every") && n.arguments?.length === 1) {

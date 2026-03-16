@@ -3,13 +3,24 @@
  */
 
 import * as ts from "typescript";
-import type { IrNode } from "../ir/types.js";
+import type { IrNode, IrAggregate } from "../ir/types.js";
 import {
   isTyphexType,
   resolveMemberPath,
   binaryOpFromSyntaxKind,
   irNodeToTsLiteral,
 } from "./shared.js";
+
+const AGGREGATE_FUNCS = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG"]);
+
+function toIrFuncName(rawName: string): string {
+  const lower = rawName.toLowerCase();
+  if (lower === "groupconcat") return "GROUP_CONCAT";
+  if (lower === "stringagg")   return "STRING_AGG";
+  if (lower === "arrayagg")    return "ARRAY_AGG";
+  if (lower === "jsonagg")     return "JSON_AGG";
+  return rawName.toUpperCase();
+}
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
 
@@ -113,6 +124,50 @@ function exprToIr(
         return { kind: "call", method, receiver, args: args as IrNode[] };
       }
     }
+    // count(p.id), sum(p.price), groupConcat(p.name, ", "), count(distinct(p.id)), etc.
+    if (ts.isIdentifier(callee)) {
+      const rawName = callee.text;
+      const funcName = toIrFuncName(rawName);
+      if (AGGREGATE_FUNCS.has(funcName)) {
+        const argExpr = expr.arguments[0] as ts.Expression | undefined;
+        let arg: IrNode | null = null;
+        let isDistinct = false;
+
+        if (argExpr) {
+          // Detect distinct(field) wrapper: count(distinct(p.id))
+          if (ts.isCallExpression(argExpr)) {
+            const innerCallee = argExpr.expression;
+            if (ts.isIdentifier(innerCallee) && innerCallee.text === "distinct") {
+              const inner = argExpr.arguments[0] as ts.Expression | undefined;
+              if (inner && ts.isPropertyAccessExpression(inner)) {
+                const resolved = resolveMemberPath(inner, paramNames);
+                if (resolved) {
+                  arg = { kind: "member", param: resolved.param, path: resolved.path };
+                  isDistinct = true;
+                }
+              }
+            }
+          } else if (ts.isPropertyAccessExpression(argExpr)) {
+            const resolved = resolveMemberPath(argExpr, paramNames);
+            if (resolved) arg = { kind: "member", param: resolved.param, path: resolved.path };
+          }
+        }
+
+        let separator: string | undefined;
+        if (funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") {
+          const sepExpr = expr.arguments[1] as ts.Expression | undefined;
+          if (sepExpr && ts.isStringLiteral(sepExpr)) separator = sepExpr.text;
+        }
+
+        return {
+          kind: "aggregate",
+          func: funcName as IrAggregate["func"],
+          arg,
+          ...(isDistinct ? { distinct: true } : {}),
+          ...(separator !== undefined ? { separator } : {}),
+        };
+      }
+    }
     return null;
   }
 
@@ -157,13 +212,14 @@ function arrowToIr(
   return { ir, freeVars: [...freeVars] };
 }
 
-export function transformWhereCall(
+function transformArrowCall(
   call: ts.CallExpression,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
+  methodName: string
 ): ts.CallExpression | null {
   const expr = call.expression;
   if (!ts.isPropertyAccessExpression(expr)) return null;
-  if (expr.name.text !== "where") return null;
+  if (expr.name.text !== methodName) return null;
   if (!isTyphexType(expr.expression, checker)) return null;
 
   const args = [...call.arguments];
@@ -185,4 +241,18 @@ export function transformWhereCall(
     call, call.expression, call.typeArguments,
     [irNodeToTsLiteral(ir), paramsLiteral]
   );
+}
+
+export function transformWhereCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker
+): ts.CallExpression | null {
+  return transformArrowCall(call, checker, "where");
+}
+
+export function transformHavingCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker
+): ts.CallExpression | null {
+  return transformArrowCall(call, checker, "having");
 }

@@ -12,6 +12,7 @@
   },
   "scripts": {
     "basic": "tsx basic/basic.ts",
+    "aggregations": "tsx aggregations/aggregations.ts",
     "entity": "tsx entity/entity-usage.ts",
     "postgres": "tsx postgres/postgres.ts",
     "migrations": "tsx migrations/migrations.ts",

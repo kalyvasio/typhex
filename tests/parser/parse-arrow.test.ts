@@ -246,9 +246,12 @@ describe("parser/parseArrowToIrSelect", () => {
     ]);
   });
 
-  it("returns null for non-object return", () => {
+  it("handles single-column shorthand (p => p.id)", () => {
     const fn = (u: { id: number }) => u.id;
-    expect(parseArrowToIrSelect(fn)).toBeNull();
+    const ir = parseArrowToIrSelect(fn);
+    expect(ir?.param).toBe("u");
+    expect(ir?.paths).toEqual([["id"]]);
+    expect(ir?.aliases).toEqual(["id"]);
   });
 
   it("returns null for computed keys", () => {

@@ -3,7 +3,7 @@
  */
 
 import * as ts from "typescript";
-import type { IrNode, IrSelect, IrBinary, IrOrderBy } from "../ir/types.js";
+import type { IrNode, IrSelect, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
 // Typhex type detection
@@ -186,6 +186,8 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       props.push(f.createPropertyAssignment("innerParam", f.createStringLiteral(ir.innerParam)));
       props.push(f.createPropertyAssignment("innerWhere", irNodeToTsLiteral(ir.innerWhere)));
       break;
+    case "aggregate":
+      return irAggregateToTsLiteral(ir as IrAggregate);
   }
   return f.createObjectLiteralExpression(props);
 }
@@ -199,6 +201,19 @@ export function irOrderByToTsLiteral(ir: IrOrderBy): ts.ObjectLiteralExpression 
     ),
     f.createPropertyAssignment("direction", f.createStringLiteral(ir.direction)),
   ]);
+}
+
+export function irAggregateToTsLiteral(agg: IrAggregate): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = [
+    f.createPropertyAssignment("kind", f.createStringLiteral("aggregate")),
+    f.createPropertyAssignment("func", f.createStringLiteral(agg.func)),
+    f.createPropertyAssignment("arg", agg.arg ? irNodeToTsLiteral(agg.arg) : f.createNull()),
+  ];
+  if (agg.alias) props.push(f.createPropertyAssignment("alias", f.createStringLiteral(agg.alias)));
+  if (agg.distinct) props.push(f.createPropertyAssignment("distinct", f.createTrue()));
+  if (agg.separator !== undefined) props.push(f.createPropertyAssignment("separator", f.createStringLiteral(agg.separator)));
+  return f.createObjectLiteralExpression(props);
 }
 
 export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
@@ -218,6 +233,22 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
   }
   if (sel.rest) {
     props.push(f.createPropertyAssignment("rest", f.createTrue()));
+  }
+  if (sel.aggregates && sel.aggregates.length > 0) {
+    props.push(f.createPropertyAssignment("aggregates",
+      f.createArrayLiteralExpression(sel.aggregates.map(irAggregateToTsLiteral))
+    ));
+  }
+  if (sel.groupBy && sel.groupBy.length > 0) {
+    props.push(f.createPropertyAssignment("groupBy",
+      f.createArrayLiteralExpression(
+        sel.groupBy.map(entry =>
+          typeof entry === "number"
+            ? f.createNumericLiteral(entry)
+            : f.createArrayLiteralExpression(entry.map(p => f.createStringLiteral(p)))
+        )
+      )
+    ));
   }
   return f.createObjectLiteralExpression(props);
 }

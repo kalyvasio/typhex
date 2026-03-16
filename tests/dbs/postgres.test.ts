@@ -97,6 +97,68 @@ describe("dbs/postgres", () => {
       expect(params).toEqual([10, 20]);
     });
 
+    it("expandPlaceholders respects startIdx — numbers from the given offset", () => {
+      const sql = '("t0"."age" > $1)';
+      const { sql: outSql, params } = postgresDialect.expandPlaceholders(sql, [25], 3);
+      expect(outSql).toBe('("t0"."age" > $3)');
+      expect(params).toEqual([25]);
+    });
+
+    it("expandPlaceholders with startIdx expands IN arrays from the offset", () => {
+      const sql = '("t0"."id" IN ($1))';
+      const { sql: outSql, params } = postgresDialect.expandPlaceholders(sql, [[10, 20]], 5);
+      expect(outSql).toBe('("t0"."id" IN ($5, $6))');
+      expect(params).toEqual([10, 20]);
+    });
+
+    it("compileSelect: HAVING params are numbered after WHERE params", () => {
+      // WHERE has 2 params ($1, $2); HAVING arrives pre-numbered from $3
+      const { sql, params } = postgresDialect.compileSelect({
+        table: "orders",
+        selectList: '"t0"."category", COUNT(*) AS "total"',
+        whereSql: '("t0"."status" = $1 AND "t0"."price" > $2)',
+        whereParams: ["active", 10],
+        orderBySql: "",
+        limitNum: null,
+        offsetNum: null,
+        groupBy: [["category"]],
+        havingSql: '(COUNT(*) > $3)',
+        havingParams: [5],
+      });
+      expect(sql).toContain("WHERE");
+      expect(sql).toContain("GROUP BY");
+      expect(sql).toContain("HAVING");
+      // Params must be in correct order: WHERE params first, then HAVING param
+      expect(params).toEqual(["active", 10, 5]);
+      // Placeholders must not collide
+      expect(sql).toContain("$1");
+      expect(sql).toContain("$2");
+      expect(sql).toContain("$3");
+      expect((sql.match(/\$1/g) ?? []).length).toBe(1);
+      expect((sql.match(/\$2/g) ?? []).length).toBe(1);
+      expect((sql.match(/\$3/g) ?? []).length).toBe(1);
+    });
+
+    it("compileSelect: HAVING + LIMIT/OFFSET placeholder sequence is contiguous", () => {
+      const { sql, params } = postgresDialect.compileSelect({
+        table: "orders",
+        selectList: "COUNT(*) AS \"total\"",
+        whereSql: '("t0"."active" = $1)',
+        whereParams: [true],
+        orderBySql: "",
+        limitNum: 10,
+        offsetNum: 20,
+        groupBy: [["category"]],
+        havingSql: '(COUNT(*) > $2)',
+        havingParams: [3],
+      });
+      // WHERE=$1, HAVING=$2, LIMIT=$3, OFFSET=$4
+      expect(params).toEqual([true, 3, 10, 20]);
+      expect(sql).toMatch(/HAVING.*\$2/);
+      expect(sql).toMatch(/LIMIT \$3/);
+      expect(sql).toMatch(/OFFSET \$4/);
+    });
+
     it("compileSelect produces SELECT with LIMIT/OFFSET", () => {
       const { sql, params } = postgresDialect.compileSelect({
         table: "users",

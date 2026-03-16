@@ -53,3 +53,21 @@ describe("where transformer", () => {
     expect(transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));")).toMatchSnapshot();
   });
 });
+
+describe("having transformer", () => {
+  it("transforms (p) => count(p.id) > 5", () => {
+    expect(transform("orders.having((p) => count(p.id) > 5);")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => sum(p.price) >= minAmount with closure var", () => {
+    expect(transform("const minAmount = 100; orders.having((p) => sum(p.price) >= minAmount);")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10", () => {
+    expect(transform("employees.having((p) => avg(p.salary) > 50000 && count(p.id) > 10);")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => count(distinct(p.category)) > 3 with distinct", () => {
+    expect(transform("orders.having((p) => count(distinct(p.category)) > 3);")).toMatchSnapshot();
+  });
+});

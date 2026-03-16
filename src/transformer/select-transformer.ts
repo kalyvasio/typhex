@@ -3,15 +3,28 @@
  */
 
 import * as ts from "typescript";
-import type { IrSelect } from "../ir/types.js";
+import type { IrSelect, IrAggregate, IrNode } from "../ir/types.js";
 import {
   isTyphexType,
   memberPath,
   unwrapObjectLiteral,
   irSelectToTsLiteral,
+  irAggregateToTsLiteral,
 } from "./shared.js";
 
 const DEFAULT_ROW_PARAM = "u";
+
+const AGGREGATE_FUNCS = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG"]);
+
+/** Map JS stub function names to IR func names. */
+function toIrFuncName(rawName: string): string {
+  const lower = rawName.toLowerCase();
+  if (lower === "groupconcat") return "GROUP_CONCAT";
+  if (lower === "stringagg")   return "STRING_AGG";
+  if (lower === "arrayagg")    return "ARRAY_AGG";
+  if (lower === "jsonagg")     return "JSON_AGG";
+  return rawName.toUpperCase();
+}
 
 interface ParamBindings {
   paramName: string;
@@ -51,10 +64,85 @@ function getParamBindings(param: ts.BindingName | undefined): ParamBindings {
   return { paramName: DEFAULT_ROW_PARAM, bindings: bindings.size > 0 ? bindings : null, restName };
 }
 
+/** Try to parse a CallExpression as an aggregate function call. */
+function tryParseAggregate(call: ts.CallExpression, paramName: string): IrAggregate | null {
+  const callee = call.expression;
+  if (!ts.isIdentifier(callee)) return null;
+  const rawName = callee.text;
+  const funcName = toIrFuncName(rawName);
+  if (!AGGREGATE_FUNCS.has(funcName)) return null;
+
+  const argExpr = call.arguments[0] as ts.Expression | undefined;
+  let arg: IrNode | null = null;
+  let isDistinct = false;
+
+  if (argExpr) {
+    // Detect distinct(field) wrapper: count(distinct(p.id))
+    if (ts.isCallExpression(argExpr)) {
+      const innerCallee = argExpr.expression;
+      if (ts.isIdentifier(innerCallee) && innerCallee.text === "distinct") {
+        const inner = argExpr.arguments[0] as ts.Expression | undefined;
+        if (inner && ts.isPropertyAccessExpression(inner)) {
+          const path = memberPath(inner, paramName);
+          if (path && path.length > 0) {
+            arg = { kind: "member", param: paramName, path };
+            isDistinct = true;
+          }
+        }
+      }
+    } else if (ts.isPropertyAccessExpression(argExpr)) {
+      const path = memberPath(argExpr, paramName);
+      if (path && path.length > 0) arg = { kind: "member", param: paramName, path };
+    }
+  }
+
+  // Extract separator for groupConcat(field, ", ") and stringAgg(field, sep)
+  let separator: string | undefined;
+  if (funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") {
+    const sepExpr = call.arguments[1] as ts.Expression | undefined;
+    if (sepExpr && ts.isStringLiteral(sepExpr)) separator = sepExpr.text;
+  }
+
+  const alias = rawName.toLowerCase();
+  return {
+    kind: "aggregate",
+    func: funcName as IrAggregate["func"],
+    arg,
+    alias,
+    ...(isDistinct ? { distinct: true } : {}),
+    ...(separator !== undefined ? { separator } : {}),
+  };
+}
+
 function arrowToIrSelect(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   { paramName, bindings, restName }: ParamBindings
 ): IrSelect | null {
+  // Handle single-expression body shorthands (non-block, non-object forms)
+  if (!ts.isBlock(fn.body)) {
+    const body = fn.body;
+
+    // p => p  →  select *
+    if (ts.isIdentifier(body) && body.text === paramName) {
+      return { param: paramName, paths: [], aliases: [], rest: true };
+    }
+
+    // p => p.id  or  p => p.author.name  →  single column
+    if (ts.isPropertyAccessExpression(body)) {
+      const path = memberPath(body, paramName);
+      if (path && path.length > 0) {
+        const alias = path[path.length - 1];
+        return { param: paramName, paths: [path], aliases: [alias] };
+      }
+    }
+
+    // p => count(p.id)  →  single aggregate
+    if (ts.isCallExpression(body)) {
+      const agg = tryParseAggregate(body, paramName);
+      if (agg) return { param: paramName, paths: [], aliases: [], aggregates: [agg] };
+    }
+  }
+
   let obj: ts.ObjectLiteralExpression | null;
   if (ts.isBlock(fn.body)) {
     if (fn.body.statements.length !== 1) return null;
@@ -68,6 +156,7 @@ function arrowToIrSelect(
 
   const paths: string[][] = [];
   const aliases: string[] = [];
+  const aggregates: IrAggregate[] = [];
   let rest = false;
 
   for (const prop of obj.properties) {
@@ -111,11 +200,23 @@ function arrowToIrSelect(
       if (path) { paths.push(path); aliases.push(name); continue; }
     }
 
+    // { total: count(p.id) }, { max: max(p.salary) }, etc.
+    if (ts.isCallExpression(value)) {
+      const agg = tryParseAggregate(value, paramName);
+      if (agg) { aggregates.push({ ...agg, alias: name }); continue; }
+    }
+
     return null;
   }
 
-  if (paths.length === 0 && !rest) return null;
-  return { param: paramName, paths, aliases, ...(rest ? { rest: true } : {}) };
+  if (paths.length === 0 && aggregates.length === 0 && !rest) return null;
+  return {
+    param: paramName,
+    paths,
+    aliases,
+    ...(rest ? { rest: true } : {}),
+    ...(aggregates.length > 0 ? { aggregates } : {}),
+  };
 }
 
 export function transformSelectCall(
@@ -141,3 +242,5 @@ export function transformSelectCall(
     [irSelectToTsLiteral(irSelect)]
   );
 }
+
+export { irAggregateToTsLiteral };

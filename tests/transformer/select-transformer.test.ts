@@ -50,4 +50,40 @@ describe("select transformer", () => {
   it("transforms (u) => ({ userId: u.id }) single column with alias", () => {
     expect(transform("users.select((u) => ({ userId: u.id }));")).toMatchSnapshot();
   });
+
+  it("transforms (p) => p to select *", () => {
+    expect(transform("users.select((p) => p);")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => p.id to single column shorthand", () => {
+    expect(transform("users.select((p) => p.id);")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => count(p.id) to single aggregate shorthand", () => {
+    expect(transform("users.select((p) => count(p.id));")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => ({ category: p.category, total: sum(p.price) }) with aggregate", () => {
+    expect(transform("products.select((p) => ({ category: p.category, total: sum(p.price) }));")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => ({ cnt: count(p.id), maxSalary: max(p.salary) }) with multiple aggregates", () => {
+    expect(transform("employees.select((p) => ({ cnt: count(p.id), maxSalary: max(p.salary) }));")).toMatchSnapshot();
+  });
+
+  it("transforms count(distinct(p.category)) single aggregate shorthand", () => {
+    expect(transform("users.select((p) => count(distinct(p.category)));")).toMatchSnapshot();
+  });
+
+  it("transforms ({ unique: count(distinct(p.id)) }) object with distinct aggregate", () => {
+    expect(transform("users.select((p) => ({ unique: count(distinct(p.id)) }));")).toMatchSnapshot();
+  });
+
+  it("transforms groupConcat(p.name, ', ') single aggregate shorthand", () => {
+    expect(transform("users.select((p) => groupConcat(p.name, ', '));")).toMatchSnapshot();
+  });
+
+  it("transforms ({ names: groupConcat(p.name, ', ') }) object with groupConcat", () => {
+    expect(transform("users.select((p) => ({ names: groupConcat(p.name, ', ') }));")).toMatchSnapshot();
+  });
 });

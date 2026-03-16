@@ -10,8 +10,43 @@ exports[`select transformer > transforms ({ id, name }) => ({ id, name }) to IR 
 "
 `;
 
+exports[`select transformer > transforms ({ names: groupConcat(p.name, ', ') }) object with groupConcat 1`] = `
+"users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "p", path: ["name"] }, alias: "names", separator: ", " }] });
+"
+`;
+
+exports[`select transformer > transforms ({ unique: count(distinct(p.id)) }) object with distinct aggregate 1`] = `
+"users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] }, alias: "unique", distinct: true }] });
+"
+`;
+
 exports[`select transformer > transforms (c) => ({ ...c, company: c.company }) to IR object with rest and relation 1`] = `
 "contacts.select({ param: "c", paths: [["company"]], aliases: ["company"], rest: true });
+"
+`;
+
+exports[`select transformer > transforms (p) => ({ category: p.category, total: sum(p.price) }) with aggregate 1`] = `
+"products.select({ param: "p", paths: [["category"]], aliases: ["category"], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["price"] }, alias: "total" }] });
+"
+`;
+
+exports[`select transformer > transforms (p) => ({ cnt: count(p.id), maxSalary: max(p.salary) }) with multiple aggregates 1`] = `
+"employees.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] }, alias: "cnt" }, { kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["salary"] }, alias: "maxSalary" }] });
+"
+`;
+
+exports[`select transformer > transforms (p) => count(p.id) to single aggregate shorthand 1`] = `
+"users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] }, alias: "count" }] });
+"
+`;
+
+exports[`select transformer > transforms (p) => p to select * 1`] = `
+"users.select({ param: "p", paths: [], rest: true });
+"
+`;
+
+exports[`select transformer > transforms (p) => p.id to single column shorthand 1`] = `
+"users.select({ param: "p", paths: [["id"]], aliases: ["id"] });
 "
 `;
 
@@ -32,5 +67,15 @@ exports[`select transformer > transforms (u) => ({ userId: u.id }) single column
 
 exports[`select transformer > transforms (u) => ({ userId: u.id, fullName: u.name, country: u.country }) with aliases 1`] = `
 "users.select({ param: "u", paths: [["id"], ["name"], ["country"]], aliases: ["userId", "fullName", "country"] });
+"
+`;
+
+exports[`select transformer > transforms count(distinct(p.category)) single aggregate shorthand 1`] = `
+"users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["category"] }, alias: "count", distinct: true }] });
+"
+`;
+
+exports[`select transformer > transforms groupConcat(p.name, ', ') single aggregate shorthand 1`] = `
+"users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "p", path: ["name"] }, alias: "groupconcat", separator: ", " }] });
 "
 `;

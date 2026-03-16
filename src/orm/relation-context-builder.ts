@@ -78,7 +78,14 @@ export function resolveSelectForSql(
 ): IrSelect | null {
   if (columnPaths === null) return selectIr;
   return (columnPaths.length > 0 || selectIr?.rest)
-    ? { param: selectIr!.param, paths: columnPaths, aliases: columnAliases!, ...(selectIr!.rest ? { rest: true } : {}) }
+    ? {
+        param: selectIr!.param,
+        paths: columnPaths,
+        aliases: columnAliases!,
+        ...(selectIr!.rest       ? { rest:       true                   } : {}),
+        ...(selectIr!.aggregates?.length ? { aggregates: selectIr!.aggregates } : {}),
+        ...(selectIr!.groupBy?.length   ? { groupBy:     selectIr!.groupBy     } : {}),
+      }
     : selectIr;
 }
 

@@ -3,8 +3,8 @@
  */
 
 import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
-import type { IrNode, IrOrderBy, IrSelect } from "../../ir/types.js";
-import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts } from "../types.js";
+import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
+import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts, ResolvedOpts } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
 import { getColumnDef } from "../types.js";
 import {
@@ -13,23 +13,22 @@ import {
   makeCompileNode,
   compileOrderBy,
   compileSelectList,
-  type DialectRenderer,
+  compileAggregate,
+  compileConcatAggregate,
+  compileGroupBy,
 } from "../shared-dialect.js";
 
-const renderer: DialectRenderer = {
-  placeholder: () => "?",
-
-  compileExists: (targetTable, alias, fkColumn, mainAlias, mainPk, innerSql) =>
-    `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${quoteId(alias)}.${quoteId(fkColumn)} = ${quoteId(mainAlias)}.${quoteId(mainPk)} AND (${innerSql})))`,
-
-  compileLike: (receiver, arg, mode) => {
-    if (mode === "startsWith") return `(${receiver} LIKE ${arg} || '%')`;
-    if (mode === "endsWith")   return `(${receiver} LIKE '%' || ${arg})`;
-    return                            `(${receiver} LIKE '%' || ${arg} || '%')`;
-  },
-};
-
-const compileNode = makeCompileNode(renderer);
+function sqliteCompileAggregate(
+  agg: IrAggregate,
+  opts?: ResolvedOpts,
+  compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
+  params?: unknown[]
+): string {
+  if (agg.func === "GROUP_CONCAT") {
+    return compileConcatAggregate("GROUP_CONCAT", agg, undefined, opts, compileNodeFn, params);
+  }
+  return compileAggregate(agg, opts, compileNodeFn, params);
+}
 
 export const sqliteDialect: DialectImpl = {
   name: "sqlite",
@@ -42,7 +41,7 @@ export const sqliteDialect: DialectImpl = {
     return "?";
   },
 
-  expandPlaceholders(sql: string, resolvedParams: unknown[]): { sql: string; params: unknown[] } {
+  expandPlaceholders(sql: string, resolvedParams: unknown[], _startIdx?: number): { sql: string; params: unknown[] } {
     let idx = 0;
     const newParams: unknown[] = [];
     const newSql = sql.replace(/\?/g, () => {
@@ -69,7 +68,7 @@ export const sqliteDialect: DialectImpl = {
   },
 
   compileSelectList(select: IrSelect | null, columns: string[], options: CompileOptions = {}): string {
-    return compileSelectList(select, columns, options);
+    return compileSelectList(select, columns, options, sqliteCompileAggregate);
   },
 
   toColumnDef(def: ColumnDef): string {
@@ -105,16 +104,37 @@ export const sqliteDialect: DialectImpl = {
   compileSelect(opts: CompileSelectOpts): CompileResult {
     const esc = quoteId;
     const params = [...opts.whereParams];
+    const groupByClause = opts.groupBy && opts.groupBy.length > 0
+      ? ` GROUP BY ${compileGroupBy(opts.groupBy, resolveOpts(opts.compileOpts ?? {}))}`
+      : "";
+    let havingClause = "";
+    if (opts.havingSql) {
+      havingClause = ` HAVING ${opts.havingSql}`;
+      params.push(...(opts.havingParams ?? []));
+    }
     let limitClause = "";
     let offsetClause = "";
     if (opts.limitNum != null) { limitClause = " LIMIT ?"; params.push(opts.limitNum); }
     if (opts.offsetNum != null) { offsetClause = " OFFSET ?"; params.push(opts.offsetNum); }
     const orderClause = opts.orderBySql ? ` ORDER BY ${opts.orderBySql}` : "";
-    return { sql: `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${orderClause}${limitClause}${offsetClause}`, params };
+    return { sql: `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`, params };
   },
+
+  compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string {
+    return `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${quoteId(alias)}.${quoteId(fkColumn)} = ${quoteId(mainAlias)}.${quoteId(mainPk)} AND (${innerSql})))`;
+  },
+
+  compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string {
+    if (mode === "startsWith") return `(${receiver} LIKE ${arg} || '%')`;
+    if (mode === "endsWith")   return `(${receiver} LIKE '%' || ${arg})`;
+    return                            `(${receiver} LIKE '%' || ${arg} || '%')`;
+  },
+  compileAggregate: sqliteCompileAggregate,
 
   buildJoinClause(join: RelationJoinInfo): string {
     const kw = JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
     return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${quoteId("t0")}.${quoteId(join.foreignKey)} = ${quoteId(join.alias)}.${quoteId(join.targetPk)}`;
   },
 };
+
+const compileNode = makeCompileNode(sqliteDialect);
