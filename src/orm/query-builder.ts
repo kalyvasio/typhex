@@ -69,7 +69,8 @@ function getRelationJoins(state: QueryState<unknown>): RelationJoinInfo[] {
     },
     state.whereIr,
     state.selectIr,
-    rootParam
+    rootParam,
+    state.orderBy
   );
 }
 
@@ -84,7 +85,7 @@ function getCompileOpts(state: QueryState<unknown>) {
   const paramToAlias = buildParamToAlias(state);
   const joins = getRelationJoins(state);
   const rootParam = getRootParam(state);
-  const relationPathToAlias = buildRelationPathToAlias(joins, rootParam);
+  const relationPathToAlias = buildRelationPathToAlias(joins, Object.keys(paramToAlias));
   const mainPk = state.pkColumn ?? "id";
   const oneToManyExists =
     state.relations && state.resolveRelationTarget
@@ -230,8 +231,31 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   }
 
   /** Append an ORDER BY clause for the given column. Defaults to ascending order. */
-  orderBy(column: string, direction: "asc" | "desc" = "asc"): QueryBuilder<C, T> {
-    this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path: [column], direction });
+  orderBy(
+      columnOrFn: string | ((row: T) => unknown),
+      direction: "asc" | "desc" = "asc"
+  ): QueryBuilder<C, T> {
+    let path: string[];
+
+    if (typeof columnOrFn === "function") {
+      // Parse lambda: u => u.company.name → IrMember { param: "u", path: ["company", "name"] }
+      try {
+        const ir = parseArrowToIr(columnOrFn as (u: any) => any, {
+          paramKeys: [],
+        });
+        if (ir.kind !== "member") {
+          throw new Error("[typhex] orderBy lambda must return a column path (e.g. u => u.name)");
+        }
+        path = ir.path;
+      } catch (e) {
+        throw new Error("Failed to parse orderBy lambda: " + (e instanceof Error ? e.message : String(e)));
+      }
+    } else {
+      // String: "company.name" → ["company", "name"]
+      path = columnOrFn.split(".");
+    }
+
+    this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path, direction });
     return this;
   }
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildRelationJoins, buildRelationPathToAlias, buildOneToManyExists, getReusableJoinKeys } from "../../src/orm/relation-joins.js";
-import type { IrNode, IrSelect } from "../../src/ir/types.js";
+import type {IrNode, IrOrderBy, IrSelect} from "../../src/ir/types.js";
 import type { RelationsMap } from "../../src/entity/relations.js";
 
 const mockResolveTarget = vi.fn(() => ({ table: "companies", pk: "id" }));
@@ -194,6 +194,59 @@ describe("relation-joins", () => {
       const result = buildRelationJoins(ctx, where, null, "c");
       expect(result).toEqual([]);
     });
+
+    it("returns join when relation column used in orderBy (dot-notation path)", () => {
+      const orderBy: IrOrderBy[] = [
+        { param: "u", path: ["company", "name"], direction: "asc" },
+      ];
+      const result = buildRelationJoins(ctx, null, null, "u", orderBy);
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({
+        relationKey: "company",
+        targetTable: "companies",
+        targetPk: "id",
+        foreignKey: "companyId",
+        relType: "many-to-one",
+      });
+    });
+
+    it("returns empty when orderBy path has only one segment (not a relation column)", () => {
+      const orderBy: IrOrderBy[] = [
+        { param: "u", path: ["name"], direction: "asc" },
+      ];
+      const result = buildRelationJoins(ctx, null, null, "u", orderBy);
+      expect(result).toEqual([]);
+    });
+
+    it("does not duplicate join when same relation in both where and orderBy", () => {
+      const where: IrNode = {
+        kind: "binary",
+        op: "===",
+        left: { kind: "member", param: "u", path: ["company", "name"] },
+        right: { kind: "const", value: "Acme" },
+      };
+      const orderBy: IrOrderBy[] = [
+        { param: "u", path: ["company", "name"], direction: "asc" },
+      ];
+      const result = buildRelationJoins(ctx, where, null, "u", orderBy);
+      expect(result).toHaveLength(1);
+      expect(result[0].relationKey).toBe("company");
+    });
+
+    it("does not join one-to-many relation from orderBy", () => {
+      mockResolveTarget.mockReturnValue({ table: "employees", pk: "id" });
+      const orderBy: IrOrderBy[] = [
+        { param: "u", path: ["employees", "name"], direction: "asc" },
+      ];
+      const result = buildRelationJoins(ctx, null, null, "u", orderBy);
+      expect(result).toHaveLength(0);
+      mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
+    });
+
+    it("returns empty when orderBy is undefined", () => {
+      const result = buildRelationJoins(ctx, null, null, "u", undefined);
+      expect(result).toEqual([]);
+    });
   });
 
   describe("getReusableJoinKeys", () => {
@@ -368,7 +421,7 @@ describe("relation-joins", () => {
           relType: "many-to-one" as const,
         },
       ];
-      const map = buildRelationPathToAlias(joins, "c");
+      const map = buildRelationPathToAlias(joins, ["c"]);
       expect(map["c.company"]).toBe("t1");
     });
 
