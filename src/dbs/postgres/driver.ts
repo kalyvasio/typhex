@@ -3,7 +3,7 @@
  */
 
 import pg from "pg";
-import type { Driver } from "../types.js";
+import type { Driver, TransactionOptions } from "../types.js";
 
 const { Client } = pg;
 
@@ -81,9 +81,12 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
       };
     },
 
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
+    async transaction<T>(fn: () => Promise<T>, options?: TransactionOptions): Promise<T> {
       await ensureConnected();
-      await client.query("BEGIN");
+      const isolationClause = options?.isolationLevel
+        ? ` ISOLATION LEVEL ${options.isolationLevel.replace("_", " ")}`
+        : "";
+      await client.query(`BEGIN${isolationClause}`);
       try {
         const result = await fn();
         await client.query("COMMIT");

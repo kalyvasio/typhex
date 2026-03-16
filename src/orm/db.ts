@@ -149,6 +149,13 @@ export class Db {
     return this.driver;
   }
 
+  async transaction<T>(
+    fn: () => Promise<T>,
+    options?: import("../driver/types.js").TransactionOptions
+  ): Promise<T> {
+    return this.driver.transaction(fn, options);
+  }
+
   async close(): Promise<void> {
     setDefaultDriver(null);
     await this.driver.close();

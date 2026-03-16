@@ -1,5 +1,9 @@
 import type { Dialect } from "../dialect.js";
 
+export interface TransactionOptions {
+  isolationLevel?: "READ_COMMITTED" | "REPEATABLE_READ" | "SERIALIZABLE";
+}
+
 /**
  * Driver abstraction for database execution. All methods are async.
  */
@@ -11,7 +15,7 @@ export interface Driver {
   /** Execute a single statement (insert/update/delete); returns lastID and changes. */
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }>;
   /** Run multiple statements in a transaction. */
-  transaction<T>(fn: () => Promise<T>): Promise<T>;
+  transaction<T>(fn: () => Promise<T>, options?: TransactionOptions): Promise<T>;
   /** Close the connection. */
   close(): Promise<void>;
 }

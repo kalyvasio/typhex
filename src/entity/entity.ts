@@ -3,7 +3,7 @@
  * Returns a class whose instances are Row<TSchema, TRels>.
  */
 
-import type { Driver } from "../driver/types.js";
+import type { Driver, TransactionOptions } from "../driver/types.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
 import { QueryBuilder } from "../orm/query-builder.js";
@@ -120,6 +120,7 @@ export type EntityClass<
   _driver: Driver | null;
   useDriver(driver: Driver): void;
   query<C extends AnyEntityClass>(this: C, driver?: Driver): QueryBuilder<C, EntityInstance<C>>;
+  transaction<T>(fn: () => Promise<T>, options?: TransactionOptions): Promise<T>;
 };
 
 /**
@@ -194,6 +195,14 @@ export function Entity<
 
     static useDriver(driver: Driver) {
       EntityClassImpl._driver = driver;
+    }
+
+    static async transaction<T>(
+      fn: () => Promise<T>,
+      options?: TransactionOptions
+    ): Promise<T> {
+      const driver = resolveDriver();
+      return driver.transaction(fn, options);
     }
 
     private static _resolveRelations(Ctor: any): RelationsMap {

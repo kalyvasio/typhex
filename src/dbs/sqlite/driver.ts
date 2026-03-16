@@ -3,7 +3,7 @@
  */
 
 import { createRequire } from "node:module";
-import type { Driver } from "../types.js";
+import type { Driver, TransactionOptions } from "../types.js";
 
 const require = createRequire(import.meta.url);
 
@@ -35,6 +35,9 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
   const Database = require("better-sqlite3") as typeof import("better-sqlite3");
   const db = new Database(options.path);
 
+  // Track nesting depth per driver instance
+  let txDepth = 0;
+
   return {
     dialect: "sqlite",
 
@@ -52,15 +55,36 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
       });
     },
 
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
-      db.exec("BEGIN");
+    async transaction<T>(fn: () => Promise<T>, options?: TransactionOptions): Promise<T> {
+      if (txDepth > 0) {
+        // Nested transaction: use savepoints
+        const savepointName = `sp_${txDepth}`;
+        txDepth++;
+        try {
+          db.exec(`SAVEPOINT ${savepointName}`);
+          const result = await fn();
+          db.exec(`RELEASE SAVEPOINT ${savepointName}`);
+          return result;
+        } catch (e) {
+          db.exec(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+          throw e;
+        } finally {
+          txDepth--;
+        }
+      }
+
+      const begin = options?.isolationLevel === "SERIALIZABLE" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED";
+      txDepth++;
       try {
+        db.exec(begin);
         const result = await fn();
         db.exec("COMMIT");
         return result;
       } catch (e) {
         db.exec("ROLLBACK");
         throw e;
+      } finally {
+        txDepth--;
       }
     },
 
