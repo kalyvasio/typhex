@@ -4,7 +4,7 @@
  * instead of failing on non-existent column.
  */
 
-import type {IrNode, IrMember, IrSelect, IrOrderBy} from "../ir/types.js";
+import type { IrNode, IrMember, IrSelect, IrOrderBy, JoinHint, JoinType } from "../ir/types.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 
 export interface RelationJoinInfo {
@@ -14,6 +14,7 @@ export interface RelationJoinInfo {
   targetPk: string;
   foreignKey: string;
   relType: "many-to-one" | "one-to-one";
+  joinType: JoinType;
 }
 
 export interface OneToManyExistsInfo {
@@ -36,7 +37,7 @@ export function buildOneToManyExists(
   aliasPrefix = "ex"
 ): Record<string, OneToManyExistsInfo> {
   const keys = new Set<string>();
-  collectRelationKeysFromNode(whereNode ?? { kind: "const", value: null }, relations, rootParam, keys);
+  collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
   const result: Record<string, OneToManyExistsInfo> = {};
   let idx = 0;
   for (const relKey of keys) {
@@ -69,11 +70,12 @@ export interface RelationJoinContext {
 /** Walk an IR node tree and collect every relation key referenced via member access
  *  on the root parameter (e.g. `c.company.name` → adds "company" to `out`). */
 function collectRelationKeysFromNode(
-  node: IrNode,
+  node: IrNode | null,
   relations: RelationsMap,
   rootParam: string,
   out: Set<string>
 ): void {
+  if (!node) return;
   if (node.kind === "member") {
     const m = node as IrMember;
     if (m.param === rootParam && m.path.length >= 1 && relations[m.path[0]]) {
@@ -97,19 +99,6 @@ function collectRelationKeysFromNode(
   }
   if (node.kind === "exists") {
     if (node.rootParam === rootParam) out.add(node.relationKey);
-  }
-}
-
-function collectRelationKeysFromOrderBy(
-  orderBy: IrOrderBy[],
-  relations: RelationsMap,
-  out: Set<string>
-): void {
-  for (const order of orderBy) {
-    if (order.path.length > 1) {
-      const key = order.path[0];
-      if (key in relations) out.add(key);
-    }
   }
 }
 
@@ -157,6 +146,38 @@ export function getReusableJoinKeys(
   return reusable;
 }
 
+function collectRelationKeysFromOrderBy(
+  orderBy: IrOrderBy[],
+  relations: RelationsMap,
+  _rootParam: string,
+  out: Set<string>
+): void {
+  for (const order of orderBy) {
+    if (order.path.length > 1) {
+      const key = order.path[0];
+      if (key in relations) out.add(key);
+    }
+  }
+}
+
+function collectJoinableRelationKeys(
+  whereNode: IrNode | null,
+  relations: RelationsMap,
+  rootParam: string,
+  orderBy?: IrOrderBy[],
+  joinHints?: JoinHint[]
+): Set<string> {
+  const keys = new Set<string>();
+  collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
+  if (orderBy?.length) collectRelationKeysFromOrderBy(orderBy, relations, rootParam, keys);
+  if (joinHints) {
+    for (const hint of joinHints) {
+      if (hint.relationKey in relations) keys.add(hint.relationKey);
+    }
+  }
+  return keys;
+}
+
 /**
  * Build JOIN metadata for relations used in the where clause or orderBy.
  * Relations used only in select are loaded via whereIn (separate query).
@@ -167,14 +188,11 @@ export function buildRelationJoins(
   whereNode: IrNode | null,
   selectNode: IrSelect | null,
   rootParam: string,
-  orderBy?: IrOrderBy[]
+  orderBy?: IrOrderBy[],
+  joinHints?: JoinHint[]
 ): RelationJoinInfo[] {
   const { relations } = ctx;
-  const keys = new Set<string>();
-  collectRelationKeysFromNode(whereNode ?? { kind: "const", value: null }, relations, rootParam, keys);
-  if (orderBy && orderBy.length > 0) {
-    collectRelationKeysFromOrderBy(orderBy, relations, keys);
-  }
+  const keys = collectJoinableRelationKeys(whereNode, relations, rootParam, orderBy, joinHints);
 
   const result: RelationJoinInfo[] = [];
   let aliasIndex = 1;
@@ -195,6 +213,8 @@ export function buildRelationJoins(
     const fk = "foreignKey" in opts ? opts.foreignKey : "";
     if (!fk) continue;
 
+    const hint = joinHints?.slice().reverse().find(h => h.relationKey === relKey);
+    const joinType: JoinType = hint?.joinType ?? "left";
     result.push({
       relationKey: relKey,
       alias: `t${aliasIndex++}`,
@@ -202,6 +222,7 @@ export function buildRelationJoins(
       targetPk: target.pk,
       foreignKey: fk,
       relType,
+      joinType,
     });
   }
 

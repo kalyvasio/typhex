@@ -11,6 +11,8 @@
 import * as ts from "typescript";
 import { transformWhereCall } from "./where-transformer.js";
 import { transformSelectCall } from "./select-transformer.js";
+import { transformOrderByCall } from "./orderby-transformer.js";
+import { transformJoinCall } from "./join-transformer.js";
 
 function visit(
   node: ts.Node,
@@ -22,8 +24,10 @@ function visit(
     const visited = ts.visitEachChild(node, (n) => visit(n, ctx, checker), ctx) as ts.CallExpression;
     
     // Try each transformer in order
-    const rewritten = transformSelectCall(visited, checker) 
-      || transformWhereCall(visited, checker);
+    const rewritten = transformSelectCall(visited, checker)
+      || transformWhereCall(visited, checker)
+      || transformOrderByCall(visited, checker)
+      || transformJoinCall(visited, checker);
     
     if (rewritten) return rewritten;
     return visited;

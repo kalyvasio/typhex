@@ -2,6 +2,7 @@
  * PostgreSQL dialect: compilation and schema translation.
  */
 
+import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
 import type { IrNode, IrOrderBy, IrSelect } from "../../ir/types.js";
 import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
@@ -119,6 +120,8 @@ export const postgresDialect: DialectImpl = {
   },
 
   buildJoinClause(join: RelationJoinInfo): string {
-    return ` LEFT JOIN ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${quoteId("t0")}.${quoteId(join.foreignKey)} = ${quoteId(join.alias)}.${quoteId(join.targetPk)}`;
+    // Postgres does not allow CROSS JOIN with an ON clause; map to INNER JOIN instead.
+    const kw = join.joinType === "cross" ? "INNER JOIN" : (JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
+    return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${quoteId("t0")}.${quoteId(join.foreignKey)} = ${quoteId(join.alias)}.${quoteId(join.targetPk)}`;
   },
 };

@@ -1,18 +1,31 @@
 /**
- * Integration scenarios: full ORM workflows covering CRUD, entity subclassing,
- * non-circular relations, circular-style relations, and relation-where (JOIN / EXISTS).
+ * PostgreSQL integration scenarios: mirrors scenarios.test.ts against a real
+ * PostgreSQL database. All tests are skipped unless TYPHEX_POSTGRES_URL is set.
+ *
+ * Run with:
+ *   TYPHEX_POSTGRES_URL=postgresql://localhost:5432/typhex_test npx vitest run tests/integration/scenarios-postgres.test.ts
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Db, Entity, rel } from "../../src/index.js";
+import { Db, Entity, rel, createPostgresDriver } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
-import { freshDb } from "../helpers.js";
+
+const connectionString =
+  process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
+
+function hasPostgres(): boolean {
+  return !!process.env.TYPHEX_POSTGRES_URL;
+}
+
+function freshDb() {
+  return new Db(createPostgresDriver({ connectionString }));
+}
 
 // ─── basic CRUD ───────────────────────────────────────────────────────────────
 
-describe("basic CRUD", () => {
-  const User = Entity("users", {
-    id: "integer primary key autoincrement",
+describe("basic CRUD (postgres)", () => {
+  const User = Entity("pg_scen_crud_users", {
+    id: "SERIAL PRIMARY KEY",
     name: "text not null",
     age: "integer not null",
     country: "text not null",
@@ -20,27 +33,29 @@ describe("basic CRUD", () => {
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     registerEntity(User);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_crud_users"');
     await db.migrate();
     await User.query().insert({ name: "Alice", age: 30, country: "US" });
     await User.query().insert({ name: "Bob",   age: 25, country: "UK" });
     await User.query().insert({ name: "Carol", age: 28, country: "US" });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   it("where age > 18 returns all rows", async () => {
     const rows = await User.query().where((u) => u.age > 18).toArray();
     expect(rows).toHaveLength(3);
-  });
+  }, { skip: !hasPostgres() });
 
   it("where with closure variable filters by country", async () => {
     const country = "US";
     const rows = await User.query().where((u) => u.country === country, { country }).toArray();
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.country === "US")).toBe(true);
-  });
+  }, { skip: !hasPostgres() });
 
   it("orderBy + limit + first", async () => {
     const row = await User.query()
@@ -49,12 +64,12 @@ describe("basic CRUD", () => {
       .limit(1)
       .first();
     expect((row as any).name).toBe("Alice");
-  });
+  }, { skip: !hasPostgres() });
 
   it("count with where", async () => {
     const n = await User.query().where((u) => u.country === "US").count();
     expect(n).toBe(2);
-  });
+  }, { skip: !hasPostgres() });
 
   it("select subset of columns", async () => {
     const rows = await User.query()
@@ -63,52 +78,52 @@ describe("basic CRUD", () => {
       .toArray();
     expect(rows).toHaveLength(3);
     expect(rows[0]).not.toHaveProperty("id");
-  });
+  }, { skip: !hasPostgres() });
 
   it("startsWith string filter", async () => {
     const rows = await User.query().where((u) => u.name.startsWith("A")).toArray();
     expect(rows).toHaveLength(1);
     expect((rows[0] as any).name).toBe("Alice");
-  });
+  }, { skip: !hasPostgres() });
 
-  it("includes string filter (case-insensitive in SQLite)", async () => {
-    // SQLite LIKE is case-insensitive for ASCII, so 'al' matches 'Al' in 'Alice'
-    const rows = await User.query().where((u) => u.name.includes("al")).toArray();
+  it("includes string filter (case-sensitive in Postgres)", async () => {
+    // Postgres LIKE is case-sensitive; "li" matches "Al-i-ce"
+    const rows = await User.query().where((u) => u.name.includes("li")).toArray();
     expect(rows).toHaveLength(1);
     expect((rows[0] as any).name).toBe("Alice");
-  });
+  }, { skip: !hasPostgres() });
 
   it("in literal array filter", async () => {
     const rows = await User.query().where((u) => u.id in [1, 3]).toArray();
     expect(rows).toHaveLength(2);
     const names = rows.map((r: any) => r.name).sort();
     expect(names).toEqual(["Alice", "Carol"]);
-  });
+  }, { skip: !hasPostgres() });
 
   it("in variable array filter", async () => {
     const ids = [1, 2];
     const rows = await User.query().where((u) => u.id in ids, { ids }).toArray();
     expect(rows).toHaveLength(2);
-  });
+  }, { skip: !hasPostgres() });
 
   it("negated in filter", async () => {
     const rows = await User.query().where((u) => !(u.id in [2])).toArray();
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.id !== 2)).toBe(true);
-  });
+  }, { skip: !hasPostgres() });
 
   it("update rows", async () => {
     const changed = await User.query().where((u) => u.name === "Bob").update({ age: 26 });
     expect(changed).toBe(1);
     const bob = await User.query().where((u) => u.name === "Bob").first();
     expect((bob as any).age).toBe(26);
-  });
+  }, { skip: !hasPostgres() });
 
   it("delete rows", async () => {
     const deleted = await User.query().where((u) => u.country === "UK").delete();
     expect(deleted).toBe(1);
     expect(await User.query().count()).toBe(2);
-  });
+  }, { skip: !hasPostgres() });
 
   it("instance save and delete", async () => {
     const dave = new User({ name: "Dave", age: 35, country: "US" });
@@ -117,29 +132,29 @@ describe("basic CRUD", () => {
     expect(await User.query().count()).toBe(4);
     await dave.query().delete();
     expect(await User.query().count()).toBe(3);
-  });
+  }, { skip: !hasPostgres() });
 });
 
 // ─── entity subclassing & lifecycle ───────────────────────────────────────────
 
-describe("entity subclassing and lifecycle hooks", () => {
-  const User = Entity("users", {
-    id: "integer primary key autoincrement",
+describe("entity subclassing and lifecycle hooks (postgres)", () => {
+  const User = Entity("pg_scen_lc_users", {
+    id: "SERIAL PRIMARY KEY",
     name: "text not null",
     email: "text",
     age: "integer",
-    createdAt: "datetime not null",
+    createdAt: "timestamp not null",
   });
 
   const Post = Entity(
-    "posts",
+    "pg_scen_lc_posts",
     {
-      id: "integer primary key autoincrement",
+      id: "SERIAL PRIMARY KEY",
       title: "text not null",
       body: "text",
       authorId: "integer not null",
       published: "boolean",
-      createdAt: "datetime not null",
+      createdAt: "timestamp not null",
     },
     { author: rel.manyToOne(() => User, { foreignKey: "authorId" }) }
   );
@@ -155,19 +170,22 @@ describe("entity subclassing and lifecycle hooks", () => {
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     registerEntity(User);
     registerEntity(Post);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_lc_posts"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_lc_users"');
     await db.migrate();
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   it("insert returns hydrated instance with id", async () => {
     const alice = await User.query().insert({ name: "Alice", email: "alice@example.com", age: 30, createdAt: new Date() });
     expect((alice as any).id).toBeDefined();
     expect((alice as any).name).toBe("Alice");
-  });
+  }, { skip: !hasPostgres() });
 
   it("subclass query returns instances with computed getter", async () => {
     await User.query().insert({ name: "Alice", email: "alice@example.com", age: 30, createdAt: new Date() });
@@ -178,25 +196,25 @@ describe("entity subclassing and lifecycle hooks", () => {
 
     const first = await UserEntity.query().where((u) => u.age > 18).first();
     expect((first as any).displayName).toBeDefined();
-  });
+  }, { skip: !hasPostgres() });
 
   it("findById returns correct instance", async () => {
     const alice = await User.query().insert({ name: "Alice", email: "alice@example.com", age: 30, createdAt: new Date() });
     const found = await User.query().findById((alice as any).id!);
     expect((found as any)?.name).toBe("Alice");
-  });
+  }, { skip: !hasPostgres() });
 
   it("findById returns null for missing id", async () => {
     const found = await User.query().findById(999);
     expect(found).toBeNull();
-  });
+  }, { skip: !hasPostgres() });
 
   it("new instance save sets id and beforeSave fires", async () => {
     const carol = new UserEntity({ name: "Carol", email: "carol@example.com", age: 28 } as any);
     await carol.query().save();
     expect((carol as any).id).toBeDefined();
     expect((carol as any).createdAt).toBeDefined();
-  });
+  }, { skip: !hasPostgres() });
 
   it("post where published filters correctly", async () => {
     const alice = await User.query().insert({ name: "Alice", email: "alice@example.com", age: 30, createdAt: new Date() });
@@ -205,21 +223,21 @@ describe("entity subclassing and lifecycle hooks", () => {
 
     const p = await Post.query().where((p) => p.published === true).first();
     expect((p as any)?.title).toBe("Published");
-  });
+  }, { skip: !hasPostgres() });
 });
 
 // ─── non-circular many-to-one ─────────────────────────────────────────────────
 
-describe("non-circular many-to-one relation", () => {
-  const Company = Entity("companies", {
-    id: "integer primary key autoincrement",
+describe("non-circular many-to-one relation (postgres)", () => {
+  const Company = Entity("pg_scen_m2o_companies", {
+    id: "SERIAL PRIMARY KEY",
     name: "text not null",
   });
 
   const Contact = Entity(
-    "contacts",
+    "pg_scen_m2o_contacts",
     {
-      id: "integer primary key autoincrement",
+      id: "SERIAL PRIMARY KEY",
       name: "text not null",
       email: "text",
       companyId: "integer not null",
@@ -229,10 +247,13 @@ describe("non-circular many-to-one relation", () => {
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     registerEntity(Company);
     registerEntity(Contact);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_m2o_contacts"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_m2o_companies"');
     await db.migrate();
     const acme   = await Company.query().insert({ name: "Acme Corp" });
     const globex = await Company.query().insert({ name: "Globex" });
@@ -240,7 +261,7 @@ describe("non-circular many-to-one relation", () => {
     await Contact.query().insert({ name: "Jane Smith", email: "jane@acme.com",  companyId: (acme as any).id });
     await Contact.query().insert({ name: "Bob Wilson", email: "bob@globex.com", companyId: (globex as any).id });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   it("select with partial relation loads company name", async () => {
     const rows = await Contact.query()
@@ -251,22 +272,22 @@ describe("non-circular many-to-one relation", () => {
     expect(rows).toHaveLength(3);
     expect((rows[0] as any).company.name).toBe("Acme Corp");
     expect((rows[2] as any).company.name).toBe("Globex");
-  });
+  }, { skip: !hasPostgres() });
 });
 
 // ─── non-circular one-to-many ─────────────────────────────────────────────────
 
-describe("non-circular one-to-many relation", () => {
-  const Employee = Entity("employees", {
-    id: "integer primary key autoincrement",
+describe("non-circular one-to-many relation (postgres)", () => {
+  const Employee = Entity("pg_scen_o2m_employees", {
+    id: "SERIAL PRIMARY KEY",
     name: "text not null",
     departmentId: "integer not null",
   });
 
   const Department = Entity(
-    "departments",
+    "pg_scen_o2m_departments",
     {
-      id: "integer primary key autoincrement",
+      id: "SERIAL PRIMARY KEY",
       name: "text not null",
     },
     { employees: rel.oneToMany(() => Employee, { foreignKey: "departmentId" }) }
@@ -274,10 +295,13 @@ describe("non-circular one-to-many relation", () => {
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     registerEntity(Employee);
     registerEntity(Department);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_o2m_employees"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_o2m_departments"');
     await db.migrate();
     const eng   = await Department.query().insert({ name: "Engineering" });
     const sales = await Department.query().insert({ name: "Sales" });
@@ -285,7 +309,7 @@ describe("non-circular one-to-many relation", () => {
     await Employee.query().insert({ name: "Bob",   departmentId: (eng as any).id });
     await Employee.query().insert({ name: "Carol", departmentId: (sales as any).id });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   it("select with oneToMany loads employees per department", async () => {
     const rows = await Department.query()
@@ -302,30 +326,33 @@ describe("non-circular one-to-many relation", () => {
     expect((rows[1] as any).employees).toHaveLength(1);
     const engNames = (rows[0] as any).employees.map((e: any) => e.name).sort();
     expect(engNames).toEqual(["Alice", "Bob"]);
-  });
+  }, { skip: !hasPostgres() });
 });
 
 // ─── circular-style relations ─────────────────────────────────────────────────
 
-describe("circular-style bidirectional relations", () => {
+describe("circular-style bidirectional relations (postgres)", () => {
   const User = Entity(
-    "users",
-    { id: "integer primary key autoincrement", name: "text not null", email: "text" },
+    "pg_scen_bi_users",
+    { id: "SERIAL PRIMARY KEY", name: "text not null", email: "text" },
     { posts: rel.oneToMany(() => Post, { foreignKey: "authorId" }) }
   );
 
   const Post = Entity(
-    "posts",
-    { id: "integer primary key autoincrement", title: "text not null", body: "text", authorId: "integer not null", published: "boolean" },
+    "pg_scen_bi_posts",
+    { id: "SERIAL PRIMARY KEY", title: "text not null", body: "text", authorId: "integer not null", published: "boolean" },
     { author: rel.manyToOne(() => User, { foreignKey: "authorId" }) }
   );
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     registerEntity(User);
     registerEntity(Post);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_bi_posts"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_bi_users"');
     await db.migrate();
     const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
     const bob   = await User.query().insert({ name: "Bob",   email: "bob@example.com" });
@@ -333,7 +360,7 @@ describe("circular-style bidirectional relations", () => {
     await Post.query().insert({ title: "Draft",          body: "WIP...",       authorId: (bob as any).id,   published: false });
     await Post.query().insert({ title: "Alice's second", body: "Another one.", authorId: (alice as any).id, published: true });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   it("manyToOne: each post loads its author", async () => {
     const rows = await Post.query()
@@ -345,7 +372,7 @@ describe("circular-style bidirectional relations", () => {
     expect((rows[0] as any).author?.name).toBe("Alice");
     expect((rows[1] as any).author?.name).toBe("Bob");
     expect((rows[2] as any).author?.name).toBe("Alice");
-  });
+  }, { skip: !hasPostgres() });
 
   it("partial relation select omits extra fields", async () => {
     const rows = await Post.query()
@@ -354,7 +381,7 @@ describe("circular-style bidirectional relations", () => {
 
     expect(rows[0].author).toMatchObject({ name: "Alice" });
     expect(rows[0].author).not.toHaveProperty("email");
-  });
+  }, { skip: !hasPostgres() });
 
   it("oneToMany: each user loads their posts", async () => {
     const rows = await User.query()
@@ -369,7 +396,7 @@ describe("circular-style bidirectional relations", () => {
     expect(rows).toHaveLength(2);
     expect((rows[0] as any).posts).toHaveLength(2);
     expect((rows[1] as any).posts).toHaveLength(1);
-  });
+  }, { skip: !hasPostgres() });
 
   it("where + select filters to published posts with author", async () => {
     const rows = await Post.query()
@@ -379,34 +406,40 @@ describe("circular-style bidirectional relations", () => {
 
     expect(rows).toHaveLength(2);
     expect(rows.every((r: any) => r.author != null)).toBe(true);
-  });
+  }, { skip: !hasPostgres() });
 });
 
 // ─── relation-where (JOIN / EXISTS) ───────────────────────────────────────────
 
-describe("relation-where: JOIN and EXISTS filtering", () => {
-  const Company    = Entity("companies",  { id: "integer primary key autoincrement", name: "text not null" });
-  const Category   = Entity("categories", { id: "integer primary key autoincrement", name: "text not null" });
+describe("relation-where: JOIN and EXISTS filtering (postgres)", () => {
+  const Company    = Entity("pg_scen_rw_companies",  { id: "SERIAL PRIMARY KEY", name: "text not null" });
+  const Category   = Entity("pg_scen_rw_categories", { id: "SERIAL PRIMARY KEY", name: "text not null" });
   const Contact    = Entity(
-    "contacts",
-    { id: "integer primary key autoincrement", name: "text not null", email: "text", companyId: "integer not null", categoryId: "integer" },
+    "pg_scen_rw_contacts",
+    { id: "SERIAL PRIMARY KEY", name: "text not null", email: "text", companyId: "integer not null", categoryId: "integer" },
     {
       company:  rel.manyToOne(() => Company,  { foreignKey: "companyId" }),
       category: rel.manyToOne(() => Category, { foreignKey: "categoryId" }),
     }
   );
-  const Employee   = Entity("employees",  { id: "integer primary key autoincrement", name: "text not null", departmentId: "integer not null" });
+  const Employee   = Entity("pg_scen_rw_employees",  { id: "SERIAL PRIMARY KEY", name: "text not null", departmentId: "integer not null" });
   const Department = Entity(
-    "departments",
-    { id: "integer primary key autoincrement", name: "text not null" },
+    "pg_scen_rw_departments",
+    { id: "SERIAL PRIMARY KEY", name: "text not null" },
     { employees: rel.oneToMany(() => Employee, { foreignKey: "departmentId" }) }
   );
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     for (const e of [Company, Category, Contact, Employee, Department]) registerEntity(e);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_rw_contacts"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_rw_employees"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_rw_companies"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_rw_categories"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_rw_departments"');
     await db.migrate();
 
     const acme   = await Company.query().insert({ name: "Acme Corp" });
@@ -423,7 +456,7 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
     await Employee.query().insert({ name: "Bob",   departmentId: (engDept as any).id });
     await Employee.query().insert({ name: "Carol", departmentId: (salesDept as any).id });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   it("where with relation (JOIN): contacts at Acme Corp", async () => {
     const rows = await Contact.query()
@@ -435,7 +468,7 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
     expect(rows).toHaveLength(2);
     expect((rows[0] as any).name).toBe("John Doe");
     expect((rows[1] as any).name).toBe("Jane Smith");
-  });
+  }, { skip: !hasPostgres() });
 
   it("where + select same relation (JOIN reuse)", async () => {
     const rows = await Contact.query()
@@ -446,7 +479,7 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows[0] as any).company.name).toBe("Acme Corp");
-  });
+  }, { skip: !hasPostgres() });
 
   it("select spread + relation: all columns plus company", async () => {
     const rows = await Contact.query()
@@ -456,7 +489,7 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
 
     expect(rows).toHaveLength(3);
     expect(rows.every((r: any) => r.company != null)).toBe(true);
-  });
+  }, { skip: !hasPostgres() });
 
   it("where uses company, select uses category (different relations)", async () => {
     const rows = await Contact.query()
@@ -467,7 +500,7 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows[0] as any).category).toBeDefined();
-  });
+  }, { skip: !hasPostgres() });
 
   it("oneToMany where with some() (EXISTS): departments with Alice", async () => {
     const rows = await Department.query()
@@ -477,7 +510,7 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
 
     expect(rows).toHaveLength(1);
     expect((rows[0] as any).name).toBe("Engineering");
-  });
+  }, { skip: !hasPostgres() });
 
   it("count with relation where", async () => {
     const n = await Contact.query()
@@ -485,21 +518,21 @@ describe("relation-where: JOIN and EXISTS filtering", () => {
       .count();
 
     expect(n).toBe(2);
-  });
+  }, { skip: !hasPostgres() });
 });
 
 // ─── explicit join type hints ─────────────────────────────────────────────────
 
-describe("explicit join type hints", () => {
-  const Author = Entity("authors", {
-    id: "integer primary key autoincrement",
+describe("explicit join type hints (postgres)", () => {
+  const Author = Entity("pg_scen_jt_authors", {
+    id: "SERIAL PRIMARY KEY",
     name: "text not null",
   });
 
   const Article = Entity(
-    "articles",
+    "pg_scen_jt_articles",
     {
-      id: "integer primary key autoincrement",
+      id: "SERIAL PRIMARY KEY",
       title: "text not null",
       authorId: "integer",
     },
@@ -508,18 +541,21 @@ describe("explicit join type hints", () => {
 
   let db: Db;
   beforeEach(async () => {
+    if (!hasPostgres()) return;
     clearRegistry();
     registerEntity(Author);
     registerEntity(Article);
     db = freshDb();
+    await db.run('DROP TABLE IF EXISTS "pg_scen_jt_articles"');
+    await db.run('DROP TABLE IF EXISTS "pg_scen_jt_authors"');
     await db.migrate();
     const alice = await Author.query().insert({ name: "Alice" });
     const bob   = await Author.query().insert({ name: "Bob" });
-    await Article.query().insert({ title: "Alice article",   authorId: (alice as any).id });
-    await Article.query().insert({ title: "Bob article",     authorId: (bob as any).id });
-    await Article.query().insert({ title: "Orphan article",  authorId: null });
+    await Article.query().insert({ title: "Alice article",  authorId: (alice as any).id });
+    await Article.query().insert({ title: "Bob article",    authorId: (bob as any).id });
+    await Article.query().insert({ title: "Orphan article", authorId: null });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => { if (db) await db.close(); });
 
   // ── INNER JOIN ──────────────────────────────────────────────────────────────
 
@@ -531,7 +567,7 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   it("innerJoin with single-member syntax p => p.author", async () => {
     const rows = await Article.query()
@@ -541,7 +577,7 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   it("innerJoin + where on joined relation column", async () => {
     const rows = await Article.query()
@@ -551,7 +587,7 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(1);
     expect((rows[0] as any).title).toBe("Alice article");
-  });
+  }, { skip: !hasPostgres() });
 
   it("innerJoin + orderBy on joined relation column", async () => {
     const rows = await Article.query()
@@ -562,7 +598,7 @@ describe("explicit join type hints", () => {
     expect(rows).toHaveLength(2);
     expect((rows[0] as any).title).toBe("Bob article");
     expect((rows[1] as any).title).toBe("Alice article");
-  });
+  }, { skip: !hasPostgres() });
 
   // ── LEFT JOIN ───────────────────────────────────────────────────────────────
 
@@ -573,7 +609,7 @@ describe("explicit join type hints", () => {
       .toArray();
 
     expect(rows).toHaveLength(3);
-  });
+  }, { skip: !hasPostgres() });
 
   it("leftJoin with single-member syntax p => p.author includes orphans", async () => {
     const rows = await Article.query()
@@ -581,7 +617,7 @@ describe("explicit join type hints", () => {
       .toArray();
 
     expect(rows).toHaveLength(3);
-  });
+  }, { skip: !hasPostgres() });
 
   it("leftJoin + count returns all rows including orphans", async () => {
     const n = await Article.query()
@@ -589,13 +625,13 @@ describe("explicit join type hints", () => {
       .count();
 
     expect(n).toBe(3);
-  });
+  }, { skip: !hasPostgres() });
 
-  // ── CROSS JOIN ──────────────────────────────────────────────────────────────
-  // SQLite supports CROSS JOIN with ON clause; it behaves like INNER JOIN
-  // (the ON condition filters the cartesian product, so orphan rows are excluded).
+  // ── CROSS JOIN (mapped to INNER JOIN on Postgres) ───────────────────────────
+  // Postgres does not support CROSS JOIN with an ON clause, so the dialect maps
+  // crossJoin() to INNER JOIN. Orphan rows are excluded, same as innerJoin().
 
-  it("crossJoin excludes orphan rows (behaves like INNER JOIN on SQLite)", async () => {
+  it("crossJoin excludes orphan rows (ON condition filters cartesian product)", async () => {
     const rows = await Article.query()
       .crossJoin((a: any) => ({ author: a.author }))
       .orderBy("id", "asc")
@@ -603,7 +639,7 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   it("crossJoin with single-member syntax p => p.author excludes orphans", async () => {
     const rows = await Article.query()
@@ -613,12 +649,12 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   // ── RIGHT JOIN ──────────────────────────────────────────────────────────────
   // RIGHT JOIN returns all rows from the right table (authors).
-  // The orphan article (authorId = null) has no matching author so it is
-  // excluded; both authors are matched so no extra null-article rows appear.
+  // Both authors have articles so no null-article rows appear.
+  // The orphan article has no matching author and is excluded.
 
   it("rightJoin excludes orphan rows (no matching author in right table)", async () => {
     const rows = await Article.query()
@@ -628,7 +664,7 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   it("rightJoin with single-member syntax p => p.author excludes orphan rows", async () => {
     const rows = await Article.query()
@@ -638,12 +674,12 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(2);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   // ── FULL OUTER JOIN ─────────────────────────────────────────────────────────
   // FULL OUTER JOIN returns all rows from both tables.
-  // The orphan article has no matching author so it appears with null author
-  // columns; both authors are matched so no extra author-only rows appear.
+  // The orphan article (no author) appears with null author columns.
+  // Both authors are matched so no extra author-only rows appear.
 
   it("fullJoin includes all rows from both sides (orphan article retained)", async () => {
     const rows = await Article.query()
@@ -653,7 +689,7 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(3);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article", "Orphan article"]);
-  });
+  }, { skip: !hasPostgres() });
 
   it("fullJoin with single-member syntax p => p.author retains orphan article", async () => {
     const rows = await Article.query()
@@ -663,5 +699,5 @@ describe("explicit join type hints", () => {
 
     expect(rows).toHaveLength(3);
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article", "Orphan article"]);
-  });
+  }, { skip: !hasPostgres() });
 });

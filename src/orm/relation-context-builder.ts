@@ -68,6 +68,20 @@ export function buildRelationContext(
   return { columnPaths, columnAliases, relationFetches, reusableJoinKeys, hasReusableRelationInSelect, skipLoadFor };
 }
 
+/** Produce the IrSelect handed to the SQL compiler.
+ *  When columnPaths is non-null the relation paths have been resolved, so
+ *  substitute them; otherwise pass the original selectIr through unchanged. */
+export function resolveSelectForSql(
+  selectIr: IrSelect | null,
+  columnPaths: string[][] | null,
+  columnAliases: string[] | null
+): IrSelect | null {
+  if (columnPaths === null) return selectIr;
+  return (columnPaths.length > 0 || selectIr?.rest)
+    ? { param: selectIr!.param, paths: columnPaths, aliases: columnAliases!, ...(selectIr!.rest ? { rest: true } : {}) }
+    : selectIr;
+}
+
 /** Top-level entry point. Walks all paths and relation entries in the IrSelect,
  *  splitting them into plain column paths (to include in the SQL SELECT list)
  *  and relation fetches (to execute as separate WHERE-IN queries after the main query).

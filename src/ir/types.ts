@@ -105,6 +105,34 @@ export interface IrSelect {
   relations?: IrSelectRelation[];
 }
 
+export type JoinType = "inner" | "left" | "right" | "cross" | "full";
+
+export const JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
+  inner: "INNER JOIN",
+  left:  "LEFT JOIN",
+  right: "RIGHT JOIN",
+  cross: "CROSS JOIN",
+  full:  "FULL OUTER JOIN",
+};
+
+export interface JoinHint {
+  relationKey: string;
+  joinType: JoinType;
+}
+
+export function isIrOrderBy(value: unknown): value is IrOrderBy {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.param === "string" &&
+    v.param.length > 0 &&
+    Array.isArray(v.path) &&
+    v.path.length > 0 &&
+    (v.path as unknown[]).every((segment): segment is string => typeof segment === "string") &&
+    (v.direction === "asc" || v.direction === "desc")
+  );
+}
+
 export function isIrNode(node: unknown): node is IrNode {
   if (node == null || typeof node !== "object") return false;
   const k = (node as { kind?: string }).kind;
@@ -118,6 +146,29 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "call" ||
     k === "exists"
   );
+}
+
+/** Recursively gather every row-parameter name referenced inside an IrWhere tree
+ *  (e.g. "u" from `u.name === "Alice"`). */
+export function collectParamNamesFromWhere(node: IrNode, out: Set<string>): void {
+  switch (node.kind) {
+    case "member": out.add(node.param); break;
+    case "binary":
+      collectParamNamesFromWhere(node.left, out);
+      collectParamNamesFromWhere(node.right, out);
+      break;
+    case "unary": collectParamNamesFromWhere(node.operand, out); break;
+    case "in":
+      collectParamNamesFromWhere(node.left, out);
+      collectParamNamesFromWhere(node.right, out);
+      break;
+    case "call":
+      collectParamNamesFromWhere(node.receiver, out);
+      for (const a of node.args) collectParamNamesFromWhere(a, out);
+      break;
+    case "exists": out.add(node.rootParam); break;
+    default: break;
+  }
 }
 
 export function isIrSelect(node: unknown): node is IrSelect {

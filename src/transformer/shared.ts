@@ -3,7 +3,7 @@
  */
 
 import * as ts from "typescript";
-import type { IrNode, IrSelect, IrBinary } from "../ir/types.js";
+import type { IrNode, IrSelect, IrBinary, IrOrderBy } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
 // Typhex type detection
@@ -188,6 +188,17 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       break;
   }
   return f.createObjectLiteralExpression(props);
+}
+
+export function irOrderByToTsLiteral(ir: IrOrderBy): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  return f.createObjectLiteralExpression([
+    f.createPropertyAssignment("param", f.createStringLiteral(ir.param)),
+    f.createPropertyAssignment("path",
+      f.createArrayLiteralExpression(ir.path.map(p => f.createStringLiteral(p)))
+    ),
+    f.createPropertyAssignment("direction", f.createStringLiteral(ir.direction)),
+  ]);
 }
 
 export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {

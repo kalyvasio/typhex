@@ -160,8 +160,9 @@ export function Entity<
         return { table: tbl._table, pk: getPkColumn(schema) };
       }
       return null;
-    } catch {
-      return null;
+    } catch (e) {
+      if (e instanceof TypeError || e instanceof ReferenceError) return null;
+      throw e;
     }
   }
 
