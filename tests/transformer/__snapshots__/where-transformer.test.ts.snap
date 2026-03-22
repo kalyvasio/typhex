@@ -1,5 +1,10 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`where transformer > transforms (d) => d.employees.some((e) => e.name === 'Alice') 1`] = `
+"depts.where({ kind: "exists", rootParam: "d", relationKey: "employees", innerParam: "e", innerWhere: { kind: "binary", op: "===", left: { kind: "member", param: "e", path: ["name"] }, right: { kind: "const", value: "Alice" } } }, {});
+"
+`;
+
 exports[`where transformer > transforms (u) => !(u.id in [2]) 1`] = `
 "users.where({ kind: "unary", op: "!", operand: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [2] } } }, {});
 "

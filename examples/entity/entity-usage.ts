@@ -94,7 +94,7 @@ console.log("user displayname:", user?.displayName ?? "n/a");
 const firstPost = await Post.query().where((p) => p.published === true).first();
 console.log("First published post:", firstPost?.title ?? "none");
 
-const found = await User.query().findByPk(alice.id!);
+const found = await User.query().findById(alice.id!);
 console.log("Found by id:", found?.name ?? "null");
 
 const newUser = new UserEntity({

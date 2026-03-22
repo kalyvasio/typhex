@@ -76,6 +76,10 @@ function arrowToIrSelect(
         rest = true;
         continue;
       }
+      if (ts.isIdentifier(prop.expression) && prop.expression.text === paramName) {
+        rest = true;
+        continue;
+      }
       return null;
     }
 

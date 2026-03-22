@@ -110,7 +110,7 @@ function createTableDef<TTable extends string, TSchema extends Record<string, st
   };
 }
 
-/** Entity class type: 3 params only (table, schema def, relations). Use .query() for insert, findByPk, where, etc. */
+/** Entity class type: 3 params only (table, schema def, relations). Use .query() for insert, findById, where, etc. */
 export type EntityClass<
   TTable extends string,
   TSchema extends Record<string, string>,
@@ -146,6 +146,24 @@ export function Entity<
     return d;
   }
 
+  function resolveRelationTarget(rel: RelationDef): { table: string; pk: string } | null {
+    try {
+      const target = rel._target();
+      const entityClass =
+        target && typeof target === "function"
+          ? (target as { table?: TableDef<Record<string, string>, RelationsMap> })
+          : (target as { _selectType?: { table?: TableDef<Record<string, string>, RelationsMap> } })?._selectType;
+      const tbl = entityClass?.table;
+      if (tbl) {
+        const schema = tbl._schema as Record<string, string>;
+        return { table: tbl._table, pk: getPkColumn(schema) };
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
   function baseState(driver: Driver) {
     return {
       tableName,
@@ -159,6 +177,7 @@ export function Entity<
       offsetNum: null as null,
       selectIr: null as null,
       relations: rels as RelationsMap,
+      resolveRelationTarget,
     };
   }
 

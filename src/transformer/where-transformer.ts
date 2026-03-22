@@ -74,10 +74,41 @@ function exprToIr(
     const callee = expr.expression;
     if (ts.isPropertyAccessExpression(callee)) {
       const method = callee.name.text;
+      if (method === "some" && expr.arguments.length === 1 && ts.isPropertyAccessExpression(callee.expression)) {
+        const receiverResolved = resolveMemberPath(callee.expression, paramNames);
+        if (receiverResolved && receiverResolved.path.length >= 1) {
+          const innerFn = expr.arguments[0];
+          if (ts.isArrowFunction(innerFn) || ts.isFunctionExpression(innerFn)) {
+            const innerParamNames = innerFn.parameters
+              .map((p) => (p.name && ts.isIdentifier(p.name) ? p.name.text : "e"))
+              .slice(0, 1);
+            const innerParam = innerParamNames[0] ?? "e";
+            const innerFreeVars = new Set<string>();
+            let innerExpr: ts.Expression;
+            if (ts.isBlock(innerFn.body)) {
+              if (innerFn.body.statements.length !== 1) return null;
+              const st = innerFn.body.statements[0];
+              if (!st || !ts.isReturnStatement(st) || !st.expression) return null;
+              innerExpr = st.expression;
+            } else {
+              innerExpr = innerFn.body;
+            }
+            const innerWhere = exprToIr(innerExpr, innerParamNames, innerFreeVars);
+            if (!innerWhere) return null;
+            return {
+              kind: "exists",
+              rootParam: receiverResolved.param,
+              relationKey: receiverResolved.path[0],
+              innerParam,
+              innerWhere,
+            };
+          }
+        }
+      }
       if (ALLOWED_METHODS.has(method)) {
         const receiver = exprToIr(callee.expression, paramNames, freeVars);
-        const args = expr.arguments.map(a => exprToIr(a as ts.Expression, paramNames, freeVars));
-        if (!receiver || args.some(a => a === null)) return null;
+        const args = expr.arguments.map((a) => exprToIr(a as ts.Expression, paramNames, freeVars));
+        if (!receiver || args.some((a) => a === null)) return null;
         return { kind: "call", method, receiver, args: args as IrNode[] };
       }
     }

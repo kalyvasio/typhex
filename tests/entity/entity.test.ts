@@ -153,7 +153,7 @@ describe("Entity()", () => {
       const User = Entity("users", userSchema);
       await db.migrate();
       await User.query().insert({ name: "Alice", age: 30 });
-      const found = await User.query().findByPk(1);
+      const found = await User.query().findById(1);
       expect(found).not.toBeNull();
       expect((found as any).name).toBe("Alice");
       expect(found!._isNew).toBe(false);
@@ -162,7 +162,7 @@ describe("Entity()", () => {
     it("returns null when not found", async () => {
       const User = Entity("users", userSchema);
       await db.migrate();
-      const found = await User.query().findByPk(999);
+      const found = await User.query().findById(999);
       expect(found).toBeNull();
     });
   });
@@ -185,7 +185,7 @@ describe("Entity()", () => {
       const u = await User.query().insert({ name: "Alice", age: 30 });
       (u as any).name = "Alice Updated";
       await u.query().save();
-      const reloaded = await User.query().findByPk((u as any).id);
+      const reloaded = await User.query().findById((u as any).id);
       expect((reloaded as any).name).toBe("Alice Updated");
     });
 
@@ -284,7 +284,7 @@ describe("Entity subclassing", () => {
     }
 
     await UserEntity.query().insert({ name: "Alice", age: 30 });
-    const found = await UserEntity.query().findByPk(1);
+    const found = await UserEntity.query().findById(1);
     expect((found as any).tag).toBe("user:1");
   });
 });
@@ -385,7 +385,7 @@ describe("lifecycle hooks", () => {
     }
 
     await UserEntity.query().insert({ name: "Alice", age: 30 });
-    await UserEntity.query().findByPk(1);
+    await UserEntity.query().findById(1);
     expect(hookCalled).toBe(true);
   });
 
@@ -419,7 +419,7 @@ describe("lifecycle hooks", () => {
     }
 
     await UserEntity.query().insert({ name: "Alice", age: 30 });
-    const found = await UserEntity.query().findByPk(1);
+    const found = await UserEntity.query().findById(1);
     expect(found).not.toBeNull();
     expect(loadedName).toBe("Alice");
   });

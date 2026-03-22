@@ -31,6 +31,10 @@ describe("select transformer", () => {
     expect(transform("users.select(({ id, ...rest }) => ({ id, ...rest }));")).toMatchSnapshot();
   });
 
+  it("transforms (c) => ({ ...c, company: c.company }) to IR object with rest and relation", () => {
+    expect(transform("contacts.select((c) => ({ ...c, company: c.company }));")).toMatchSnapshot();
+  });
+
   it("transforms (u) => ({ userId: u.id, fullName: u.name, country: u.country }) with aliases", () => {
     expect(
       transform(

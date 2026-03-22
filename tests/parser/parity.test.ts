@@ -24,7 +24,7 @@ function transformToIr(source: string): IrNode | null {
   const result = ts.transform(sourceFile, [createTyphexTransformer(program)]);
   const printed = ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
 
-  const match = printed.match(/users\.where\((\{[\s\S]+?\})\s*,\s*\{/);
+  const match = printed.match(/\.where\((\{[\s\S]+?\})\s*,\s*\{/);
   if (!match) return null;
   try {
     return new Function(`return ${match[1]}`)() as IrNode;
@@ -79,6 +79,12 @@ describe("parity: runtime parser vs compile-time transformer", () => {
       name: "or expression: u.a || u.b",
       source: 'users.where((u) => u.a || u.b);',
       fn: (u: { a: boolean; b: boolean }) => u.a || u.b,
+    },
+    {
+      name: "relation.some(): d.employees.some((e) => e.name === 'Alice')",
+      source: 'depts.where((d) => d.employees.some((e) => e.name === "Alice"));',
+      fn: (d: { employees: { name: string }[] }) => d.employees.some((e) => e.name === "Alice"),
+      options: { paramNames: ["d"] },
     },
   ];
 
