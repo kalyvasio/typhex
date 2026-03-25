@@ -5,7 +5,7 @@
  * (except insert, which is synchronous to support save()).
  */
 
-import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
 import { isIrNode, isIrSelect } from "../ir/types.js";
 import type { Driver } from "../driver/types.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
@@ -31,7 +31,7 @@ export interface QueryBuilderInterface<C extends AnyEntityClass, T> {
   where(ir: IrNode, params?: Record<string, unknown>): QueryBuilderInterface<C, T>;
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilderInterface<C, U>;
   select(cols: string[] | IrSelect): QueryBuilderInterface<C, T>;
-  orderBy(col: string, dir?: string): QueryBuilderInterface<C, T>;
+  orderBy(col: string | ((row: T) => unknown), dir?: OrderDirection): QueryBuilderInterface<C, T>;
   limit(n: number): QueryBuilderInterface<C, T>;
   offset(n: number): QueryBuilderInterface<C, T>;
   toArray(): Promise<T[]>;
@@ -69,7 +69,8 @@ function getRelationJoins(state: QueryState<unknown>): RelationJoinInfo[] {
     },
     state.whereIr,
     state.selectIr,
-    rootParam
+    rootParam,
+    state.orderBy
   );
 }
 
@@ -84,7 +85,7 @@ function getCompileOpts(state: QueryState<unknown>) {
   const paramToAlias = buildParamToAlias(state);
   const joins = getRelationJoins(state);
   const rootParam = getRootParam(state);
-  const relationPathToAlias = buildRelationPathToAlias(joins, rootParam);
+  const relationPathToAlias = buildRelationPathToAlias(joins, Object.keys(paramToAlias));
   const mainPk = state.pkColumn ?? "id";
   const oneToManyExists =
     state.relations && state.resolveRelationTarget
@@ -230,8 +231,35 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   }
 
   /** Append an ORDER BY clause for the given column. Defaults to ascending order. */
-  orderBy(column: string, direction: "asc" | "desc" = "asc"): QueryBuilder<C, T> {
-    this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path: [column], direction });
+  orderBy(
+      columnOrFn: string | ((row: T) => unknown),
+      direction: OrderDirection = "asc"
+  ): QueryBuilder<C, T> {
+    let path: string[];
+
+    if (typeof columnOrFn === "function") {
+      // Parse lambda: u => u.company.name → IrMember { param: "u", path: ["company", "name"] }
+      try {
+        const ir = parseArrowToIr(columnOrFn as (u: any) => any, {
+          paramKeys: [],
+        });
+        if (ir.kind !== "member" || !ir.path || ir.path.length === 0) {
+          throw new Error("[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)");
+        }
+        path = ir.path;
+      } catch (e) {
+        throw new Error("Failed to parse orderBy lambda: " + (e instanceof Error ? e.message : String(e)));
+      }
+    } else {
+      // String: "company.name" → ["company", "name"]
+      const segments = columnOrFn.split(".").map((s) => s.trim());
+      if (segments.length === 0 || segments.some((s) => s.length === 0)) {
+        throw new Error('[typhex] orderBy column must be a non-empty dot-separated path (e.g. "company.name")');
+      }
+      path = segments;
+    }
+
+    this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path, direction });
     return this;
   }
 

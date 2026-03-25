@@ -1,0 +1,296 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { QueryBuilder } from "../../src/orm/query-builder.js";
+import { Db, createSqliteDriver, Entity, rel } from "../../src/index.js";
+import type { Driver } from "../../src/driver/types.js";
+import type { RelationDef } from "../../src/entity/relations.js";
+import { sqliteDialect } from "../../src/dbs/sqlite/dialect.js";
+import type { IrOrderBy } from "../../src/ir/types.js";
+
+// ---------------------------------------------------------------------------
+// Unit tests: orderBy lambda parsing
+// ---------------------------------------------------------------------------
+
+class MockCompanyE extends Entity("mock_companies", {
+  id: "integer primary key",
+  name: "text",
+}) {}
+
+class MockContactE extends Entity("mock_contacts", {
+  id: "integer primary key",
+  name: "text",
+  companyId: "integer",
+}, {
+  company: rel.manyToOne(() => MockCompanyE, { foreignKey: "companyId" }),
+}) {}
+
+function createMockDriver(): Driver {
+  return {
+    dialect: "sqlite",
+    query: vi.fn().mockReturnValue([]),
+    run: vi.fn().mockReturnValue({ lastID: 1, changes: 0 }),
+    transaction: vi.fn((fn) => fn()),
+    close: vi.fn(),
+  };
+}
+
+function newBuilder(driver: Driver) {
+  return new QueryBuilder<typeof MockContactE, InstanceType<typeof MockContactE>>({
+    tableName: "mock_contacts",
+    columnNames: ["id", "name", "companyId"],
+    driver,
+    pkColumn: "id",
+    whereIr: null,
+    whereParams: {},
+    orderBy: [],
+    limitNum: null,
+    offsetNum: null,
+    selectIr: null,
+    relations: MockContactE.table._relations,
+    resolveRelationTarget: (rel: RelationDef) => {
+      const target = rel._target() as { table?: { _table: string } } | null;
+      return target?.table ? { table: target.table._table, pk: "id" } : null;
+    },
+  });
+}
+
+describe("orderBy — lambda and dot-notation support", () => {
+  let driver: Driver;
+
+  beforeEach(() => {
+    driver = createMockDriver();
+  });
+
+  describe("lambda parsing", () => {
+    it("parses u => u.name as single-segment path", () => {
+      const q = newBuilder(driver);
+      q.orderBy(u => u.name);
+      expect(q).toBeInstanceOf(QueryBuilder);
+    });
+
+    it("parses u => u.company.name as two-segment path", () => {
+      const q = newBuilder(driver);
+      q.orderBy(u => u.company.name);
+      expect(q).toBeInstanceOf(QueryBuilder);
+    });
+
+    it("stores correct path for u => u.name", async () => {
+      let capturedSql = "";
+      (driver.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+        capturedSql = sql;
+        return [];
+      });
+      const q = newBuilder(driver);
+      q.orderBy(u => u.name);
+      await q.toArray();
+      expect(capturedSql).toContain('"name"');
+    });
+
+    it("throws on non-member-expression lambda", () => {
+      const q = newBuilder(driver);
+      expect(() => q.orderBy(u => (u.name as any) > 5)).toThrow();
+    });
+
+    it("chains and returns this (same reference)", () => {
+      const q = newBuilder(driver);
+      const result = q.orderBy(u => u.name);
+      expect(result).toBe(q);
+    });
+  });
+
+  describe("dot-notation string", () => {
+    it("splits 'company.name' into path ['company', 'name']", async () => {
+      let capturedSql = "";
+      (driver.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+        capturedSql = sql;
+        return [];
+      });
+      const q = newBuilder(driver);
+      q.orderBy("company.name");
+      await q.toArray();
+      expect(capturedSql).toContain('"mock_companies"');
+      expect(capturedSql).toMatch(/ORDER BY\s+.+name/i);
+    });
+
+    it("chains and returns this (same reference)", () => {
+      const q = newBuilder(driver);
+      const result = q.orderBy("name", "desc");
+      expect(result).toBe(q);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Unit tests: compileOrderBy with relationPathToAlias
+// ---------------------------------------------------------------------------
+
+describe("compileOrderBy — relation path resolution", () => {
+  it("resolves relation alias for path ['company', 'name']", () => {
+    const orders: IrOrderBy[] = [
+      { param: "u", path: ["company", "name"], direction: "asc" },
+    ];
+    const result = sqliteDialect.compileOrderBy(orders, {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+      relationPathToAlias: { "u.company": "t1" },
+    });
+    expect(result).toBe('"t1"."name" ASC');
+  });
+
+  it("resolves relation alias for desc direction", () => {
+    const orders: IrOrderBy[] = [
+      { param: "u", path: ["company", "name"], direction: "desc" },
+    ];
+    const result = sqliteDialect.compileOrderBy(orders, {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+      relationPathToAlias: { "u.company": "t1" },
+    });
+    expect(result).toBe('"t1"."name" DESC');
+  });
+
+  it("falls back to table alias when no relation path alias matches", () => {
+    const orders: IrOrderBy[] = [
+      { param: "u", path: ["name"], direction: "asc" },
+    ];
+    const result = sqliteDialect.compileOrderBy(orders, {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+    });
+    expect(result).toBe('"t0"."name" ASC');
+  });
+
+  it("does not resolve single-segment paths (non-relation columns)", () => {
+    const orders: IrOrderBy[] = [
+      { param: "u", path: ["company"], direction: "asc" },
+    ];
+    const result = sqliteDialect.compileOrderBy(orders, {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+      relationPathToAlias: { "u.company": "t1" },
+    });
+    // single-segment path: no resolution (path.length < 2)
+    expect(result).toBe('"t0"."company" ASC');
+  });
+
+  it("compiles multiple orders including a relation column", () => {
+    const orders: IrOrderBy[] = [
+      { param: "u", path: ["company", "name"], direction: "asc" },
+      { param: "u", path: ["name"], direction: "desc" },
+    ];
+    const result = sqliteDialect.compileOrderBy(orders, {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+      relationPathToAlias: { "u.company": "t1" },
+    });
+    expect(result).toBe('"t1"."name" ASC, "t0"."name" DESC');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration tests: orderBy on relation columns with actual SQLite DB
+// ---------------------------------------------------------------------------
+
+class CompanyE extends Entity("companies_ob", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+}) {}
+
+class ContactE extends Entity("contacts_ob", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+  companyId: "integer not null",
+}, {
+  company: rel.manyToOne(() => CompanyE, { foreignKey: "companyId" }),
+}) {}
+
+describe("orderBy relation columns — integration", () => {
+  let db: Db;
+
+  beforeEach(async () => {
+    db = new Db(createSqliteDriver({ path: ":memory:" }));
+    await db.migrate();
+    // Insert in non-alphabetical order to verify sorting
+    const globex = await CompanyE.query().insert({ name: "Globex" });
+    const acme = await CompanyE.query().insert({ name: "Acme" });
+    await ContactE.query().insert({ name: "Bob", companyId: globex.id });
+    await ContactE.query().insert({ name: "Alice", companyId: acme.id });
+    await ContactE.query().insert({ name: "Charlie", companyId: globex.id });
+  });
+
+  afterEach(async () => {
+    await db.close();
+  });
+
+  it("orderBy string 'company.name' asc sorts by joined relation column", async () => {
+    const rows = await ContactE.query()
+      .orderBy("company.name", "asc")
+      .select(c => ({ id: c.id, name: c.name }))
+      .toArray();
+    // Acme contacts first, then Globex
+    const names = rows.map(r => r.name);
+    const aliceIdx = names.indexOf("Alice");
+    const bobIdx = names.indexOf("Bob");
+    const charlieIdx = names.indexOf("Charlie");
+    // Alice (Acme) should come before Bob/Charlie (Globex)
+    expect(aliceIdx).toBeLessThan(bobIdx);
+    expect(aliceIdx).toBeLessThan(charlieIdx);
+  });
+
+  it("orderBy lambda (u => u.company.name) asc sorts by joined relation column", async () => {
+    const rows = await ContactE.query()
+      .orderBy(u => u.company.name, "asc")
+      .select(c => ({ id: c.id, name: c.name }))
+      .toArray();
+    const names = rows.map(r => r.name);
+    const aliceIdx = names.indexOf("Alice");
+    const bobIdx = names.indexOf("Bob");
+    const charlieIdx = names.indexOf("Charlie");
+    expect(aliceIdx).toBeLessThan(bobIdx);
+    expect(aliceIdx).toBeLessThan(charlieIdx);
+  });
+
+  it("orderBy lambda desc sorts in reverse", async () => {
+    const rows = await ContactE.query()
+      .orderBy(u => u.company.name, "desc")
+      .select(c => ({ id: c.id, name: c.name }))
+      .toArray();
+    const names = rows.map(r => r.name);
+    const aliceIdx = names.indexOf("Alice");
+    const bobIdx = names.indexOf("Bob");
+    // Globex first in desc, Alice (Acme) should be last
+    expect(bobIdx).toBeLessThan(aliceIdx);
+  });
+
+  it("generates LEFT JOIN in SQL for relation orderBy", async () => {
+    let capturedSql = "";
+    const mockDriver = createMockDriver();
+    (mockDriver.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+      capturedSql = sql;
+      return [];
+    });
+
+    const state = {
+      tableName: "contacts_ob",
+      columnNames: ["id", "name", "companyId"],
+      driver: mockDriver,
+      pkColumn: "id",
+      whereIr: null,
+      whereParams: {},
+      orderBy: [] as IrOrderBy[],
+      limitNum: null,
+      offsetNum: null,
+      selectIr: null,
+      relations: ContactE.table._relations,
+      resolveRelationTarget: (rel: RelationDef) => {
+        const target = rel._target() as { table?: { _table: string } } | null;
+        return target?.table ? { table: target.table._table, pk: "id" } : null;
+      },
+    };
+    const qb = new QueryBuilder(state);
+    qb.orderBy("company.name", "asc");
+    await qb.toArray();
+    expect(capturedSql).toContain("LEFT JOIN");
+    expect(capturedSql).toContain('"companies_ob"');
+    expect(capturedSql).toContain("ORDER BY");
+  });
+});

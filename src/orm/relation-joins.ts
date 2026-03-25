@@ -4,7 +4,7 @@
  * instead of failing on non-existent column.
  */
 
-import type { IrNode, IrMember, IrSelect } from "../ir/types.js";
+import type {IrNode, IrMember, IrSelect, IrOrderBy} from "../ir/types.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 
 export interface RelationJoinInfo {
@@ -100,6 +100,19 @@ function collectRelationKeysFromNode(
   }
 }
 
+function collectRelationKeysFromOrderBy(
+  orderBy: IrOrderBy[],
+  relations: RelationsMap,
+  out: Set<string>
+): void {
+  for (const order of orderBy) {
+    if (order.path.length > 1) {
+      const key = order.path[0];
+      if (key in relations) out.add(key);
+    }
+  }
+}
+
 /** Collect relation keys referenced in a select IR — from dotted paths (e.g. ["company","name"])
  *  and from explicit relation entries in `select.relations`. */
 function collectRelationKeysFromSelect(
@@ -145,7 +158,7 @@ export function getReusableJoinKeys(
 }
 
 /**
- * Build JOIN metadata only for relations used in the where clause.
+ * Build JOIN metadata for relations used in the where clause or orderBy.
  * Relations used only in select are loaded via whereIn (separate query).
  * Relations in both where and select reuse the join when select projection <= where projection.
  */
@@ -153,11 +166,15 @@ export function buildRelationJoins(
   ctx: RelationJoinContext,
   whereNode: IrNode | null,
   selectNode: IrSelect | null,
-  rootParam: string
+  rootParam: string,
+  orderBy?: IrOrderBy[]
 ): RelationJoinInfo[] {
   const { relations } = ctx;
   const keys = new Set<string>();
   collectRelationKeysFromNode(whereNode ?? { kind: "const", value: null }, relations, rootParam, keys);
+  if (orderBy && orderBy.length > 0) {
+    collectRelationKeysFromOrderBy(orderBy, relations, keys);
+  }
 
   const result: RelationJoinInfo[] = [];
   let aliasIndex = 1;
@@ -196,11 +213,13 @@ export function buildRelationJoins(
  *  references in WHERE and SELECT clauses. */
 export function buildRelationPathToAlias(
   joins: RelationJoinInfo[],
-  rootParam: string
+  params: string[]
 ): Record<string, string> {
   const map: Record<string, string> = {};
   for (const j of joins) {
-    map[`${rootParam}.${j.relationKey}`] = j.alias;
+    for (const param of params) {
+      map[`${param}.${j.relationKey}`] = j.alias;
+    }
   }
   return map;
 }
