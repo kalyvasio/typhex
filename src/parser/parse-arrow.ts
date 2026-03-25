@@ -358,10 +358,13 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
 
     case "UnaryExpression": {
       if (n.operator !== "!") throw new Error("Unsupported unary: " + n.operator);
+      const inner = walk(n.argument ?? n.operand!, params, paramKeys);
+      // Optimization: !(.in.) → negated IrIn instead of IrUnary(IrIn)
+      if (inner.kind === "in") return { ...inner, negated: true };
       return {
         kind: "unary",
         op: "!",
-        operand: walk(n.argument ?? n.operand!, params, paramKeys),
+        operand: inner,
       } as IrUnary;
     }
 
@@ -389,7 +392,7 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
       };
       if (callee.type !== "MemberExpression") throw new Error("Unsupported call expression");
       const method = callee.property?.name;
-      if (method === "some" && n.arguments?.length === 1) {
+      if ((method === "some" || method === "every") && n.arguments?.length === 1) {
         const receiverResolved = resolveMemberFromAcorn(callee.object as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, params);
         if (receiverResolved && receiverResolved.path.length >= 1) {
           const arg = n.arguments[0] as AcornNode & { type: string; params?: AcornNode[]; body?: AcornNode };
@@ -408,6 +411,7 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
             const innerWhere = walk(innerExpr, [innerParam], paramKeys);
             return {
               kind: "exists",
+              ...(method === "every" ? { negated: true } : {}),
               rootParam: receiverResolved.param,
               relationKey: receiverResolved.path[0],
               innerParam,

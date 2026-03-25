@@ -61,6 +61,27 @@ describe("parser/parse-arrow", () => {
     }
   });
 
+  it("parses negated in operator as IrIn with negated: true", () => {
+    const fn = (u: { id: number }) => !(u.id in [1, 2, 3]);
+    const ir = parseArrowToIr(fn);
+    expect(ir.kind).toBe("in");
+    if (ir.kind === "in") {
+      expect(ir.negated).toBe(true);
+      expect(ir.left).toEqual({ kind: "member", param: "u", path: ["id"] });
+      expect(ir.right).toEqual({ kind: "const", value: [1, 2, 3] });
+    }
+  });
+
+  it("parses not-expression wrapping non-in as IrUnary (not short-circuited)", () => {
+    const fn = (u: { active: boolean }) => !u.active;
+    const ir = parseArrowToIr(fn);
+    expect(ir.kind).toBe("unary");
+    if (ir.kind === "unary") {
+      expect(ir.op).toBe("!");
+      expect(ir.operand).toEqual({ kind: "member", param: "u", path: ["active"] });
+    }
+  });
+
   it("parses startsWith call", () => {
     const fn = (u: { name: string }) => u.name.startsWith("A");
     const ir = parseArrowToIr(fn);

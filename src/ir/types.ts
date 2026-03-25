@@ -48,11 +48,14 @@ export interface IrIn {
   kind: "in";
   left: IrNode;
   right: IrNode; // IrConst with array value or IrParam
+  negated?: boolean;
 }
 
-/** EXISTS subquery for one-to-many: relation.some(e => predicate). */
+/** EXISTS subquery for one-to-many: relation.some(e => predicate) or relation.every(e => predicate).
+ *  negated: true → every() → NOT EXISTS (... WHERE NOT (predicate)) */
 export interface IrExists {
   kind: "exists";
+  negated?: boolean;
   rootParam: string;
   relationKey: string;
   innerParam: string;

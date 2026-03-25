@@ -74,7 +74,7 @@ function exprToIr(
     const callee = expr.expression;
     if (ts.isPropertyAccessExpression(callee)) {
       const method = callee.name.text;
-      if (method === "some" && expr.arguments.length === 1 && ts.isPropertyAccessExpression(callee.expression)) {
+      if ((method === "some" || method === "every") && expr.arguments.length === 1 && ts.isPropertyAccessExpression(callee.expression)) {
         const receiverResolved = resolveMemberPath(callee.expression, paramNames);
         if (receiverResolved && receiverResolved.path.length >= 1) {
           const innerFn = expr.arguments[0];
@@ -97,6 +97,7 @@ function exprToIr(
             if (!innerWhere) return null;
             return {
               kind: "exists",
+              ...(method === "every" ? { negated: true } : {}),
               rootParam: receiverResolved.param,
               relationKey: receiverResolved.path[0],
               innerParam,
