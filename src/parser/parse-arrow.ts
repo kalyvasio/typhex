@@ -360,7 +360,7 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
       if (n.operator !== "!") throw new Error("Unsupported unary: " + n.operator);
       const inner = walk(n.argument ?? n.operand!, params, paramKeys);
       // Optimization: !(.in.) → negated IrIn instead of IrUnary(IrIn)
-      if (inner.kind === "in") return { ...inner, negated: true };
+      if (inner.kind === "in") return { ...inner, negated: !inner.negated };
       return {
         kind: "unary",
         op: "!",
@@ -402,12 +402,12 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
             let innerExpr: AcornNode;
             if (innerBody?.type === "BlockStatement" && innerBody.body?.[0]) {
               const ret = innerBody.body[0] as { expression?: AcornNode };
-              if (!ret.expression) throw new Error("Unsupported .some() callback: need return");
+              if (!ret.expression) throw new Error(`Unsupported .${method}() callback: need return`);
               innerExpr = ret.expression;
             } else {
               innerExpr = innerBody;
             }
-            if (!innerExpr) throw new Error("Unsupported .some() callback body");
+            if (!innerExpr) throw new Error(`Unsupported .${method}() callback body`);
             const innerWhere = walk(innerExpr, [innerParam], paramKeys);
             return {
               kind: "exists",

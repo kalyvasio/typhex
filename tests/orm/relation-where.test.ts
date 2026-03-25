@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {Db, createSqliteDriver, Entity, rel, IrNode} from "../../src/index.js";
-import {clearRegistry, registerEntity} from "../../src/entity/global-driver";
+import {clearRegistry, registerEntity} from "../../src/entity/global-driver.js";
 
 describe("relation where (JOIN)", () => {
     let db: Db;
@@ -128,178 +128,179 @@ describe("relation where (JOIN)", () => {
         expect(rows.length).toBeGreaterThan(0);
         expect((rows as any[]).some((r) => r.name === "Engineering")).toBe(true);
     });
-    describe("NOT IN / negated .some() (NOT EXISTS)", () => {
-        const User = Entity(
-            "rw_users",
-            {
-                id: "integer primary key autoincrement",
-                name: "text not null",
-                email: "text",
-            },
-            {
-                posts: rel.oneToMany(() => Post, { foreignKey: "authorId" }),
-            }
-        );
+});
 
-        const Post = Entity(
-            "rw_posts",
-            {
-                id: "integer primary key autoincrement",
-                title: "text not null",
-                body: "text",
-                authorId: "integer not null",
-                published: "boolean",
-            },
-            {
-                author: rel.manyToOne(() => User, { foreignKey: "authorId" }),
-            }
-        );
+describe("NOT IN / negated .some() (NOT EXISTS)", () => {
+    const User = Entity(
+        "rw_users",
+        {
+            id: "integer primary key autoincrement",
+            name: "text not null",
+            email: "text",
+        },
+        {
+            posts: rel.oneToMany(() => Post, { foreignKey: "authorId" }),
+        }
+    );
 
-        let db: Db;
+    const Post = Entity(
+        "rw_posts",
+        {
+            id: "integer primary key autoincrement",
+            title: "text not null",
+            body: "text",
+            authorId: "integer not null",
+            published: "boolean",
+        },
+        {
+            author: rel.manyToOne(() => User, { foreignKey: "authorId" }),
+        }
+    );
 
-        beforeEach(async () => {
-            clearRegistry();
-            registerEntity(User);
-            registerEntity(Post);
-            db = new Db(createSqliteDriver({ path: ":memory:" }));
-            await db.migrate();
+    let db: Db;
+
+    beforeEach(async () => {
+        clearRegistry();
+        registerEntity(User);
+        registerEntity(Post);
+        db = new Db(createSqliteDriver({ path: ":memory:" }));
+        await db.migrate();
+    });
+
+    afterEach(async () => {
+        await db.close();
+    });
+
+    describe("NOT IN with array literal via IrNode", () => {
+        it("returns rows whose id is NOT IN the given list", async () => {
+            const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
+            const bob = await User.query().insert({ name: "Bob", email: "bob@example.com" });
+            await User.query().insert({ name: "Carol", email: "carol@example.com" });
+
+            const aliceId = (alice as any).id as number;
+            const bobId = (bob as any).id as number;
+
+            // Build IrIn with negated: true directly
+            const notInIr: IrNode = {
+                kind: "in",
+                negated: true,
+                left: { kind: "member", param: "u", path: ["id"] },
+                right: { kind: "const", value: [aliceId, bobId] },
+            };
+
+            const results = await User.query()
+                .where(notInIr)
+                .orderBy("id", "asc")
+                .toArray();
+
+            expect(results).toHaveLength(1);
+            expect((results[0] as any).name).toBe("Carol");
         });
 
-        afterEach(async () => {
-            await db.close();
+        it("NOT IN with empty array (negated: true) returns all rows (1=1)", async () => {
+            await User.query().insert({ name: "Alice", email: "alice@example.com" });
+            await User.query().insert({ name: "Bob", email: "bob@example.com" });
+
+            // IrIn with negated: true and empty list compiles to 1=1 — all rows match
+            const notInEmptyIr: IrNode = {
+                kind: "in",
+                negated: true,
+                left: { kind: "member", param: "u", path: ["id"] },
+                right: { kind: "const", value: [] },
+            };
+
+            const results = await User.query()
+                .where(notInEmptyIr)
+                .orderBy("id", "asc")
+                .toArray();
+
+            expect(results).toHaveLength(2);
         });
 
-        describe("NOT IN with array literal via IrNode", () => {
-            it("returns rows whose id is NOT IN the given list", async () => {
-                const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
-                const bob = await User.query().insert({ name: "Bob", email: "bob@example.com" });
-                await User.query().insert({ name: "Carol", email: "carol@example.com" });
+        it("IN with empty array (negated: false) returns no rows (1=0)", async () => {
+            await User.query().insert({ name: "Alice", email: "alice@example.com" });
 
-                const aliceId = (alice as any).id as number;
-                const bobId = (bob as any).id as number;
+            // IrIn without negation and empty list compiles to 1=0 — no rows match
+            const inEmptyIr: IrNode = {
+                kind: "in",
+                left: { kind: "member", param: "u", path: ["id"] },
+                right: { kind: "const", value: [] },
+            };
 
-                // Build IrIn with negated: true directly
-                const notInIr: IrNode = {
-                    kind: "in",
-                    negated: true,
-                    left: { kind: "member", param: "u", path: ["id"] },
-                    right: { kind: "const", value: [aliceId, bobId] },
-                };
+            const results = await User.query()
+                .where(inEmptyIr)
+                .toArray();
 
-                const results = await User.query()
-                    .where(notInIr)
-                    .orderBy("id", "asc")
-                    .toArray();
-
-                expect(results).toHaveLength(1);
-                expect((results[0] as any).name).toBe("Carol");
-            });
-
-            it("NOT IN with empty array (negated: true) returns all rows (1=1)", async () => {
-                await User.query().insert({ name: "Alice", email: "alice@example.com" });
-                await User.query().insert({ name: "Bob", email: "bob@example.com" });
-
-                // IrIn with negated: true and empty list compiles to 1=1 — all rows match
-                const notInEmptyIr: IrNode = {
-                    kind: "in",
-                    negated: true,
-                    left: { kind: "member", param: "u", path: ["id"] },
-                    right: { kind: "const", value: [] },
-                };
-
-                const results = await User.query()
-                    .where(notInEmptyIr)
-                    .orderBy("id", "asc")
-                    .toArray();
-
-                expect(results).toHaveLength(2);
-            });
-
-            it("IN with empty array (negated: false) returns no rows (1=0)", async () => {
-                await User.query().insert({ name: "Alice", email: "alice@example.com" });
-
-                // IrIn without negation and empty list compiles to 1=0 — no rows match
-                const inEmptyIr: IrNode = {
-                    kind: "in",
-                    left: { kind: "member", param: "u", path: ["id"] },
-                    right: { kind: "const", value: [] },
-                };
-
-                const results = await User.query()
-                    .where(inEmptyIr)
-                    .toArray();
-
-                expect(results).toHaveLength(0);
-            });
-
-            it("parses !(u.id in [1, 2, 3]) arrow to negated IrIn and executes correctly", async () => {
-                // Use fixed IDs so we can reference them as literals in the arrow body.
-                // SQLite autoincrement starts at 1, so insert order gives predictable IDs.
-                await User.query().insert({ name: "Alice", email: "alice@example.com" }); // id=1
-                await User.query().insert({ name: "Bob", email: "bob@example.com" });     // id=2
-                await User.query().insert({ name: "Carol", email: "carol@example.com" }); // id=3
-
-                // Arrow with literal array values — these parse as IrConst, no closure needed
-                const results = await User.query()
-                    .where((u: any) => !(u.id in [1, 2]))
-                    .orderBy("id", "asc")
-                    .toArray();
-
-                // Only Carol (id=3) should be returned
-                expect(results).toHaveLength(1);
-                expect((results[0] as any).name).toBe("Carol");
-            });
+            expect(results).toHaveLength(0);
         });
 
-        describe("!.some() compiles to NOT EXISTS (unary wrapping)", () => {
-            it("negated .some() returns users with no published posts", async () => {
-                const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
-                await User.query().insert({ name: "Bob", email: "bob@example.com" });
+        it("parses !(u.id in [1, 2, 3]) arrow to negated IrIn and executes correctly", async () => {
+            // Use fixed IDs so we can reference them as literals in the arrow body.
+            // SQLite autoincrement starts at 1, so insert order gives predictable IDs.
+            await User.query().insert({ name: "Alice", email: "alice@example.com" }); // id=1
+            await User.query().insert({ name: "Bob", email: "bob@example.com" });     // id=2
+            await User.query().insert({ name: "Carol", email: "carol@example.com" }); // id=3
 
-                // Alice has a published post; Bob has none
-                await Post.query().insert({ title: "Hello", authorId: (alice as any).id, published: true });
+            // Arrow with literal array values — these parse as IrConst, no closure needed
+            const results = await User.query()
+                .where((u: any) => !(u.id in [1, 2]))
+                .orderBy("id", "asc")
+                .toArray();
 
-                const results = await User.query()
-                    .where((u: any) => !u.posts.some((p: any) => p.published === true))
-                    .orderBy("id", "asc")
-                    .toArray();
+            // Only Carol (id=3) should be returned
+            expect(results).toHaveLength(1);
+            expect((results[0] as any).name).toBe("Carol");
+        });
+    });
 
-                expect(results).toHaveLength(1);
-                expect((results[0] as any).name).toBe("Bob");
-            });
+    describe("!.some() compiles to NOT EXISTS (unary wrapping)", () => {
+        it("negated .some() returns users with no published posts", async () => {
+            const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
+            await User.query().insert({ name: "Bob", email: "bob@example.com" });
+
+            // Alice has a published post; Bob has none
+            await Post.query().insert({ title: "Hello", authorId: (alice as any).id, published: true });
+
+            const results = await User.query()
+                .where((u: any) => !u.posts.some((p: any) => p.published === true))
+                .orderBy("id", "asc")
+                .toArray();
+
+            expect(results).toHaveLength(1);
+            expect((results[0] as any).name).toBe("Bob");
+        });
+    });
+
+    describe(".every() compiles to NOT EXISTS with negated inner predicate", () => {
+        it("returns users where all posts are published", async () => {
+            const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
+            const bob = await User.query().insert({ name: "Bob", email: "bob@example.com" });
+
+            // Alice: all published; Bob: one published, one not
+            await Post.query().insert({ title: "A1", authorId: (alice as any).id, published: true });
+            await Post.query().insert({ title: "A2", authorId: (alice as any).id, published: true });
+            await Post.query().insert({ title: "B1", authorId: (bob as any).id, published: true });
+            await Post.query().insert({ title: "B2", authorId: (bob as any).id, published: false });
+
+            const results = await User.query()
+                .where((u: any) => u.posts.every((p: any) => p.published === true))
+                .orderBy("id", "asc")
+                .toArray();
+
+            expect(results).toHaveLength(1);
+            expect((results[0] as any).name).toBe("Alice");
         });
 
-        describe(".every() compiles to NOT EXISTS with negated inner predicate", () => {
-            it("returns users where all posts are published", async () => {
-                const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
-                const bob = await User.query().insert({ name: "Bob", email: "bob@example.com" });
+        it("vacuously includes users with no posts", async () => {
+            await User.query().insert({ name: "Alice", email: "alice@example.com" });
+            // Alice has no posts — every() is vacuously true
 
-                // Alice: all published; Bob: one published, one not
-                await Post.query().insert({ title: "A1", authorId: (alice as any).id, published: true });
-                await Post.query().insert({ title: "A2", authorId: (alice as any).id, published: true });
-                await Post.query().insert({ title: "B1", authorId: (bob as any).id, published: true });
-                await Post.query().insert({ title: "B2", authorId: (bob as any).id, published: false });
+            const results = await User.query()
+                .where((u: any) => u.posts.every((p: any) => p.published === true))
+                .toArray();
 
-                const results = await User.query()
-                    .where((u: any) => u.posts.every((p: any) => p.published === true))
-                    .orderBy("id", "asc")
-                    .toArray();
-
-                expect(results).toHaveLength(1);
-                expect((results[0] as any).name).toBe("Alice");
-            });
-
-            it("vacuously includes users with no posts", async () => {
-                await User.query().insert({ name: "Alice", email: "alice@example.com" });
-                // Alice has no posts — every() is vacuously true
-
-                const results = await User.query()
-                    .where((u: any) => u.posts.every((p: any) => p.published === true))
-                    .toArray();
-
-                expect(results).toHaveLength(1);
-                expect((results[0] as any).name).toBe("Alice");
-            });
+            expect(results).toHaveLength(1);
+            expect((results[0] as any).name).toBe("Alice");
         });
     });
 });

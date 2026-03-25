@@ -8,7 +8,7 @@
  * DialectRenderer that each dialect provides to makeCompileNode().
  */
 
-import type { IrNode, IrBinary, IrExists, IrIn, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { IrNode, IrBinary, IrExists, IrOrderBy, IrSelect } from "../ir/types.js";
 import type { CompileOptions } from "./types.js";
 
 export const DEFAULT_OPTS: CompileOptions = {
