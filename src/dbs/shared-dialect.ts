@@ -8,7 +8,7 @@
  * DialectRenderer that each dialect provides to makeCompileNode().
  */
 
-import type { IrNode, IrBinary, IrExists, IrIn, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { IrNode, IrBinary, IrExists, IrOrderBy, IrSelect } from "../ir/types.js";
 import type { CompileOptions } from "./types.js";
 
 export const DEFAULT_OPTS: CompileOptions = {
@@ -92,10 +92,10 @@ export function makeCompileNode(renderer: DialectRenderer) {
         return renderer.placeholder(params);
       case "in": {
         const left = compileNode(node.left, opts, params);
-        const op = (node as IrIn & { negated?: boolean }).negated ? "NOT IN" : "IN";
+        const op =node.negated ? "NOT IN" : "IN";
         if (node.right.kind === "const" && Array.isArray(node.right.value)) {
           const list = node.right.value;
-          if (list.length === 0) return (node as IrIn & { negated?: boolean }).negated ? "1=1" : "1=0";
+          if (list.length === 0) return node.negated ? "1=1" : "1=0";
           const placeholders = list.map(v => { params.push(v); return renderer.placeholder(params); });
           return `${left} ${op} (${placeholders.join(", ")})`;
         }
@@ -110,8 +110,11 @@ export function makeCompileNode(renderer: DialectRenderer) {
         const info = opts.oneToManyExists?.[`${ex.rootParam}.${ex.relationKey}`];
         if (!info) throw new Error(`No oneToManyExists info for ${ex.rootParam}.${ex.relationKey}`);
         const innerOpts = { ...opts, paramToAlias: { ...opts.paramToAlias, [ex.innerParam]: info.alias } };
-        const innerSql = compileNode(ex.innerWhere, innerOpts, params);
-        return renderer.compileExists(info.targetTable, info.alias, info.fkColumn, opts.tableAlias, info.mainPk, innerSql);
+        const innerSql = ex.negated
+          ? `(NOT (${compileNode(ex.innerWhere, innerOpts, params)}))`
+          : compileNode(ex.innerWhere, innerOpts, params);
+        const existsSql = renderer.compileExists(info.targetTable, info.alias, info.fkColumn, opts.tableAlias, info.mainPk, innerSql);
+        return ex.negated ? `(NOT ${existsSql})` : existsSql;
       }
       case "call": {
         const receiver = compileNode(node.receiver, opts, params);
