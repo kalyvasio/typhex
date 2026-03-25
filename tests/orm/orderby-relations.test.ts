@@ -45,6 +45,11 @@ function newBuilder(driver: Driver) {
     limitNum: null,
     offsetNum: null,
     selectIr: null,
+    relations: MockContactE.table._relations,
+    resolveRelationTarget: (rel: RelationDef) => {
+      const target = rel._target() as { table?: { _table: string } } | null;
+      return target?.table ? { table: target.table._table, pk: "id" } : null;
+    },
   });
 }
 
@@ -100,9 +105,10 @@ describe("orderBy — lambda and dot-notation support", () => {
         return [];
       });
       const q = newBuilder(driver);
-      q.orderBy("name");
+      q.orderBy("company.name");
       await q.toArray();
-      expect(capturedSql).toContain('"name"');
+      expect(capturedSql).toContain('"mock_companies"');
+      expect(capturedSql).toMatch(/ORDER BY\s+.+name/i);
     });
 
     it("chains and returns this (same reference)", () => {

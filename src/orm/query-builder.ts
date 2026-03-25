@@ -5,7 +5,7 @@
  * (except insert, which is synchronous to support save()).
  */
 
-import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
 import { isIrNode, isIrSelect } from "../ir/types.js";
 import type { Driver } from "../driver/types.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
@@ -31,7 +31,7 @@ export interface QueryBuilderInterface<C extends AnyEntityClass, T> {
   where(ir: IrNode, params?: Record<string, unknown>): QueryBuilderInterface<C, T>;
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilderInterface<C, U>;
   select(cols: string[] | IrSelect): QueryBuilderInterface<C, T>;
-  orderBy(col: string, dir?: string): QueryBuilderInterface<C, T>;
+  orderBy(col: string | ((row: T) => unknown), dir?: OrderDirection): QueryBuilderInterface<C, T>;
   limit(n: number): QueryBuilderInterface<C, T>;
   offset(n: number): QueryBuilderInterface<C, T>;
   toArray(): Promise<T[]>;
@@ -233,7 +233,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** Append an ORDER BY clause for the given column. Defaults to ascending order. */
   orderBy(
       columnOrFn: string | ((row: T) => unknown),
-      direction: "asc" | "desc" = "asc"
+      direction: OrderDirection = "asc"
   ): QueryBuilder<C, T> {
     let path: string[];
 
@@ -243,8 +243,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
         const ir = parseArrowToIr(columnOrFn as (u: any) => any, {
           paramKeys: [],
         });
-        if (ir.kind !== "member") {
-          throw new Error("[typhex] orderBy lambda must return a column path (e.g. u => u.name)");
+        if (ir.kind !== "member" || !ir.path || ir.path.length === 0) {
+          throw new Error("[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)");
         }
         path = ir.path;
       } catch (e) {
@@ -252,7 +252,11 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       }
     } else {
       // String: "company.name" → ["company", "name"]
-      path = columnOrFn.split(".");
+      const segments = columnOrFn.split(".").map((s) => s.trim());
+      if (segments.length === 0 || segments.some((s) => s.length === 0)) {
+        throw new Error('[typhex] orderBy column must be a non-empty dot-separated path (e.g. "company.name")');
+      }
+      path = segments;
     }
 
     this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path, direction });
