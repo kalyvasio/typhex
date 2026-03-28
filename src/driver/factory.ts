@@ -30,6 +30,11 @@ export interface CreateDriverConfigCompat {
   port?: number;
   user?: string;
   password?: string;
+  ssl?: PostgresDriverOptions["ssl"];
+  poolMin?: number;
+  poolMax?: number;
+  idleTimeoutMs?: number;
+  connectionTimeoutMs?: number;
 }
 
 export function createDriver(options: CreateDriverOptions | CreateDriverConfigCompat): Driver {
@@ -41,8 +46,15 @@ export function createDriver(options: CreateDriverOptions | CreateDriverConfigCo
     case "postgres": {
       const o = options as CreateDriverConfigCompat;
       const connectionString = o.connectionString ?? o.url;
+      const poolOpts = {
+        ssl: o.ssl,
+        poolMin: o.poolMin,
+        poolMax: o.poolMax,
+        idleTimeoutMs: o.idleTimeoutMs,
+        connectionTimeoutMs: o.connectionTimeoutMs,
+      };
       if (connectionString) {
-        return createPostgresDriver({ connectionString });
+        return createPostgresDriver({ connectionString, ...poolOpts });
       }
       return createPostgresDriver({
         host: o.host,
@@ -50,6 +62,7 @@ export function createDriver(options: CreateDriverOptions | CreateDriverConfigCo
         database: o.database,
         user: o.user,
         password: o.password,
+        ...poolOpts,
       });
     }
     default:

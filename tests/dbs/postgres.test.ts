@@ -171,6 +171,87 @@ describe("dbs/postgres", () => {
     );
 
     it(
+      "supports concurrent queries via connection pooling",
+      async () => {
+        if (!hasPostgres()) return;
+        const driver = createPostgresDriver({ connectionString, poolMin: 2, poolMax: 5 });
+        try {
+          // Fire multiple concurrent queries to exercise the pool
+          const results = await Promise.all([
+            driver.query("SELECT 1 as n"),
+            driver.query("SELECT 2 as n"),
+            driver.query("SELECT 3 as n"),
+            driver.query("SELECT 4 as n"),
+            driver.query("SELECT 5 as n"),
+          ]);
+          expect(results).toHaveLength(5);
+          results.forEach((rows, i) => {
+            expect(rows).toHaveLength(1);
+            expect((rows[0] as { n: number }).n).toBe(i + 1);
+          });
+        } finally {
+          await driver.close();
+        }
+      },
+      { skip: !hasPostgres() }
+    );
+
+    it(
+      "rolls back transaction on error",
+      async () => {
+        if (!hasPostgres()) return;
+        const driver = createPostgresDriver({ connectionString });
+        try {
+          await driver.run("DROP TABLE IF EXISTS pg_tx_rollback_test");
+          await driver.run("CREATE TABLE pg_tx_rollback_test (id SERIAL PRIMARY KEY, val TEXT)");
+
+          await expect(
+            driver.transaction(async () => {
+              await driver.run("INSERT INTO pg_tx_rollback_test (val) VALUES ($1)", ["should-rollback"]);
+              throw new Error("intentional rollback");
+            })
+          ).rejects.toThrow("intentional rollback");
+
+          const rows = await driver.query("SELECT * FROM pg_tx_rollback_test");
+          expect(rows).toHaveLength(0);
+        } finally {
+          await driver.run("DROP TABLE IF EXISTS pg_tx_rollback_test");
+          await driver.close();
+        }
+      },
+      { skip: !hasPostgres() }
+    );
+
+    it(
+      "wraps errors with SQL context",
+      async () => {
+        if (!hasPostgres()) return;
+        const driver = createPostgresDriver({ connectionString });
+        try {
+          await expect(
+            driver.query("SELECT * FROM nonexistent_table_xyz_typhex")
+          ).rejects.toThrow(/PG\([\s\S]*SQL:\s*SELECT \* FROM nonexistent_table_xyz_typhex/);
+        } finally {
+          await driver.close();
+        }
+      },
+      { skip: !hasPostgres() }
+    );
+
+    it(
+      "closes pool cleanly",
+      async () => {
+        if (!hasPostgres()) return;
+        const driver = createPostgresDriver({ connectionString });
+        // Run a query to ensure pool is active
+        await driver.query("SELECT 1");
+        // close() should resolve without error
+        await expect(driver.close()).resolves.toBeUndefined();
+      },
+      { skip: !hasPostgres() }
+    );
+
+    it(
       "Entity CRUD with PostgreSQL",
       async () => {
         clearRegistry();
