@@ -23,7 +23,7 @@ describe("generateMigrationFiles", () => {
   });
 
   it("returns empty array when schema is in sync", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
     const files = await generateMigrationFiles(driver, [entity("users", { id: "integer primary key", name: "text" })]);
     expect(files).toHaveLength(0);
   });
@@ -39,7 +39,7 @@ describe("generateMigrationFiles", () => {
   });
 
   it("generates add_column script", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key)`);
     const files = await generateMigrationFiles(driver, [
       entity("users", { id: "integer primary key", email: "text" }),
     ]);

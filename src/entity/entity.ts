@@ -3,15 +3,17 @@
  * Returns a class whose instances are Row<TSchema, TRels>.
  */
 
-import type { Driver } from "../driver/types.js";
+import type { Trx } from "../orm/trx.js";
+import type { QueryExecutor } from "../orm/db.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
-import { QueryBuilder } from "../orm/query-builder.js";
+import {QueryBuilder, QueryState} from "../orm/query-builder.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
 import type { InferTable, InferInsert, Flatten, Materialized, MaterializeShape } from "./schema-inference.js";
 import type { RelationDef, RelationsMap, RelationQueryable, RelationQueryBuilder, ManyRelation } from "./relations.js";
 import type { TableDef, EntityBase } from "./types.js";
-import { getDefaultDriver, registerEntity } from "./global-driver.js";
+import { getDefaultDb, registerEntity } from "./global-driver.js";
+import { getActiveTrx } from "../orm/db.js";
 
 /** Loaded value for a relation (data only when E is a concrete entity class; when E is unknown or any, use queryable type so subclass declare can narrow). */
 /** When E is concrete: use EntityInstance<E>[]/E so type flows from rel.oneToMany(() => Employee) without declare. When E is unknown (circular refs): use broad type so declare provides. */
@@ -117,9 +119,8 @@ export type EntityClass<
   TRels extends RelationsMap = {},
 > = (new (data?: Partial<InferTable<TSchema>>) => Row<Materialized<TSchema>, TRels>) & {
   table: TableDef<TSchema, TRels>;
-  _driver: Driver | null;
-  useDriver(driver: Driver): void;
-  query<C extends AnyEntityClass>(this: C, driver?: Driver): QueryBuilder<C, EntityInstance<C>>;
+  query<C extends AnyEntityClass>(this: C, trx?: Trx): QueryBuilder<C, EntityInstance<C>>;
+  transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T>;
 };
 
 /**
@@ -140,10 +141,10 @@ export function Entity<
   const cols = getColumnNames(schema as TableDefinition);
   const pk = getPkColumn(schema);
 
-  function resolveDriver(override?: Driver): Driver {
-    const d = override ?? (EntityClassImpl as any)._driver ?? getDefaultDriver();
-    if (!d) throw new Error(`Entity "${tableName}": no driver. Use new Db(driver) or call ${tableName}.useDriver(driver).`);
-    return d;
+  function resolveDb() {
+    const resolved = getDefaultDb();
+    if (!resolved) throw new Error(`Entity "${tableName}": no Db. Use new Db(driver) to instantiate typhex.`);
+    return resolved;
   }
 
   function resolveRelationTarget(rel: RelationDef): { table: string; pk: string } | null {
@@ -164,11 +165,11 @@ export function Entity<
     }
   }
 
-  function baseState(driver: Driver) {
+  function baseState(executor?: QueryExecutor): QueryState<unknown> {
     return {
       tableName,
       columnNames: cols,
-      driver,
+      qe: executor ?? resolveDb(),
       pkColumn: pk,
       whereIr: null as null,
       whereParams: {} as Record<string, unknown>,
@@ -190,10 +191,12 @@ export function Entity<
     declare _dirty: Set<string>;
 
     static table = tableDef;
-    static _driver: Driver | null = null;
 
-    static useDriver(driver: Driver) {
-      EntityClassImpl._driver = driver;
+    static async transaction<T>(
+      fn: (trx: Trx) => Promise<T>
+    ): Promise<T> {
+      const db = resolveDb();
+      return db.transaction(fn);
     }
 
     private static _resolveRelations(Ctor: any): RelationsMap {
@@ -201,12 +204,11 @@ export function Entity<
       return classRels && Object.keys(classRels).length > 0 ? classRels : rels as RelationsMap;
     }
 
-    static query(this: new (data?: any) => any, driverOverride?: Driver) {
-      const d = resolveDriver(driverOverride);
+    static query(this: new (data?: any) => any, executor?: QueryExecutor) {
       const Ctor = this;
       const effectiveRels = EntityClassImpl._resolveRelations(Ctor);
       return new QueryBuilder({
-        ...baseState(d),
+        ...baseState(executor),
         relations: effectiveRels,
         async hydrate(row: Record<string, unknown>) {
           const inst = new Ctor(row);
@@ -227,11 +229,10 @@ export function Entity<
       this._dirty = new Set(Object.keys(row).filter((k) => cols.includes(k)));
     }
 
-    query(driverOverride?: Driver): SingleRowQueryBuilder<this> {
+    query(executor?: QueryExecutor): SingleRowQueryBuilder<this> {
       return new SingleRowQueryBuilder<this>(
         this as unknown as Record<string, unknown>,
-        (d) => baseState(d),
-        () => resolveDriver(driverOverride),
+        baseState(executor ?? getActiveTrx()),
         runHook,
         pk,
         cols,

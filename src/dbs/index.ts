@@ -5,8 +5,10 @@ export { createPostgresDriver, postgresDialect, postgresMigrations } from "./pos
 export type { PostgresDriverOptions } from "./postgres/index.js";
 
 import type { DialectImpl, DbMigrations } from "./types.js";
-import { sqliteDialect, sqliteMigrations } from "./sqlite/index.js";
-import { postgresDialect, postgresMigrations } from "./postgres/index.js";
+import { sqliteDialect } from "./sqlite/dialect.js";
+import { sqliteMigrations } from "./sqlite/migrations.js";
+import { postgresDialect } from "./postgres/dialect.js";
+import { postgresMigrations } from "./postgres/migrations.js";
 
 const dialectMap: Record<string, DialectImpl> = {
   sqlite: sqliteDialect,

@@ -6,7 +6,8 @@ import {
   getDialect,
 } from "../../src/dbs/index.js";
 import { Entity } from "../../src/entity/entity.js";
-import { clearRegistry, setDefaultDriver } from "../../src/entity/global-driver.js";
+import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
+import { Db } from "../../src/orm/db.js";
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {
@@ -14,18 +15,18 @@ describe("dbs/sqlite", () => {
   });
 
   afterEach(() => {
-    setDefaultDriver(null);
+    setDefaultDb(null);
   });
 
   describe("createSqliteDriver", () => {
-    it("creates a driver with async query/run", async () => {
+    it("creates a driver with async execute", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
-        const rows = await driver.query("SELECT 1 as x");
+        const rows = await driver.execute("SELECT 1 as x").then(r => r.rows);
         expect(rows).toEqual([{ x: 1 }]);
 
-        await driver.run('CREATE TABLE "t" ("id" integer primary key)');
-        const runResult = await driver.run('INSERT INTO "t" ("id") VALUES (1)');
+        await driver.execute('CREATE TABLE "t" ("id" integer primary key)');
+        const runResult = await driver.execute('INSERT INTO "t" ("id") VALUES (1)');
         expect(runResult.changes).toBe(1);
         expect(runResult.lastID).toBe(1);
       } finally {
@@ -35,33 +36,35 @@ describe("dbs/sqlite", () => {
 
     it("supports transactions", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
+      const db = new Db(driver);
       try {
-        await driver.run('CREATE TABLE "t" ("id" integer primary key)');
-        await driver.transaction(async () => {
-          await driver.run('INSERT INTO "t" ("id") VALUES (1)');
-          await driver.run('INSERT INTO "t" ("id") VALUES (2)');
+        await driver.execute('CREATE TABLE "t" ("id" integer primary key)');
+        await db.transaction(async () => {
+          await db.run('INSERT INTO "t" ("id") VALUES (1)');
+          await db.run('INSERT INTO "t" ("id") VALUES (2)');
         });
-        const rows = await driver.query('SELECT * FROM "t"');
+        const rows = await driver.execute('SELECT * FROM "t"').then(r => r.rows);
         expect(rows).toHaveLength(2);
       } finally {
-        await driver.close();
+        await db.close();
       }
     });
 
     it("rolls back on transaction error", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
+      const db = new Db(driver);
       try {
-        await driver.run('CREATE TABLE "t" ("id" integer primary key)');
+        await driver.execute('CREATE TABLE "t" ("id" integer primary key)');
         await expect(
-          driver.transaction(async () => {
-            await driver.run('INSERT INTO "t" ("id") VALUES (1)');
+          db.transaction(async () => {
+            await db.run('INSERT INTO "t" ("id") VALUES (1)');
             throw new Error("abort");
           })
         ).rejects.toThrow("abort");
-        const rows = await driver.query('SELECT * FROM "t"');
+        const rows = await driver.execute('SELECT * FROM "t"').then(r => r.rows);
         expect(rows).toHaveLength(0);
       } finally {
-        await driver.close();
+        await db.close();
       }
     });
   });
@@ -156,7 +159,7 @@ describe("dbs/sqlite", () => {
     it("getDbTables returns table names", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
-        await driver.run('CREATE TABLE "foo" ("id" integer primary key)');
+        await driver.execute('CREATE TABLE "foo" ("id" integer primary key)');
         const tables = await sqliteMigrations.getDbTables(driver);
         expect(tables).toContain("foo");
       } finally {
@@ -167,7 +170,7 @@ describe("dbs/sqlite", () => {
     it("getDbColumns returns column info", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
-        await driver.run(
+        await driver.execute(
           'CREATE TABLE "users" ("id" integer primary key, "name" text not null)'
         );
         const cols = await sqliteMigrations.getDbColumns(driver, "users");

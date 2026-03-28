@@ -4,7 +4,8 @@
  */
 
 import { createRequire } from "node:module";
-import type { Driver } from "./types.js";
+import type { Driver, Connection, ExecuteResult, TransactionOptions } from "./types.js";
+import { SqliteTrx } from "../dbs/sqlite/trx.js";
 
 const require = createRequire(import.meta.url);
 
@@ -29,6 +30,16 @@ function bindableParams(params: unknown[]): unknown[] {
   return params.map(toBindable);
 }
 
+/** Execute a statement against the better-sqlite3 Database instance. */
+function executeSql(db: import("better-sqlite3").Database, sql: string, params: unknown[]): ExecuteResult {
+  const stmt = db.prepare(sql);
+  if (stmt.reader) {
+    return { rows: stmt.all(...bindableParams(params)) as unknown[], changes: 0 };
+  }
+  const info = stmt.run(...bindableParams(params)) as { lastInsertRowid: number; changes: number };
+  return { rows: [], lastID: info.lastInsertRowid, changes: info.changes };
+}
+
 export interface SqliteDriverOptions {
   /** Path to database file or ":memory:" */
   path: string;
@@ -38,33 +49,29 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
   const Database = require("better-sqlite3") as typeof import("better-sqlite3");
   const db = new Database(options.path);
 
+  function makeConnection(): Connection {
+    return {
+      dialect: "sqlite" as const,
+      async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
+        return executeSql(db, sql, params);
+      },
+      async release(): Promise<void> { /* no-op for SQLite */ },
+    };
+  }
+
   return {
     dialect: "sqlite" as const,
-    async query(sql: string, params: unknown[] = []): Promise<unknown[]> {
-      const stmt = db.prepare(sql);
-      const rows = stmt.all(...bindableParams(params)) as unknown[];
-      return rows;
+
+    async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
+      return executeSql(db, sql, params);
     },
 
-    async run(sql: string, params: unknown[] = []): Promise<{ lastID?: number; changes: number }> {
-      const stmt = db.prepare(sql);
-      const info = stmt.run(...bindableParams(params)) as { lastInsertRowid: number; changes: number };
-      return {
-        lastID: info.lastInsertRowid,
-        changes: info.changes,
-      };
+    connect(): Promise<Connection> {
+      return Promise.resolve(makeConnection());
     },
 
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
-      db.exec("BEGIN");
-      try {
-        const result = await fn();
-        db.exec("COMMIT");
-        return result;
-      } catch (e) {
-        db.exec("ROLLBACK");
-        throw e;
-      }
+    createTrx(conn: Connection, options?: TransactionOptions) {
+      return new SqliteTrx(conn, options);
     },
 
     async close(): Promise<void> {

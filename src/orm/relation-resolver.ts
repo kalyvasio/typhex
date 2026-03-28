@@ -1,13 +1,9 @@
 /**
  * Relation resolver: top-level orchestrator for relation loading.
- * Calls relation-fetcher to run WHERE IN queries for each relation, then
- * calls relation-assembler to attach the results (and any JOIN columns)
- * back onto the result rows. The RelationContext produced by
- * relation-context-builder drives every decision made here.
  */
 
 import type { IrSelect } from "../ir/types.js";
-import type { Driver } from "../driver/types.js";
+import type { QueryExecutor } from "./db.js";
 import type { RelationContext } from "./relation-context-builder.js";
 import { fetchRelations } from "./relation-fetcher.js";
 import { assembleJoined, assembleFetched } from "./relation-assembler.js";
@@ -19,10 +15,10 @@ import { assembleJoined, assembleFetched } from "./relation-assembler.js";
 export async function resolveRelations(
   ctx: RelationContext,
   selectIr: IrSelect | null,
-  driver: Driver,
+  qe: QueryExecutor,
   rows: Record<string, unknown>[]
 ): Promise<void> {
-  const fetched = await fetchRelations(driver, rows, ctx.relationFetches, ctx.skipLoadFor);
+  const fetched = await fetchRelations(qe, rows, ctx.relationFetches, ctx.skipLoadFor);
   if (ctx.hasReusableRelationInSelect) assembleJoined(rows, ctx.reusableJoinKeys, selectIr!);
   assembleFetched(rows, ctx.relationFetches, fetched, ctx.skipLoadFor);
 }

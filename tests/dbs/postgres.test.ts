@@ -7,7 +7,7 @@ import {
 } from "../../src/dbs/index.js";
 import { Entity } from "../../src/entity/entity.js";
 import { Db } from "../../src/orm/db.js";
-import { clearRegistry, setDefaultDriver } from "../../src/entity/global-driver.js";
+import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
@@ -23,7 +23,7 @@ describe("dbs/postgres", () => {
   });
 
   afterAll(() => {
-    setDefaultDriver(null);
+    setDefaultDb(null);
   });
 
   describe("postgresDialect", () => {
@@ -160,9 +160,9 @@ describe("dbs/postgres", () => {
         if (!hasPostgres()) return;
         const driver = createPostgresDriver({ connectionString });
         try {
-          const rows = await driver.query("SELECT 1 as x");
-          expect(rows).toHaveLength(1);
-          expect((rows[0] as { x: number }).x).toBe(1);
+          const result = await driver.execute("SELECT 1 as x", []);
+          expect(result.rows).toHaveLength(1);
+          expect((result.rows[0] as { x: number }).x).toBe(1);
         } finally {
           await driver.close();
         }
@@ -178,16 +178,16 @@ describe("dbs/postgres", () => {
         try {
           // Fire multiple concurrent queries to exercise the pool
           const results = await Promise.all([
-            driver.query("SELECT 1 as n"),
-            driver.query("SELECT 2 as n"),
-            driver.query("SELECT 3 as n"),
-            driver.query("SELECT 4 as n"),
-            driver.query("SELECT 5 as n"),
+            driver.execute("SELECT 1 as n", []),
+            driver.execute("SELECT 2 as n", []),
+            driver.execute("SELECT 3 as n", []),
+            driver.execute("SELECT 4 as n", []),
+            driver.execute("SELECT 5 as n", []),
           ]);
           expect(results).toHaveLength(5);
-          results.forEach((rows, i) => {
-            expect(rows).toHaveLength(1);
-            expect((rows[0] as { n: number }).n).toBe(i + 1);
+          results.forEach((result, i) => {
+            expect(result.rows).toHaveLength(1);
+            expect((result.rows[0] as { n: number }).n).toBe(i + 1);
           });
         } finally {
           await driver.close();
@@ -201,22 +201,23 @@ describe("dbs/postgres", () => {
       async () => {
         if (!hasPostgres()) return;
         const driver = createPostgresDriver({ connectionString });
+        const db = new Db(driver);
         try {
-          await driver.run("DROP TABLE IF EXISTS pg_tx_rollback_test");
-          await driver.run("CREATE TABLE pg_tx_rollback_test (id SERIAL PRIMARY KEY, val TEXT)");
+          await driver.execute("DROP TABLE IF EXISTS pg_tx_rollback_test", []);
+          await driver.execute("CREATE TABLE pg_tx_rollback_test (id SERIAL PRIMARY KEY, val TEXT)", []);
 
           await expect(
-            driver.transaction(async () => {
-              await driver.run("INSERT INTO pg_tx_rollback_test (val) VALUES ($1)", ["should-rollback"]);
+            db.transaction(async (trx) => {
+              await trx.run("INSERT INTO pg_tx_rollback_test (val) VALUES ($1)", ["should-rollback"]);
               throw new Error("intentional rollback");
             })
           ).rejects.toThrow("intentional rollback");
 
-          const rows = await driver.query("SELECT * FROM pg_tx_rollback_test");
-          expect(rows).toHaveLength(0);
+          const result = await driver.execute("SELECT * FROM pg_tx_rollback_test", []);
+          expect(result.rows).toHaveLength(0);
         } finally {
-          await driver.run("DROP TABLE IF EXISTS pg_tx_rollback_test");
-          await driver.close();
+          await driver.execute("DROP TABLE IF EXISTS pg_tx_rollback_test", []);
+          await db.close();
         }
       },
       { skip: !hasPostgres() }
@@ -229,7 +230,7 @@ describe("dbs/postgres", () => {
         const driver = createPostgresDriver({ connectionString });
         try {
           await expect(
-            driver.query("SELECT * FROM nonexistent_table_xyz_typhex")
+            driver.execute("SELECT * FROM nonexistent_table_xyz_typhex", [])
           ).rejects.toThrow(/PG\([\s\S]*SQL:\s*SELECT \* FROM nonexistent_table_xyz_typhex/);
         } finally {
           await driver.close();
@@ -244,7 +245,7 @@ describe("dbs/postgres", () => {
         if (!hasPostgres()) return;
         const driver = createPostgresDriver({ connectionString });
         // Run a query to ensure pool is active
-        await driver.query("SELECT 1");
+        await driver.execute("SELECT 1", []);
         // close() should resolve without error
         await expect(driver.close()).resolves.toBeUndefined();
       },
@@ -262,11 +263,10 @@ describe("dbs/postgres", () => {
         });
 
         const driver = createPostgresDriver({ connectionString });
-        const db = new Db(driver);
-        setDefaultDriver(driver);
+        const db = new Db(driver); // automatically sets default Db
 
         try {
-          await driver.run('DROP TABLE IF EXISTS "pg_test_users"');
+          await driver.execute('DROP TABLE IF EXISTS "pg_test_users"', []);
           await db.migrate();
 
           const u = await User.query().insert({ name: "Alice", age: 30 });

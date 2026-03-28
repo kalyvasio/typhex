@@ -1,20 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Entity } from "../../src/entity/entity.js";
+import { setDefaultDb, clearRegistry } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
-import { createSqliteDriver } from "../../src/driver/sqlite.js";
-import { setDefaultDriver, clearRegistry } from "../../src/entity/global-driver.js";
-import type { Driver } from "../../src/driver/types.js";
 import { QueryBuilder } from "../../src/orm/query-builder.js";
+import { freshDriver } from "../helpers.js";
 
 const userSchema = {
   id: "integer primary key autoincrement",
   name: "text not null",
   age: "integer",
 } as const;
-
-function freshDriver(): Driver {
-  return createSqliteDriver({ path: ":memory:" });
-}
 
 describe("Entity()", () => {
   let db: Db;
@@ -451,42 +446,21 @@ describe("driver resolution", () => {
   });
 
   afterEach(() => {
-    setDefaultDriver(null);
+    setDefaultDb(null);
   });
 
   it("throws when no driver is set", () => {
     const User = Entity("things", { id: "integer primary key" });
-    expect(() => User.query()).toThrow("no driver");
+    expect(() => User.query()).toThrow("Entity \"things\": no Db. Use new Db(driver) to instantiate typhex.");
   });
 
-  it("useDriver sets a per-entity driver", async () => {
+  it("Db constructor sets default driver for queries", async () => {
     const driver = freshDriver();
+    const db = new Db(driver);
     const User = Entity("users2", userSchema);
-    User.useDriver(driver);
-    driver.run(`CREATE TABLE "users2" ("id" integer primary key autoincrement, "name" text not null, "age" integer)`);
+    await driver.execute(`CREATE TABLE "users2" ("id" integer primary key autoincrement, "name" text not null, "age" integer)`);
     await User.query().insert({ name: "Test", age: 1 });
     expect(await User.query().count()).toBe(1);
-    driver.close();
-  });
-
-  it("per-query driver override takes precedence", async () => {
-    const mainDriver = freshDriver();
-    const altDriver = freshDriver();
-    setDefaultDriver(mainDriver);
-
-    const User = Entity("users3", userSchema);
-    mainDriver.run(`CREATE TABLE "users3" ("id" integer primary key autoincrement, "name" text not null, "age" integer)`);
-    altDriver.run(`CREATE TABLE "users3" ("id" integer primary key autoincrement, "name" text not null, "age" integer)`);
-
-    await User.query().insert({ name: "MainDB" });
-    await User.query(altDriver).insert({ name: "AltDB" });
-
-    expect(await User.query().count()).toBe(1);
-    expect(await User.query(altDriver).count()).toBe(1);
-    expect((await User.query().first() as any).name).toBe("MainDB");
-    expect((await User.query(altDriver).first() as any).name).toBe("AltDB");
-
-    mainDriver.close();
-    altDriver.close();
+    await db.close();
   });
 });

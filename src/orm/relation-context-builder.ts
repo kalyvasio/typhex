@@ -4,8 +4,8 @@
  */
 
 import type { RelationsMap, RelationDef, RelationOptions } from "../entity/relations.js";
-import type { IrSelect, IrNode, IrOrderBy, IrSelectRelation } from "../ir/types.js";
-import type { Driver } from "../driver/types.js";
+import type { IrSelect, IrNode, IrSelectRelation } from "../ir/types.js";
+import type { QueryExecutor } from "./db.js";
 import type { AnyEntityClass } from "../entity/entity.js";
 import {QueryBuilderInterface} from "./query-builder.js";
 import { getReusableJoinKeys } from "./relation-joins.js";
@@ -14,7 +14,7 @@ export interface RelationFetchMetadata {
   relation: IrSelectRelation;
   fkColumn: string;
   targetPk: string;
-  targetEntity: { query(d?: Driver): QueryBuilderInterface<AnyEntityClass, unknown> };
+  targetEntity: { query(d?: QueryExecutor): QueryBuilderInterface<AnyEntityClass, unknown> };
   isArray: boolean;
 }
 

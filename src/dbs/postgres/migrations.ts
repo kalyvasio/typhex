@@ -22,19 +22,19 @@ export const postgresMigrations: DbMigrations = {
   dialect: "postgres",
 
   async getDbTables(driver: Driver): Promise<string[]> {
-    const rows = await driver.query(`
+    const rows = await driver.execute(`
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = 'public'
         AND table_type = 'BASE TABLE'
         AND table_name != '_typhex_migrations'
-    `);
+    `).then(r => r.rows);
     return (rows as Array<{ table_name: string }>).map((r) => r.table_name);
   },
 
   async getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]> {
     const esc = postgresDialect.escapeIdentifier(table);
-    const rows = await driver.query(
+    const rows = await driver.execute(
       `
       SELECT column_name as name, data_type as type,
              CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END as notnull,
@@ -54,7 +54,7 @@ export const postgresMigrations: DbMigrations = {
       ORDER BY ordinal_position
     `,
       [table]
-    );
+    ).then(r => r.rows);
     return rows as DbColumnInfo[];
   },
 
