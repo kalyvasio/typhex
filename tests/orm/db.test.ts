@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {Db, getActiveTrx, Trx} from "../../src/orm/db.js";
-import { Entity } from "../../src/entity/entity.js";
-import { getDefaultDb, setDefaultDb, clearRegistry } from "../../src/entity/global-driver.js";
+import { Entity, rel } from "../../src/index.js";
+import { getDefaultDb, setDefaultDb, clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 import { freshDriver } from "../helpers.js";
 
 describe("Db", () => {
@@ -489,6 +489,124 @@ describe("Db", () => {
       const db = new Db(driver);
       await expect(db.validate()).rejects.toThrow('column "name"');
       await db.close();
+    });
+  });
+
+  describe("transactions with relations", () => {
+    // TrxAuthor ←(oneToMany)→ TrxPost ←(manyToOne)→ TrxAuthor
+    // Declared at describe scope so they share a stable reference across tests.
+    const TrxAuthor = Entity(
+      "trx_rel_authors",
+      { id: "integer primary key autoincrement", name: "text not null" },
+      { posts: rel.oneToMany(() => TrxPost, { foreignKey: "authorId" }) }
+    );
+
+    const TrxPost = Entity(
+      "trx_rel_posts",
+      { id: "integer primary key autoincrement", title: "text not null", authorId: "integer not null" },
+      { author: rel.manyToOne(() => TrxAuthor, { foreignKey: "authorId" }) }
+    );
+
+    let db: Db;
+
+    beforeEach(async () => {
+      clearRegistry();
+      registerEntity(TrxAuthor);
+      registerEntity(TrxPost);
+      db = new Db(freshDriver());
+      await db.migrate();
+    });
+
+    afterEach(async () => { await db.close(); });
+
+    it("manyToOne relation is visible within the same transaction (callback API)", async () => {
+      await db.transaction(async (trx) => {
+        const author = await TrxAuthor.query(trx).insert({ name: "Alice" });
+        await TrxPost.query(trx).insert({ title: "Hello", authorId: (author as any).id });
+
+        const posts = await TrxPost.query(trx)
+          .select((p: any) => ({ title: p.title, author: { name: p.author.name } }))
+          .toArray();
+
+        expect(posts).toHaveLength(1);
+        expect((posts[0] as any).author.name).toBe("Alice");
+      });
+    });
+
+    it("manyToOne relation is visible within the same transaction (explicit beginTrx API)", async () => {
+      const trx = await db.beginTrx();
+      try {
+        const author = await TrxAuthor.query(trx).insert({ name: "Bob" });
+        await TrxPost.query(trx).insert({ title: "World", authorId: (author as any).id });
+
+        const posts = await TrxPost.query(trx)
+          .select((p: any) => ({ title: p.title, author: { name: p.author.name } }))
+          .toArray();
+
+        expect(posts).toHaveLength(1);
+        expect((posts[0] as any).author.name).toBe("Bob");
+        await trx.commit();
+      } catch (e) {
+        await trx.rollback();
+        throw e;
+      }
+    });
+
+    it("oneToMany relation is visible within the same transaction", async () => {
+      await db.transaction(async (trx) => {
+        const author = await TrxAuthor.query(trx).insert({ name: "Alice" });
+        await TrxPost.query(trx).insert({ title: "Post 1", authorId: (author as any).id });
+        await TrxPost.query(trx).insert({ title: "Post 2", authorId: (author as any).id });
+
+        const authors = await TrxAuthor.query(trx)
+          .select((a: any) => ({
+            name: a.name,
+            posts: a.posts.query().select((p: any) => ({ title: p.title })),
+          }))
+          .toArray();
+
+        expect(authors).toHaveLength(1);
+        expect((authors[0] as any).posts).toHaveLength(2);
+        const titles = (authors[0] as any).posts.map((p: any) => p.title).sort();
+        expect(titles).toEqual(["Post 1", "Post 2"]);
+      });
+    });
+
+    it("relation data rolled back with transaction is not visible after rollback", async () => {
+      await expect(
+        db.transaction(async (trx) => {
+          const author = await TrxAuthor.query(trx).insert({ name: "Ghost" });
+          await TrxPost.query(trx).insert({ title: "Phantom", authorId: (author as any).id });
+          throw new Error("abort");
+        })
+      ).rejects.toThrow("abort");
+
+      expect(await TrxAuthor.query().count()).toBe(0);
+      expect(await TrxPost.query().count()).toBe(0);
+    });
+
+    it("nested savepoint: inner relation insert rolled back, outer relation insert survives", async () => {
+      await db.transaction(async (trx) => {
+        const author = await TrxAuthor.query(trx).insert({ name: "Outer Author" });
+        await TrxPost.query(trx).insert({ title: "Outer Post", authorId: (author as any).id });
+
+        await expect(
+          trx.transaction(async (inner) => {
+            await TrxPost.query(inner).insert({ title: "Inner Post", authorId: (author as any).id });
+            throw new Error("inner abort");
+          })
+        ).rejects.toThrow("inner abort");
+
+        // Only outer post should be visible within the outer trx
+        const posts = await TrxPost.query(trx)
+          .select((p: any) => ({ title: p.title, author: { name: p.author.name } }))
+          .toArray();
+        expect(posts).toHaveLength(1);
+        expect((posts[0] as any).title).toBe("Outer Post");
+        expect((posts[0] as any).author.name).toBe("Outer Author");
+      });
+
+      expect(await TrxPost.query().count()).toBe(1);
     });
   });
 });
