@@ -14,7 +14,7 @@ import { getDbMigrations } from "../dbs/index.js";
 async function ensureTrackingTable(driver: Driver): Promise<void> {
   const dialect = driver.dialect ?? "sqlite";
   const migrations = getDbMigrations(dialect);
-  await driver.run(migrations.getTrackingTableDdl());
+  await driver.execute(migrations.getTrackingTableDdl());
 }
 
 async function getApplied(driver: Driver): Promise<Set<string>> {
@@ -23,17 +23,12 @@ async function getApplied(driver: Driver): Promise<Set<string>> {
   const migrations = getDbMigrations(dialect);
   const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
   const table = esc("_typhex_migrations");
-  const rows = (await driver.query(
+  const rows = (await driver.execute(
     `SELECT ${esc("name")} FROM ${table} ORDER BY ${esc("id")}`
-  )) as Array<{ name: string }>;
+  ).then(r => r.rows)) as Array<{ name: string }>;
   return new Set(rows.map((r) => r.name));
 }
 
-async function record(driver: Driver, name: string): Promise<void> {
-  const dialect = driver.dialect ?? "sqlite";
-  const migrations = getDbMigrations(dialect);
-  await driver.run(migrations.getRecordMigrationSql(), [name]);
-}
 
 export interface MigrationResult {
   applied: string[];
@@ -48,7 +43,9 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
 
   const result: MigrationResult = { applied: [], skipped: [] };
 
-  await driver.transaction(async () => {
+  const conn = await driver.connect();
+  try {
+    await conn.execute("BEGIN", []);
     for (const file of files) {
       const name = file.replace(/\.sql$/, "");
       if (applied.has(name)) {
@@ -66,12 +63,18 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
         }
       }
       for (const stmt of splitStatements(sql)) {
-        await driver.run(stmt);
+        await conn.execute(stmt, []);
       }
-      await record(driver, name);
+      await conn.execute(getDbMigrations(driver.dialect ?? "sqlite").getRecordMigrationSql(), [name]);
       result.applied.push(name);
     }
-  });
+    await conn.execute("COMMIT", []);
+  } catch (e) {
+    try { await conn.execute("ROLLBACK", []); } catch { /* ignore */ }
+    throw e;
+  } finally {
+    await conn.release();
+  }
 
   return result;
 }
@@ -83,9 +86,9 @@ export async function migrationStatus(
   await ensureTrackingTable(driver);
   const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
   const table = esc("_typhex_migrations");
-  const appliedRows = (await driver.query(
+  const appliedRows = (await driver.execute(
     `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${table} ORDER BY ${esc("id")}`
-  )) as MigrationRecord[];
+  ).then(r => r.rows)) as MigrationRecord[];
   const appliedNames = new Set(appliedRows.map((r) => r.name));
 
   let files: string[] = [];

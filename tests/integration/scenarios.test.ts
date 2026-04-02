@@ -4,12 +4,9 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Db, Entity, rel, createSqliteDriver } from "../../src/index.js";
+import { Db, Entity, rel } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
-
-function freshDb() {
-  return new Db(createSqliteDriver({ path: ":memory:" }));
-}
+import { freshDb } from "../helpers.js";
 
 // ─── basic CRUD ───────────────────────────────────────────────────────────────
 

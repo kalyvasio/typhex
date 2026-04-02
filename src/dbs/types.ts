@@ -3,6 +3,7 @@
  */
 
 import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { Connection, ExecuteResult, Driver } from "../driver/types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import type { RelationJoinInfo } from "../orm/relation-joins.js";
 
@@ -42,14 +43,8 @@ export type DiffAction =
   | { kind: "drop_column"; table: string; column: string }
   | { kind: "alter_column"; table: string; column: string; oldDef: string; newDef: ColumnDef };
 
-/** Async driver interface. */
-export interface Driver {
-  dialect: Dialect;
-  query(sql: string, params?: unknown[]): Promise<unknown[]>;
-  run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }>;
-  transaction<T>(fn: () => Promise<T>): Promise<T>;
-  close(): Promise<void>;
-}
+export type { Connection, ExecuteResult };
+export type { TransactionOptions, Driver } from "../driver/types.js";
 
 /** Options for compileSelect. */
 export interface CompileSelectOpts {

@@ -1,10 +1,11 @@
 /**
- * PostgreSQL driver using pg.Pool with AsyncLocalStorage for transaction routing.
+ * PostgreSQL driver using pg.Pool.
+ * Thin adapter: execute(), connect(), close() only — no transaction logic.
  */
 
 import pg from "pg";
-import { AsyncLocalStorage } from "async_hooks";
-import type { Driver } from "../types.js";
+import type { Driver, Connection, ExecuteResult, TransactionOptions } from "../../driver/types.js";
+import {PostgresTrx} from "./trx.js";
 
 const { Pool } = pg;
 type PoolClient = pg.PoolClient;
@@ -37,6 +38,8 @@ export interface PostgresDriverOptions {
   poolMax?: number;
   idleTimeoutMs?: number;
   connectionTimeoutMs?: number;
+  statementTimeoutMs?: number;
+  logger?: { error: (msg: string, err: Error) => void };
 }
 
 export function createPostgresDriver(options: PostgresDriverOptions): Driver {
@@ -59,11 +62,12 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
     ssl: options.ssl,
   });
 
-  pool.on("error", (err: Error) => {
-    console.error("Unexpected error on idle PostgreSQL client", err);
-  });
+  const log = options.logger ?? { error: (msg: string, err: Error) => console.error(msg, err) };
+  const { statementTimeoutMs } = options;
 
-  const transactionStorage = new AsyncLocalStorage<PoolClient>();
+  pool.on("error", (err: Error) => {
+    log.error("Unexpected error on idle PostgreSQL client", err);
+  });
 
   function wrapError(e: unknown, sql: string): never {
     const err = e as { code?: string; detail?: string; message?: string };
@@ -76,67 +80,61 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
     throw new Error(parts.join(" — "), { cause: e as Error });
   }
 
+  function toExecuteResult(result: pg.QueryResult, sql: string): ExecuteResult {
+    const rowCount = result.rowCount ?? 0;
+    const firstRow = result.rows[0];
+    const lastID = firstRow
+      ? (firstRow["id"] ?? firstRow["lastval"] ?? Object.values(firstRow)[0])
+      : undefined;
+    return {
+      rows: result.rows,
+      lastID: typeof lastID === "number" ? lastID : undefined,
+      changes: rowCount,
+    };
+    void sql; // used in wrapError only
+  }
+
+  function makeConnection(client: PoolClient): Connection {
+    return {
+      dialect: "postgres" as const,
+      async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
+        const bound = params.map(toBindable);
+        try {
+          const result = await client.query(sql, bound);
+          return toExecuteResult(result, sql);
+        } catch (e) {
+          wrapError(e, sql);
+        }
+      },
+      async release(): Promise<void> {
+        client.release();
+      },
+    };
+  }
+
   return {
     dialect: "postgres",
 
-    async query(sql: string, params: unknown[] = []): Promise<unknown[]> {
-      const client = transactionStorage.getStore();
+    async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
       const bound = params.map(toBindable);
       try {
-        const result = client
-          ? await client.query(sql, bound)
-          : await pool.query(sql, bound);
-        return result.rows;
+        const result = await pool.query(sql, bound);
+        return toExecuteResult(result, sql);
       } catch (e) {
         wrapError(e, sql);
       }
     },
 
-    async run(sql: string, params: unknown[] = []): Promise<{ lastID?: number; changes: number }> {
-      const client = transactionStorage.getStore();
-      const bound = params.map(toBindable);
-      try {
-        const result = client
-          ? await client.query(sql, bound)
-          : await pool.query(sql, bound);
-        const rowCount = result.rowCount ?? 0;
-        const firstRow = result.rows[0];
-        const lastID = firstRow
-          ? (firstRow["id"] ?? firstRow["lastval"] ?? Object.values(firstRow)[0])
-          : undefined;
-        return { lastID: typeof lastID === "number" ? lastID : undefined, changes: rowCount };
-      } catch (e) {
-        wrapError(e, sql);
-      }
-    },
-
-    async transaction<T>(fn: () => Promise<T>): Promise<T> {
-      const existingClient = transactionStorage.getStore();
-      if (existingClient) {
-        // Nested transaction: use savepoint
-        const sp = `sp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-        await existingClient.query(`SAVEPOINT ${sp}`);
-        try {
-          const result = await fn();
-          await existingClient.query(`RELEASE SAVEPOINT ${sp}`);
-          return result;
-        } catch (e) {
-          await existingClient.query(`ROLLBACK TO SAVEPOINT ${sp}`);
-          throw e;
-        }
-      }
+    async connect(): Promise<Connection> {
       const client = await pool.connect();
-      try {
-        await client.query("BEGIN");
-        const result = await transactionStorage.run(client, fn);
-        await client.query("COMMIT");
-        return result;
-      } catch (e) {
-        try { await client.query("ROLLBACK"); } catch { /* ignore rollback failure */ }
-        throw e;
-      } finally {
-        client.release();
+      if (statementTimeoutMs) {
+        await client.query(`SET statement_timeout = ${statementTimeoutMs}`);
       }
+      return makeConnection(client);
+    },
+
+    createTrx(conn: Connection, options?: TransactionOptions) {
+      return new PostgresTrx(conn, options);
     },
 
     async close(): Promise<void> {

@@ -235,6 +235,103 @@ const userPosts = posts.where((p) => p.userId === userId, { userId }).toArray();
 
 Future versions will add `.include()` and relation helpers.
 
+## Transactions
+
+Typhex supports two transaction styles — a callback API with implicit propagation, and an explicit API for passing transactions through service layers.
+
+### Callback API (`db.transaction`)
+
+The callback API automatically propagates the active transaction to any `Entity.query()` call inside the callback, without needing to pass `trx` explicitly:
+
+```ts
+await db.transaction(async (trx) => {
+  // These use the active transaction implicitly via AsyncLocalStorage
+  await User.query().insert({ name: "Alice" });
+  await Post.query().insert({ title: "Hello", authorId: 1 });
+  // Auto-commits on success, auto-rolls-back on throw
+});
+```
+
+You can also pass `trx` explicitly if you prefer:
+
+```ts
+await db.transaction(async (trx) => {
+  await User.query(trx).insert({ name: "Alice" });
+});
+```
+
+### Explicit API (`db.beginTrx`)
+
+Use `beginTrx()` when you need to control the transaction lifecycle manually — for example, to pass a `trx` handle into service functions:
+
+```ts
+async function createUserWithPosts(trx: Trx) {
+  const user = await User.query(trx).insert({ name: "Alice" });
+  await Post.query(trx).insert({ title: "Hello", authorId: user.id });
+}
+
+const trx = await db.beginTrx();
+try {
+  await createUserWithPosts(trx);
+  await trx.commit();
+} catch {
+  await trx.rollback();
+}
+```
+
+### Nested Transactions (Savepoints)
+
+Both APIs support nesting. Each nested call creates a savepoint, so you can roll back only the inner operation:
+
+```ts
+await db.transaction(async (trx) => {
+  await User.query(trx).insert({ name: "Alice" });
+
+  await trx.transaction(async (nested) => {
+    await Post.query(nested).insert({ title: "Draft" });
+    throw new Error("discard draft"); // only rolls back the savepoint
+  }).catch(() => {});
+
+  // Alice was still inserted
+});
+```
+
+### `Entity.transaction` Shorthand
+
+If you have a default `Db` configured, you can use the static shorthand:
+
+```ts
+await User.transaction(async (trx) => {
+  await User.query(trx).insert({ name: "Bob" });
+});
+```
+
+### Transaction Options
+
+Both `db.transaction(fn, options)` and `db.beginTrx(options)` accept a `TransactionOptions` object:
+
+```ts
+// ANSI isolation level (PostgreSQL supports all four; SQLite only supports "SERIALIZABLE")
+await db.transaction(fn, { isolationLevel: "SERIALIZABLE" });
+
+// PostgreSQL: read-only transaction
+await db.transaction(fn, { readOnly: true });
+
+// PostgreSQL: serializable, read-only, deferrable (lowest overhead for long-running read-only txns)
+await db.transaction(fn, {
+  isolationLevel: "SERIALIZABLE",
+  readOnly: true,
+  deferrable: true,
+});
+
+// SQLite: native transaction mode (overrides isolationLevel)
+// "deferred" (default) | "immediate" | "exclusive"
+await db.transaction(fn, { sqliteMode: "immediate" });
+await db.beginTrx({ sqliteMode: "exclusive" });
+```
+
+**SQLite isolation level note:** SQLite does not support ANSI isolation levels other than `"SERIALIZABLE"` (mapped to `BEGIN IMMEDIATE`). Passing `"READ_COMMITTED"`, `"READ_UNCOMMITTED"`, or `"REPEATABLE_READ"` to a SQLite connection will throw an error. Use `sqliteMode` for fine-grained SQLite control.
+
 ## Architecture
 
 Typhex uses a **query IR (Intermediate Representation)** that bridges JavaScript expressions and SQL:

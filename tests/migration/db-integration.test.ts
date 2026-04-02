@@ -5,19 +5,19 @@ import { tmpdir } from "node:os";
 import { createSqliteDriver } from "../../src/driver/sqlite.js";
 import { Db } from "../../src/orm/db.js";
 import { Entity } from "../../src/entity/entity.js";
-import { clearRegistry, setDefaultDriver } from "../../src/entity/global-driver.js";
+import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 
 describe("Db migration API (integration)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
     clearRegistry();
-    setDefaultDriver(null);
+    setDefaultDb(null);
     tmpDir = mkdtempSync(join(tmpdir(), "typhex-db-mig-"));
   });
 
   afterEach(() => {
-    setDefaultDriver(null);
+    setDefaultDb(null);
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -61,7 +61,7 @@ describe("Db migration API (integration)", () => {
     expect(result.applied).toHaveLength(1);
     expect(result.applied[0]).toMatch(/add_accounts_table/);
 
-    const rows = await db.getDriver().query(`SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`);
+    const rows = await db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`);
     expect(rows).toHaveLength(1);
 
     await db.close();
@@ -129,14 +129,14 @@ describe("Db migration API (integration)", () => {
     });
 
     const driver = createSqliteDriver({ path: ":memory:" });
-    await driver.run("PRAGMA foreign_keys = ON");
+    await driver.execute("PRAGMA foreign_keys = ON");
     const db = new Db(driver);
 
     await expect(db.migrate()).resolves.not.toThrow();
 
-    const tables = ((await driver.query(
+    const tables = ((await driver.execute(
       `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
-    )) as Array<{ name: string }>).map((r) => r.name);
+    ).then(r => r.rows)) as Array<{ name: string }>).map((r) => r.name);
     expect(tables).toContain("users");
     expect(tables).toContain("posts");
     expect(tables).toContain("comments");

@@ -3,20 +3,16 @@
  * No _dirty tracking: save() inserts if no pk, else updates all current column values.
  */
 
-import type { Driver } from "../driver/types.js";
+import type { Db } from "./db.js";
 import type { QueryState } from "./query-builder.js";
 import { QueryBuilder } from "./query-builder.js";
 import { whereColumnEq } from "./query-helpers.js";
 
-export interface SingleRowQueryBuilderStateFactory {
-  (driver: Driver): QueryState<unknown>;
-}
 
 export class SingleRowQueryBuilder<T = unknown> {
   constructor(
     private readonly instance: Record<string, unknown>,
-    private readonly getState: SingleRowQueryBuilderStateFactory,
-    private readonly resolveDriver: () => Driver,
+    private readonly state: QueryState<unknown>,
     private readonly runHook: (instance: unknown, name: string) => Promise<void>,
     private readonly pkColumn: string,
     private readonly columnNames: string[],
@@ -26,8 +22,6 @@ export class SingleRowQueryBuilder<T = unknown> {
   async save(): Promise<void> {
     const self = this.instance as T & { _isNew?: boolean };
     await this.runHook(self, "beforeSave");
-    const driver = this.resolveDriver();
-    const state = this.getState(driver);
     const pkVal = this.instance[this.pkColumn];
 
     if (pkVal === undefined || pkVal === null) {
@@ -36,7 +30,7 @@ export class SingleRowQueryBuilder<T = unknown> {
       for (const c of this.columnNames) {
         if (this.instance[c] !== undefined) row[c] = this.instance[c];
       }
-      const inserted = (await new QueryBuilder({ ...state }).insert(row)) as unknown as Record<string, unknown>;
+      const inserted = (await new QueryBuilder({ ...this.state }).insert(row)) as unknown as Record<string, unknown>;
       for (const c of this.columnNames) {
         if (inserted[c] !== undefined) this.instance[c] = inserted[c];
       }
@@ -50,7 +44,7 @@ export class SingleRowQueryBuilder<T = unknown> {
       }
       if (Object.keys(set).length > 0) {
         await new QueryBuilder({
-          ...state,
+          ...this.state,
           whereIr: whereColumnEq(this.pkColumn, pkVal),
           whereParams: {},
         }).update(set);
@@ -69,8 +63,7 @@ export class SingleRowQueryBuilder<T = unknown> {
       await this.runHook(self, "afterDelete");
       return;
     }
-    const driver = this.resolveDriver();
-    const state = this.getState(driver);
+    const state = this.state;
     await new QueryBuilder({
       ...state,
       whereIr: whereColumnEq(this.pkColumn, pkVal),
@@ -83,10 +76,8 @@ export class SingleRowQueryBuilder<T = unknown> {
   async patch(set: Record<string, unknown>): Promise<void> {
     const pkVal = this.instance[this.pkColumn];
     if (pkVal === undefined || pkVal === null) return;
-    const driver = this.resolveDriver();
-    const state = this.getState(driver);
     await new QueryBuilder({
-      ...state,
+      ...this.state,
       whereIr: whereColumnEq(this.pkColumn, pkVal),
       whereParams: {},
     }).update(set);

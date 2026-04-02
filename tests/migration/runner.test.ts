@@ -28,7 +28,7 @@ describe("runMigrations", () => {
     expect(result.applied).toEqual(["001_add_users", "002_add_posts"]);
     expect(result.skipped).toEqual([]);
 
-    const tables = ((await driver.query(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)) as Array<{ name: string }>)
+    const tables = ((await driver.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).then(r => r.rows)) as Array<{ name: string }>)
       .map((r) => r.name)
       .filter((n) => n !== "_typhex_migrations")
       .sort();
@@ -58,7 +58,7 @@ describe("runMigrations", () => {
     writeFileSync(join(tmpDir, "001_init.sql"), 'CREATE TABLE "t" ("id" integer primary key);');
     await runMigrations(driver, tmpDir);
 
-    const rows = (await driver.query(`SELECT "name" FROM "_typhex_migrations"`)) as Array<{ name: string }>;
+    const rows = (await driver.execute(`SELECT "name" FROM "_typhex_migrations"`).then(r => r.rows)) as Array<{ name: string }>;
     expect(rows).toHaveLength(1);
     expect(rows[0].name).toBe("001_init");
   });
@@ -69,7 +69,7 @@ describe("runMigrations", () => {
 
     await expect(runMigrations(driver, tmpDir)).rejects.toThrow();
 
-    const tables = ((await driver.query(`SELECT name FROM sqlite_master WHERE type='table'`)) as Array<{ name: string }>)
+    const tables = ((await driver.execute(`SELECT name FROM sqlite_master WHERE type='table'`).then(r => r.rows)) as Array<{ name: string }>)
       .map((r) => r.name);
     expect(tables).not.toContain("good");
   });

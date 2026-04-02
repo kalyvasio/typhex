@@ -2,9 +2,9 @@
  * Typhex ORM: Entity-based API with arrow-function query predicates.
  */
 
-export { Db, QueryBuilder, SingleRowQueryBuilder } from "./orm/index.js";
-export type { DbOptions, QueryState, SingleRowQueryBuilderStateFactory } from "./orm/index.js";
-export type { Driver } from "./driver/types.js";
+export { Db, Trx, QueryBuilder, SingleRowQueryBuilder } from "./orm/index.js";
+export type { DbOptions, QueryState, QueryExecutor } from "./orm/index.js";
+export type { Driver, Connection, ExecuteResult, TransactionOptions } from "./driver/types.js";
 export { createSqliteDriver, createDriver } from "./driver/index.js";
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export { createPostgresDriver, getDialect } from "./dbs/index.js";

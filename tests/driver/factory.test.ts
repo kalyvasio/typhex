@@ -5,7 +5,7 @@ describe("driver/factory", () => {
   it("creates sqlite driver with dialect and path", async () => {
     const driver = createDriver({ dialect: "sqlite", path: ":memory:" });
     expect(driver.dialect).toBe("sqlite");
-    const rows = await driver.query("SELECT 1 as x");
+    const rows = await driver.execute("SELECT 1 as x").then(r => r.rows);
     expect(rows).toHaveLength(1);
     await driver.close();
   });

@@ -5,7 +5,7 @@
 import type { InferTable, InferInsert } from "./schema-inference.js";
 import type { RelationsMap } from "./relations.js";
 import type { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
-import type { Driver } from "../driver/types.js";
+import {Db, Trx} from "../orm/db.js";
 
 export interface TableDef<
   TSchema extends Record<string, string>,
@@ -22,5 +22,5 @@ export interface EntityBase {
   _isNew: boolean;
   _dirty: ReadonlySet<string>;
 
-  query(driver?: Driver): SingleRowQueryBuilder<this>;
+  query(trx?: Trx): SingleRowQueryBuilder<this>;
 }

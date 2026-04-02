@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryBuilder } from "../../src/orm/query-builder.js";
 import { Db, createSqliteDriver, Entity, rel } from "../../src/index.js";
-import type { Driver } from "../../src/driver/types.js";
 import type { RelationDef } from "../../src/entity/relations.js";
 import { sqliteDialect } from "../../src/dbs/sqlite/dialect.js";
 import type { IrOrderBy } from "../../src/ir/types.js";
+import { type MockDb, createMockDb } from "../helpers.js";
 
 // ---------------------------------------------------------------------------
 // Unit tests: orderBy lambda parsing
@@ -23,21 +23,12 @@ class MockContactE extends Entity("mock_contacts", {
   company: rel.manyToOne(() => MockCompanyE, { foreignKey: "companyId" }),
 }) {}
 
-function createMockDriver(): Driver {
-  return {
-    dialect: "sqlite",
-    query: vi.fn().mockReturnValue([]),
-    run: vi.fn().mockReturnValue({ lastID: 1, changes: 0 }),
-    transaction: vi.fn((fn) => fn()),
-    close: vi.fn(),
-  };
-}
 
-function newBuilder(driver: Driver) {
+function newBuilder(db: MockDb) {
   return new QueryBuilder<typeof MockContactE, InstanceType<typeof MockContactE>>({
     tableName: "mock_contacts",
     columnNames: ["id", "name", "companyId"],
-    driver,
+    qe: db,
     pkColumn: "id",
     whereIr: null,
     whereParams: {},
@@ -54,44 +45,44 @@ function newBuilder(driver: Driver) {
 }
 
 describe("orderBy — lambda and dot-notation support", () => {
-  let driver: Driver;
+  let db: MockDb;
 
   beforeEach(() => {
-    driver = createMockDriver();
+    db = createMockDb();
   });
 
   describe("lambda parsing", () => {
     it("parses u => u.name as single-segment path", () => {
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       q.orderBy(u => u.name);
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
     it("parses u => u.company.name as two-segment path", () => {
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       q.orderBy(u => u.company.name);
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
     it("stores correct path for u => u.name", async () => {
       let capturedSql = "";
-      (driver.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+      (db.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
         capturedSql = sql;
         return [];
       });
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       q.orderBy(u => u.name);
       await q.toArray();
       expect(capturedSql).toContain('"name"');
     });
 
     it("throws on non-member-expression lambda", () => {
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       expect(() => q.orderBy(u => (u.name as any) > 5)).toThrow();
     });
 
     it("chains and returns this (same reference)", () => {
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       const result = q.orderBy(u => u.name);
       expect(result).toBe(q);
     });
@@ -100,11 +91,11 @@ describe("orderBy — lambda and dot-notation support", () => {
   describe("dot-notation string", () => {
     it("splits 'company.name' into path ['company', 'name']", async () => {
       let capturedSql = "";
-      (driver.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+      (db.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
         capturedSql = sql;
         return [];
       });
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       q.orderBy("company.name");
       await q.toArray();
       expect(capturedSql).toContain('"mock_companies"');
@@ -112,7 +103,7 @@ describe("orderBy — lambda and dot-notation support", () => {
     });
 
     it("chains and returns this (same reference)", () => {
-      const q = newBuilder(driver);
+      const q = newBuilder(db);
       const result = q.orderBy("name", "desc");
       expect(result).toBe(q);
     });
@@ -263,8 +254,8 @@ describe("orderBy relation columns — integration", () => {
 
   it("generates LEFT JOIN in SQL for relation orderBy", async () => {
     let capturedSql = "";
-    const mockDriver = createMockDriver();
-    (mockDriver.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
+    const mockDb = createMockDb();
+    (mockDb.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
       capturedSql = sql;
       return [];
     });
@@ -272,7 +263,7 @@ describe("orderBy relation columns — integration", () => {
     const state = {
       tableName: "contacts_ob",
       columnNames: ["id", "name", "companyId"],
-      driver: mockDriver,
+      qe: mockDb,
       pkColumn: "id",
       whereIr: null,
       whereParams: {},

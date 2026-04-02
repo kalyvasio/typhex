@@ -28,14 +28,14 @@ describe("diffSchema", () => {
   });
 
   it("detects no changes when schema matches", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text not null)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text not null)`);
     const entities = [entity("users", { id: "integer primary key", name: "text not null" })];
     const actions = await diffSchema(driver, entities);
     expect(actions).toHaveLength(0);
   });
 
   it("detects added column", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
     const entities = [entity("users", { id: "integer primary key", name: "text", age: "integer" })];
     const actions = await diffSchema(driver, entities);
     expect(actions).toHaveLength(1);
@@ -47,7 +47,7 @@ describe("diffSchema", () => {
   });
 
   it("detects dropped column", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text, "legacy" text)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text, "legacy" text)`);
     const entities = [entity("users", { id: "integer primary key", name: "text" })];
     const actions = await diffSchema(driver, entities);
     expect(actions).toHaveLength(1);
@@ -58,7 +58,7 @@ describe("diffSchema", () => {
   });
 
   it("detects dropped table", async () => {
-    await driver.run(`CREATE TABLE "old_table" ("id" integer primary key)`);
+    await driver.execute(`CREATE TABLE "old_table" ("id" integer primary key)`);
     const actions = await diffSchema(driver, []);
     expect(actions).toHaveLength(1);
     expect(actions[0].kind).toBe("drop_table");
@@ -66,14 +66,14 @@ describe("diffSchema", () => {
   });
 
   it("detects altered column type", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "age" text)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "age" text)`);
     const entities = [entity("users", { id: "integer primary key", age: "integer" })];
     const actions = await diffSchema(driver, entities);
     expect(actions.some((a) => a.kind === "alter_column")).toBe(true);
   });
 
   it("handles multiple tables with mixed changes", async () => {
-    await driver.run(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
     const entities = [
       entity("users", { id: "integer primary key", name: "text", email: "text" }),
       entity("posts", { id: "integer primary key", title: "text" }),
@@ -85,7 +85,7 @@ describe("diffSchema", () => {
   });
 
   it("ignores _typhex_migrations table", async () => {
-    await driver.run(`CREATE TABLE "_typhex_migrations" ("id" integer primary key, "name" text)`);
+    await driver.execute(`CREATE TABLE "_typhex_migrations" ("id" integer primary key, "name" text)`);
     const actions = await diffSchema(driver, []);
     expect(actions).toHaveLength(0);
   });

@@ -1,23 +1,28 @@
 /**
- * Db: connection manager. Sets the global default driver so all entities
- * resolve it automatically. Provides migrate(), validate(), and close().
- *
- * Also exposes the programmatic migration API: generateMigrations(),
- * runMigrations(), and migrationStatus().
+ * Db: the rich database class. Transaction logic lives in dialect-specific Trx subclasses
+ * (see src/orm/trx.ts and dialect trx subclasses). Db.transaction() manages the connection
+ * lifecycle and delegates to Driver.createTrx() for the dialect-specific scope.
  */
 
-import type { Driver } from "../driver/types.js";
-import { createDriver } from "../driver/factory.js";
-import { getDialect } from "../dbs/index.js";
-import {
-  setDefaultDriver,
-  getRegisteredEntities,
-} from "../entity/global-driver.js";
-import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
-import { runMigrations as runMig, migrationStatus as migStatus } from "../migration/runner.js";
-import { parseFkDependencies, topoSort } from "../migration/topo-sort.js";
-import type { MigrationFile } from "../migration/types.js";
-import { loadConfig } from "../config/load-config.js";
+import type { Driver, TransactionOptions } from "../driver/types.js";
+import type {Dialect} from "../dialect.js";
+import {createDriver, CreateDriverOptions} from "../driver/factory.js";
+import {getDialect} from "../dbs/index.js";
+import {getRegisteredEntities, setDefaultDb,} from "../entity/global-driver.js";
+import {generateMigrationFiles, writeMigrationFiles} from "../migration/generator.js";
+import {migrationStatus as migStatus, runMigrations as runMig} from "../migration/runner.js";
+import {parseFkDependencies, topoSort} from "../migration/topo-sort.js";
+import type {MigrationFile} from "../migration/types.js";
+import {loadConfig} from "../config/load-config.js";
+import { Trx, getActiveTrx, runInTrxStorage } from "./trx.js";
+export { Trx, getActiveTrx };
+
+/** Minimal interface satisfied by both Db and Trx — used as QueryState.qe. */
+export interface QueryExecutor {
+  readonly dialect: Dialect;
+  query(sql: string, params?: unknown[]): Promise<unknown[]>;
+  run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }>;
+}
 
 export type DbOptions =
   | { driver: Driver; migrationsFolder?: string }
@@ -32,34 +37,30 @@ function isDriver(v: unknown): v is Driver {
   return (
     v != null &&
     typeof v === "object" &&
-    "query" in v &&
-    "run" in v &&
+    "execute" in v &&
+    "connect" in v &&
     "close" in v
   );
 }
 
-export class Db {
-  private migrationsFolder: string;
-  private driver: Driver;
+/** Internal symbol: only used for the Db internal constructor overload. */
+const INTERNAL = Symbol("db-internal");
 
-  constructor(options: DbOptions | Driver) {
-    const opts: DbOptions = isDriver(options)
-      ? { driver: options, migrationsFolder: "./migrations" }
-      : options;
-    let driver: Driver;
-    if ("driver" in opts) {
-      driver = opts.driver;
-      this.migrationsFolder = opts.migrationsFolder ?? "./migrations";
-    } else {
-      driver = createDriver({
-        dialect: opts.dialect,
-        database: opts.database,
-        url: opts.url,
-      });
-      this.migrationsFolder = opts.migrationsFolder ?? "./migrations";
-    }
-    this.driver = driver;
-    setDefaultDriver(driver);
+export class Db implements QueryExecutor {
+  protected _driver: Driver;
+  private _migrationsFolder: string;
+
+  constructor(options: DbOptions | Driver);
+  /** @internal — Trx subclass only */
+  constructor(driver: Driver, _internal: typeof INTERNAL);
+  constructor(arg: Driver | DbOptions, internal?: typeof INTERNAL) {
+    this._driver = isDriver(arg)
+        ? (arg as Driver)
+        : isDriver((arg as { driver?: unknown }).driver)
+            ? (arg as { driver: Driver }).driver
+            : createDriver(arg as CreateDriverOptions);
+    this._migrationsFolder = (arg as { migrationsFolder?: string }).migrationsFolder ?? "./migrations";
+    if (internal !== INTERNAL) setDefaultDb(this);
   }
 
   /** Create Db from config file. Loads config and creates driver internally. */
@@ -71,9 +72,59 @@ export class Db {
     return new Db(config);
   }
 
+  get dialect(): Dialect {
+    return this._driver.dialect;
+  }
+
+  query(sql: string, params?: unknown[]): Promise<unknown[]> {
+    return this._driver.execute(sql, params).then(r => r.rows);
+  }
+
+  run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }> {
+    return this._driver.execute(sql, params).then(r => ({ lastID: r.lastID, changes: r.changes }));
+  }
+
+  async transaction<T>(fn: (trx: Trx) => Promise<T>, options?: TransactionOptions): Promise<T> {
+    const conn = await this._driver.connect();
+    const trx = this._driver.createTrx(conn, options);
+    try {
+      return await runInTrxStorage(trx, () => trx.transaction(fn));
+    } finally {
+      await conn.release();
+    }
+  }
+
+  /**
+   * Begin an explicit transaction and return the Trx handle.
+   * You are responsible for calling trx.commit() or trx.rollback().
+   *
+   * @example
+   * const trx = await db.beginTrx();
+   * try {
+   *   await User.query(trx).insert({ name: "Alice" });
+   *   const nested = await trx.beginTrx();
+   *   try {
+   *     await Post.query(nested).insert({ title: "Hello", authorId: 1 });
+   *     await nested.commit();
+   *   } catch { await nested.rollback(); }
+   *   await trx.commit();
+   * } catch { await trx.rollback(); }
+   */
+  async beginTrx(options?: TransactionOptions): Promise<Trx> {
+    const conn = await this._driver.connect();
+    const trx = this._driver.createTrx(conn, options);
+    await trx._initRoot(() => conn.release());
+    return trx;
+  }
+
+  /** @deprecated Use the driver field directly. */
+  getDriver(): Driver {
+    return this._driver;
+  }
+
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
   async migrate(): Promise<void> {
-    const dialect = getDialect(this.driver.dialect ?? "sqlite");
+    const dialect = getDialect(this._driver.dialect ?? "sqlite");
     const esc = dialect.escapeIdentifier.bind(dialect);
     const entities = getRegisteredEntities();
     const deps = parseFkDependencies(entities);
@@ -88,19 +139,19 @@ export class Db {
       const colDefs = Object.entries(schema)
         .map(([c, def]) => `${esc(c)} ${def}`)
         .join(", ");
-      await this.driver.run(`CREATE TABLE IF NOT EXISTS ${esc(name)} (${colDefs})`);
+      await this.run(`CREATE TABLE IF NOT EXISTS ${esc(name)} (${colDefs})`);
     }
   }
 
   /** Validate all registered entities against the database. Throws on mismatch. */
   async validate(): Promise<void> {
-    const dialect = getDialect(this.driver.dialect ?? "sqlite");
+    const dialect = getDialect(this._driver.dialect ?? "sqlite");
     const esc = dialect.escapeIdentifier.bind(dialect);
     for (const entity of getRegisteredEntities()) {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = (await this.driver.query(`PRAGMA table_info(${esc(name)})`)) as Array<{
+      const rows = (await this.query(`PRAGMA table_info(${esc(name)})`)) as Array<{
         name: string;
         type: string;
         notnull: number;
@@ -126,31 +177,27 @@ export class Db {
   /**
    * Diff entity definitions against the database and generate migration files.
    * Returns the generated files (also written to disk).
-   * Uses driver.dialect for SQL generation.
    */
-  async generateMigrations(dir = this.migrationsFolder): Promise<MigrationFile[]> {
+  async generateMigrations(dir = this._migrationsFolder): Promise<MigrationFile[]> {
     const entities = getRegisteredEntities();
-    const files = await generateMigrationFiles(this.driver, entities);
+    const files = await generateMigrationFiles(this._driver, entities);
     if (files.length > 0) writeMigrationFiles(dir, files);
     return files;
   }
 
   /** Apply pending migration scripts from the migrations directory. */
-  async runMigrations(dir = this.migrationsFolder) {
-    return runMig(this.driver, dir);
+  async runMigrations(dir = this._migrationsFolder) {
+    return runMig(this._driver, dir);
   }
 
   /** Show applied and pending migration status. */
-  async migrationStatus(dir = this.migrationsFolder) {
-    return migStatus(this.driver, dir);
-  }
-
-  getDriver(): Driver {
-    return this.driver;
+  async migrationStatus(dir = this._migrationsFolder) {
+    return migStatus(this._driver, dir);
   }
 
   async close(): Promise<void> {
-    setDefaultDriver(null);
-    await this.driver.close();
+    setDefaultDb(null);
+    await this._driver.close();
   }
 }
+

@@ -3,7 +3,7 @@
  * Does NOT mutate rows — returns fetched data as maps.
  */
 
-import type { Driver } from "../driver/types.js";
+import type { QueryExecutor } from "./db.js";
 import type { RelationFetchMetadata } from "./relation-context-builder.js";
 import { whereColumnIn, whereAnd } from "./query-helpers.js";
 
@@ -12,7 +12,7 @@ import { whereColumnIn, whereAnd } from "./query-helpers.js";
  *  Returns a map from relation name to either a to-one index (Map by PK)
  *  or a to-many grouping (Map by FK). */
 export async function fetchRelations(
-  driver: Driver,
+  qe: QueryExecutor,
   rows: Record<string, unknown>[],
   fetches: RelationFetchMetadata[],
   skip: Set<string>
@@ -23,12 +23,12 @@ export async function fetchRelations(
     if (meta.isArray) {
       const ids = collectUniqueValues(rows, "id");
       if (ids.length === 0) { result.set(meta.relation.name, new Map()); continue; }
-      const related = await buildRelatedQuery(meta, driver, meta.fkColumn, ids, meta.fkColumn);
+      const related = await buildRelatedQuery(meta, qe, meta.fkColumn, ids, meta.fkColumn);
       result.set(meta.relation.name, groupByKey(related, meta.fkColumn));
     } else {
       const ids = collectUniqueValues(rows, meta.fkColumn);
       if (ids.length === 0) { result.set(meta.relation.name, new Map()); continue; }
-      const related = await buildRelatedQuery(meta, driver, meta.targetPk, ids, meta.targetPk);
+      const related = await buildRelatedQuery(meta, qe, meta.targetPk, ids, meta.targetPk);
       result.set(meta.relation.name, indexByKey(related, meta.targetPk));
     }
   }
@@ -47,7 +47,7 @@ function collectUniqueValues(rows: Record<string, unknown>[], column: string): u
  *  SELECT list so rows can be correlated back to their parents. */
 async function buildRelatedQuery(
   meta: RelationFetchMetadata,
-  driver: Driver,
+  qe: QueryExecutor,
   whereInColumn: string,
   ids: unknown[],
   anchorColumn: string
@@ -55,7 +55,7 @@ async function buildRelatedQuery(
   const baseWhere = whereColumnIn(whereInColumn, ids as number[]);
   const whereIr = meta.relation.whereIr ? whereAnd(baseWhere, meta.relation.whereIr) : baseWhere;
 
-  let chain = meta.targetEntity.query(driver).where(whereIr, meta.relation.whereParams ?? {});
+  let chain = meta.targetEntity.query(qe).where(whereIr, meta.relation.whereParams ?? {});
   for (const o of meta.relation.orderBy ?? []) chain = chain.orderBy(o.path[0] ?? "", o.direction);
   if (meta.relation.limitNum != null) chain = chain.limit(meta.relation.limitNum);
   if (meta.relation.offsetNum != null) chain = chain.offset(meta.relation.offsetNum);

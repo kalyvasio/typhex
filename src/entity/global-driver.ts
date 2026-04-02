@@ -1,19 +1,19 @@
 /**
- * Global default driver and entity registry.
- * - Driver: set by Db constructor, fallback when entities don't have a per-entity driver.
+ * Global default Db and entity registry.
+ * - Db: set by Db constructor, fallback when entities don't have a per-entity Db.
  * - Registry: populated by Entity(), used by Db.migrate() / Db.validate().
  */
 
-import type { Driver } from "../driver/types.js";
+import type { Db } from "../orm/db.js";
 
-let defaultDriver: Driver | null = null;
+let defaultDb: Db | null = null;
 
-export function getDefaultDriver(): Driver | null {
-  return defaultDriver;
+export function getDefaultDb(): Db | null {
+  return defaultDb;
 }
 
-export function setDefaultDriver(driver: Driver | null): void {
-  defaultDriver = driver;
+export function setDefaultDb(db: Db | null): void {
+  defaultDb = db;
 }
 
 export interface RegisteredEntity {
