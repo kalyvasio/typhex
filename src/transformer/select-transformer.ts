@@ -3,7 +3,7 @@
  */
 
 import * as ts from "typescript";
-import type { IrSelect, IrAggregate, IrSubqueryRef } from "../ir/types.js";
+import type { IrSelect, IrAggregate, IrSubqueryRef, IrSelectRelation } from "../ir/types.js";
 import {
   isTyphexType,
   matchTyphexMethodCall,
@@ -13,6 +13,7 @@ import {
   irSelectToTsLiteral,
   irAggregateToTsLiteral,
   getParamBindings,
+  getArrowExpressionBody,
   type ParamBindings,
 } from "./shared.js";
 import {
@@ -20,6 +21,7 @@ import {
   isTyphexQueryChain,
   type CapturedSubquery,
 } from "./subquery-transformer.js";
+import { scopePredicateToIr } from "./where-transformer.js";
 
 // ---------------------------------------------------------------------------
 // Top-level arrow dispatch
@@ -60,6 +62,58 @@ function extractReturnedObjectLiteral(
   const st = fn.body.statements[0];
   if (!st || !ts.isReturnStatement(st) || !st.expression) return null;
   return unwrapObjectLiteral(st.expression);
+}
+
+function extractWherePredicate(
+  decl: ts.MethodDeclaration | ts.FunctionDeclaration,
+): ts.ArrowFunction | ts.FunctionExpression | null {
+  if (!decl.body) return null;
+  for (const stmt of decl.body.statements) {
+    if (!ts.isReturnStatement(stmt) || !stmt.expression) continue;
+    const ret = stmt.expression;
+    if (!ts.isCallExpression(ret)) continue;
+    const callee = ret.expression;
+    if (!ts.isPropertyAccessExpression(callee)) continue;
+    if (callee.name.text !== "where") continue;
+    if (callee.expression.kind !== ts.SyntaxKind.ThisKeyword) continue;
+    const arg = ret.arguments[0];
+    if (!arg) continue;
+    if (ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) return arg;
+  }
+  return null;
+}
+
+function tryResolveScopeCall(
+  call: ts.CallExpression,
+  paramName: string,
+  checker: ts.TypeChecker,
+): Omit<IrSelectRelation, "outputKey"> | null {
+  const callee = call.expression;
+  if (!ts.isPropertyAccessExpression(callee)) return null;
+  const receiver = callee.expression;
+  if (!ts.isPropertyAccessExpression(receiver)) return null;
+  const relName = receiver.name.text;
+  const base = receiver.expression;
+  if (!ts.isIdentifier(base) || base.text !== paramName) return null;
+
+  const methodSymbol = checker.getSymbolAtLocation(callee);
+  if (!methodSymbol) return null;
+  const decls = methodSymbol.getDeclarations();
+  if (!decls || decls.length === 0) return null;
+  const decl = decls[0];
+  if (!ts.isMethodDeclaration(decl) && !ts.isFunctionDeclaration(decl)) return null;
+
+  const predicate = extractWherePredicate(decl);
+  if (!predicate) return null;
+
+  const innerParam = predicate.parameters[0]?.name;
+  if (!innerParam || !ts.isIdentifier(innerParam)) return null;
+  const bodyExpr = getArrowExpressionBody(predicate);
+  if (!bodyExpr) return null;
+  const whereIr = scopePredicateToIr(bodyExpr, [innerParam.text]);
+  if (!whereIr) return null;
+
+  return { name: relName, whereIr, whereParams: {} };
 }
 
 // ---- Shorthand bodies -------------------------------------------------------
@@ -125,6 +179,7 @@ function parseSelectObjectLiteral(
   const aliases: string[] = [];
   const aggregates: IrAggregate[] = [];
   const subqueries: Array<{ alias: string; subquery: IrSubqueryRef }> = [];
+  const relations: IrSelectRelation[] = [];
   let rest = false;
 
   for (const prop of obj.properties) {
@@ -145,12 +200,20 @@ function parseSelectObjectLiteral(
       aliases.push(keyName);
     } else if (handled.kind === "aggregate") {
       aggregates.push(handled.aggregate);
+    } else if (handled.kind === "relation") {
+      relations.push({ ...handled.relation, outputKey: keyName });
     } else {
       subqueries.push({ alias: keyName, subquery: handled.subquery });
     }
   }
 
-  if (paths.length === 0 && aggregates.length === 0 && subqueries.length === 0 && !rest) {
+  if (
+    paths.length === 0 &&
+    aggregates.length === 0 &&
+    subqueries.length === 0 &&
+    relations.length === 0 &&
+    !rest
+  ) {
     return null;
   }
   return {
@@ -160,6 +223,7 @@ function parseSelectObjectLiteral(
     ...(rest ? { rest: true } : {}),
     ...(aggregates.length > 0 ? { aggregates } : {}),
     ...(subqueries.length > 0 ? { subqueries } : {}),
+    ...(relations.length > 0 ? { relations } : {}),
   };
 }
 
@@ -181,7 +245,8 @@ function getPropertyKeyName(prop: ts.ObjectLiteralElementLike): string | null {
 type PropertyResult =
   | { kind: "path"; path: string[] }
   | { kind: "aggregate"; aggregate: IrAggregate }
-  | { kind: "subquery"; subquery: IrSubqueryRef };
+  | { kind: "subquery"; subquery: IrSubqueryRef }
+  | { kind: "relation"; relation: Omit<IrSelectRelation, "outputKey"> };
 
 /**
  * Classify a single select-object property as either a column path or an
@@ -229,6 +294,9 @@ function parseSelectObjectProperty(
         subquery: captureSubqueryRef(value, capturedSubqueries),
       };
     }
+
+    const scopeRel = tryResolveScopeCall(value, pb.paramName, checker);
+    if (scopeRel) return { kind: "relation", relation: scopeRel };
   }
 
   return null;

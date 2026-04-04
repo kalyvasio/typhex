@@ -3,7 +3,7 @@
  */
 
 import ts from "typescript";
-import type { IrNode, IrSelect, IrWhere, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrSelect, IrWhere, IrBinary, IrOrderBy, IrAggregate, IrSelectRelation } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
 // Typhex type detection
@@ -45,8 +45,21 @@ function isTyphexDeclarationFile(rawPath: string): boolean {
  */
 export function isTyphexType(receiver: ts.Expression, checker: ts.TypeChecker): boolean {
   try {
+    const receiverType = checker.getTypeAtLocation(receiver);
     const symbol = resolveTypeSymbol(receiver, checker);
-    return symbol ? checkSymbolIsTyphex(symbol) : false;
+    if (symbol && checkSymbolIsTyphex(symbol)) return true;
+    return isTypeOrAncestorTyphex(receiverType, checker);
+  } catch {
+    return false;
+  }
+}
+
+function isTypeOrAncestorTyphex(type: ts.Type, checker: ts.TypeChecker): boolean {
+  const sym = type.getSymbol();
+  if (sym && checkSymbolIsTyphex(sym)) return true;
+  try {
+    const bases = (type as ts.InterfaceType).getBaseTypes?.() ?? [];
+    return bases.some((b) => isTypeOrAncestorTyphex(b, checker));
   } catch {
     return false;
   }
@@ -536,6 +549,42 @@ export function irAggregateToTsLiteral(agg: IrAggregate): ts.ObjectLiteralExpres
   return f.createObjectLiteralExpression(props);
 }
 
+function irSelectRelationToTsLiteral(rel: IrSelectRelation): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = [
+    f.createPropertyAssignment("name", f.createStringLiteral(rel.name)),
+    f.createPropertyAssignment("outputKey", f.createStringLiteral(rel.outputKey)),
+  ];
+  if (rel.whereIr) {
+    props.push(f.createPropertyAssignment("whereIr", irNodeToTsLiteral(rel.whereIr)));
+  }
+  if (rel.whereParams && Object.keys(rel.whereParams).length > 0) {
+    props.push(
+      f.createPropertyAssignment(
+        "whereParams",
+        f.createObjectLiteralExpression(
+          Object.entries(rel.whereParams).map(([k, v]) =>
+            f.createPropertyAssignment(k, valueToTsExpression(v as any, f)),
+          ),
+        ),
+      ),
+    );
+  }
+  if (rel.subPaths && rel.subPaths.length > 0) {
+    props.push(
+      f.createPropertyAssignment(
+        "subPaths",
+        f.createArrayLiteralExpression(
+          rel.subPaths.map((p) =>
+            f.createArrayLiteralExpression(p.map((s) => f.createStringLiteral(s))),
+          ),
+        ),
+      ),
+    );
+  }
+  return f.createObjectLiteralExpression(props);
+}
+
 /** Serialize an IrSelect into a TS object literal, emitting only populated optional fields. */
 export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
   const f = ts.factory;
@@ -576,6 +625,14 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
             ]),
           ),
         ),
+      ),
+    );
+  }
+  if (sel.relations && sel.relations.length > 0) {
+    props.push(
+      f.createPropertyAssignment(
+        "relations",
+        f.createArrayLiteralExpression(sel.relations.map(irSelectRelationToTsLiteral)),
       ),
     );
   }
