@@ -556,7 +556,7 @@ function irSelectRelationToTsLiteral(rel: IrSelectRelation): ts.ObjectLiteralExp
     f.createPropertyAssignment("outputKey", f.createStringLiteral(rel.outputKey)),
   ];
   if (rel.whereIr) {
-    props.push(f.createPropertyAssignment("whereIr", irNodeToTsLiteral(rel.whereIr)));
+    props.push(f.createPropertyAssignment("whereIr", irWhereToTsLiteral(rel.whereIr)));
   }
   if (rel.whereParams && Object.keys(rel.whereParams).length > 0) {
     props.push(

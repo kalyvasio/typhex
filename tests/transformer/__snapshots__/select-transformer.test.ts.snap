@@ -115,3 +115,31 @@ exports[`select transformer > transforms inline subquery with .orderBy().limit()
 authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).orderBy({ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }).limit(1).select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }) });
 "
 `;
+
+exports[`select transformer — scope inlining (real type resolution) > inlines p.comments.archived() into an IrSelectRelation with whereIr 1`] = `
+"// Minimal stubs — no imports needed; isTyphexType is mocked to always return true.
+declare class QueryBuilder<C, T> {
+    where(predicate: (row: T) => boolean): this;
+    select(fn: (row: T) => any): any;
+}
+interface CommentRow {
+    id: number;
+    postId: number;
+    archived: number;
+}
+declare class CommentQuery extends QueryBuilder<any, CommentRow> {
+    archived(): this {
+        return this.where({ node: { kind: "binary", op: "==", left: { kind: "member", param: "c", path: ["archived"] }, right: { kind: "const", value: 1 } }, rootParam: "c", localParamNames: ["c"] }, {});
+    }
+}
+interface UserRow {
+    id: number;
+    name: string;
+    comments: CommentQuery;
+}
+declare class UserQuery extends QueryBuilder<any, UserRow> {
+}
+declare const users: UserQuery;
+users.select({ param: "p", paths: [], relations: [{ name: "comments", outputKey: "comments", whereIr: { node: { kind: "binary", op: "==", left: { kind: "member", param: "c", path: ["archived"] }, right: { kind: "const", value: 1 } }, rootParam: "c", localParamNames: ["c"] } }] });
+"
+`;

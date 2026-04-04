@@ -13,7 +13,6 @@ import {
   irSelectToTsLiteral,
   irAggregateToTsLiteral,
   getParamBindings,
-  getArrowExpressionBody,
   type ParamBindings,
 } from "./shared.js";
 import {
@@ -21,7 +20,7 @@ import {
   isTyphexQueryChain,
   type CapturedSubquery,
 } from "./subquery-transformer.js";
-import { scopePredicateToIr } from "./where-transformer.js";
+import { parseWhereArrowToIr } from "./where-transformer.js";
 
 // ---------------------------------------------------------------------------
 // Top-level arrow dispatch
@@ -108,12 +107,10 @@ function tryResolveScopeCall(
 
   const innerParam = predicate.parameters[0]?.name;
   if (!innerParam || !ts.isIdentifier(innerParam)) return null;
-  const bodyExpr = getArrowExpressionBody(predicate);
-  if (!bodyExpr) return null;
-  const whereIr = scopePredicateToIr(bodyExpr, [innerParam.text]);
-  if (!whereIr) return null;
+  const parsed = parseWhereArrowToIr(predicate, checker);
+  if (!parsed || parsed.freeVars.length > 0) return null;
 
-  return { name: relName, whereIr, whereParams: {} };
+  return { name: relName, whereIr: parsed.ir, whereParams: {} };
 }
 
 // ---- Shorthand bodies -------------------------------------------------------

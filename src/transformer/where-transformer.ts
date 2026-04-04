@@ -82,13 +82,6 @@ function exprToIr(expr: ts.Expression, ctx: WhereCtx): IrNode | null {
   return null;
 }
 
-export function scopePredicateToIr(expr: ts.Expression, paramNames: string[]): IrNode | null {
-  const freeVars = new Set<string>();
-  const whereIr = exprToIr(expr, { paramNames, freeVars, capturedSubqueries: [] });
-  if (!whereIr || freeVars.size > 0) return null;
-  return whereIr;
-}
-
 // ---- Node kind predicates ---------------------------------------------------
 
 /** Narrowing predicate: is this a `!<expr>` prefix unary expression? */
