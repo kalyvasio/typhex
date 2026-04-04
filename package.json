@@ -25,6 +25,7 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:postgres": "TYPHEX_POSTGRES_URL=${TYPHEX_POSTGRES_URL:-postgresql://postgres:postgres@localhost:5433/typhex_test} vitest run tests/integration/scenarios-postgres.test.ts",
     "coverage": "vitest run --coverage"
   },
   "keywords": [

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isIrNode,
   isIrSelect,
+  isIrOrderBy,
   type IrNode,
   type IrBinary,
   type IrMember,
@@ -11,6 +12,7 @@ import {
   type IrIn,
   type IrCall,
   type IrSelect,
+  type IrOrderBy,
 } from "../../src/ir/types.js";
 
 describe("ir/types", () => {
@@ -134,6 +136,53 @@ describe("ir/types", () => {
 
     it("returns false when rest is not boolean", () => {
       expect(isIrSelect({ param: "u", paths: [], rest: "yes" })).toBe(false);
+    });
+  });
+
+  describe("isIrOrderBy", () => {
+    it("returns true for a valid IrOrderBy", () => {
+      const ob: IrOrderBy = { param: "u", path: ["name"], direction: "asc" };
+      expect(isIrOrderBy(ob)).toBe(true);
+    });
+
+    it("returns true for desc direction", () => {
+      expect(isIrOrderBy({ param: "u", path: ["age"], direction: "desc" })).toBe(true);
+    });
+
+    it("returns true for a relation path", () => {
+      expect(isIrOrderBy({ param: "u", path: ["author", "name"], direction: "asc" })).toBe(true);
+    });
+
+    it("returns false when param is missing", () => {
+      expect(isIrOrderBy({ path: ["name"], direction: "asc" })).toBe(false);
+    });
+
+    it("returns false when param is an empty string", () => {
+      expect(isIrOrderBy({ param: "", path: ["name"], direction: "asc" })).toBe(false);
+    });
+
+    it("returns false when param is not a string", () => {
+      expect(isIrOrderBy({ param: 1, path: ["name"], direction: "asc" })).toBe(false);
+    });
+
+    it("returns false when path is empty", () => {
+      expect(isIrOrderBy({ param: "u", path: [], direction: "asc" })).toBe(false);
+    });
+
+    it("returns false when path contains non-string segments", () => {
+      expect(isIrOrderBy({ param: "u", path: [42], direction: "asc" })).toBe(false);
+    });
+
+    it("returns false for unknown direction", () => {
+      expect(isIrOrderBy({ param: "u", path: ["name"], direction: "random" })).toBe(false);
+    });
+
+    it("returns false for null", () => {
+      expect(isIrOrderBy(null)).toBe(false);
+    });
+
+    it("returns false for non-object", () => {
+      expect(isIrOrderBy("asc")).toBe(false);
     });
   });
 });

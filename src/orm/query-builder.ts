@@ -5,166 +5,28 @@
  * (except insert, which is synchronous to support save()).
  */
 
-import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
-import { isIrNode, isIrSelect } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, OrderDirection, JoinHint, JoinType } from "../ir/types.js";
 import type { QueryExecutor } from "./db.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
-import { parseArrowToIr, parseArrowToIrSelect } from "../parser/parse-arrow.js";
-import { getDialect } from "../dbs/index.js";
+import { resolveWhereIr, resolveOrderBy, resolveSelectIr, resolveJoinKeys } from "../parser/resolve.js";
 import { resolveParamSentinels } from "../dbs/types.js";
-import type { DialectImpl } from "../dbs/types.js";
-import { buildRelationContext } from "./relation-context-builder.js";
+import { buildRelationContext, resolveSelectForSql } from "./relation-context-builder.js";
 import { resolveRelations } from "./relation-resolver.js";
 import { whereColumnEq } from "./query-helpers.js";
 import {
-  buildRelationJoins,
-  buildRelationPathToAlias,
-  buildOneToManyExists,
-  type RelationJoinInfo,
-} from "./relation-joins.js";
-
-const DEFAULT_ROW_PARAM = "u";
-const TABLE_ALIAS = "t0";
+  getDialectOrThrow, getRootParam, getCompileOpts, buildJoinsSql,
+} from "./compile-context.js";
 
 export interface QueryBuilderInterface<C extends AnyEntityClass, T> {
   where(ir: IrNode, params?: Record<string, unknown>): QueryBuilderInterface<C, T>;
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilderInterface<C, U>;
   select(cols: string[] | IrSelect): QueryBuilderInterface<C, T>;
+  orderBy(ir: IrOrderBy): QueryBuilderInterface<C, T>;
   orderBy(col: string | ((row: T) => unknown), dir?: OrderDirection): QueryBuilderInterface<C, T>;
   limit(n: number): QueryBuilderInterface<C, T>;
   offset(n: number): QueryBuilderInterface<C, T>;
   toArray(): Promise<T[]>;
-}
-
-
-/** Derive the row parameter name used in IR expressions (e.g. "u", "c")
- *  from whichever of selectIr, whereIr, or orderBy is available. */
-function getRootParam(state: QueryState<unknown>): string {
-  if (state.selectIr?.param) return state.selectIr.param;
-  if (state.whereIr) {
-    const names = new Set<string>();
-    collectParamNamesFromNode(state.whereIr, names);
-    const first = names.values().next().value;
-    if (first) return first;
-  }
-  return state.orderBy[0]?.param ?? DEFAULT_ROW_PARAM;
-}
-
-/** Return JOIN descriptors for any to-one/one-to-one relations referenced in
- *  the WHERE clause, or an empty array when there are no relations. */
-function getRelationJoins(state: QueryState<unknown>): RelationJoinInfo[] {
-  const { relations, resolveRelationTarget } = state;
-  if (!relations || Object.keys(relations).length === 0 || !resolveRelationTarget) {
-    return [];
-  }
-  const rootParam = getRootParam(state);
-  return buildRelationJoins(
-    {
-      relations,
-      tableName: state.tableName,
-      columnNames: state.columnNames,
-      pkColumn: state.pkColumn ?? "id",
-      resolveTarget: resolveRelationTarget,
-    },
-    state.whereIr,
-    state.selectIr,
-    rootParam,
-    state.orderBy
-  );
-}
-
-/** Compile all WHERE-referenced relation joins to a SQL JOIN fragment. */
-function buildJoinsSql(state: QueryState<unknown>, dialect: DialectImpl): string {
-  return getRelationJoins(state).map((j) => dialect.buildJoinClause(j)).join("");
-}
-
-/** Assemble the compile options passed to every dialect compiler call:
- *  table alias mapping, JOIN alias lookup, and EXISTS subquery info. */
-function getCompileOpts(state: QueryState<unknown>) {
-  const paramToAlias = buildParamToAlias(state);
-  const joins = getRelationJoins(state);
-  const rootParam = getRootParam(state);
-  const relationPathToAlias = buildRelationPathToAlias(joins, Object.keys(paramToAlias));
-  const mainPk = state.pkColumn ?? "id";
-  const oneToManyExists =
-    state.relations && state.resolveRelationTarget
-      ? buildOneToManyExists(
-          state.whereIr,
-          state.relations,
-          rootParam,
-          mainPk,
-          state.resolveRelationTarget
-        )
-      : undefined;
-  return {
-    tableAlias: TABLE_ALIAS,
-    paramToAlias,
-    relationPathToAlias: Object.keys(relationPathToAlias).length > 0 ? relationPathToAlias : undefined,
-    oneToManyExists: oneToManyExists && Object.keys(oneToManyExists).length > 0 ? oneToManyExists : undefined,
-  };
-}
-
-/** Resolve the dialect implementation for the current Db, defaulting to SQLite. */
-function getDialectOrThrow(state: QueryState<unknown>) {
-  return getDialect(state.qe.dialect ?? "sqlite");
-}
-
-/** Produce the IrSelect handed to the SQL compiler.
- *  When columnPaths is non-null the relation paths have been resolved, so
- *  substitute them; otherwise pass the original selectIr through unchanged. */
-function buildSelectForSql(
-  selectIr: IrSelect | null,
-  columnPaths: string[][] | null,
-  columnAliases: string[] | null
-): IrSelect | null {
-  if (columnPaths === null) return selectIr;
-  return (columnPaths.length > 0 || selectIr?.rest)
-    ? { param: selectIr!.param, paths: columnPaths, aliases: columnAliases!, ...(selectIr!.rest ? { rest: true } : {}) }
-    : selectIr;
-}
-
-/** Recursively gather every row-parameter name referenced inside an IR node tree
- *  (e.g. "u" from `u.name === "Alice"`). */
-function collectParamNamesFromNode(node: IrNode, out: Set<string>): void {
-  switch (node.kind) {
-    case "member":
-      out.add(node.param);
-      break;
-    case "binary":
-      collectParamNamesFromNode(node.left, out);
-      collectParamNamesFromNode(node.right, out);
-      break;
-    case "unary":
-      collectParamNamesFromNode(node.operand, out);
-      break;
-    case "in":
-      collectParamNamesFromNode(node.left, out);
-      collectParamNamesFromNode(node.right, out);
-      break;
-    case "call":
-      collectParamNamesFromNode(node.receiver, out);
-      for (const a of node.args) collectParamNamesFromNode(a, out);
-      break;
-    case "exists":
-      out.add(node.rootParam);
-      break;
-    default:
-      break;
-  }
-}
-
-/** Map every row-parameter name in the query to the main table alias (t0),
- *  so the dialect compiler can qualify column references correctly. */
-function buildParamToAlias(state: QueryState<unknown>): Record<string, string> {
-  const names = new Set<string>();
-  names.add(DEFAULT_ROW_PARAM);
-  if (state.whereIr) collectParamNamesFromNode(state.whereIr, names);
-  for (const o of state.orderBy) names.add(o.param);
-  if (state.selectIr) names.add(state.selectIr.param);
-  const paramToAlias: Record<string, string> = {};
-  for (const p of names) paramToAlias[p] = TABLE_ALIAS;
-  return paramToAlias;
 }
 
 export interface QueryState<T = unknown> {
@@ -181,6 +43,7 @@ export interface QueryState<T = unknown> {
   relations?: RelationsMap;
   hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
   resolveRelationTarget?: (rel: RelationDef) => { table: string; pk: string } | null;
+  joinHints?: JoinHint[];
 }
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
@@ -199,6 +62,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       ...this.state,
       whereParams: { ...this.state.whereParams },
       orderBy: [...this.state.orderBy],
+      joinHints: this.state.joinHints ? [...this.state.joinHints] : undefined,
     }) as QueryBuilder<C, T>;
   }
 
@@ -215,52 +79,54 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     params?: Record<string, unknown>
   ): QueryBuilder<C, T> {
     if (params) Object.assign(this.state.whereParams, params);
-
-    if (isIrNode(predicate)) {
-      this.state.whereIr = predicate;
-    } else {
-      try {
-        this.state.whereIr = parseArrowToIr(predicate as (u: any) => boolean, {
-          paramKeys: params ? Object.keys(params) : [],
-        });
-      } catch (e) {
-        throw new Error("Failed to parse arrow predicate: " + (e instanceof Error ? e.message : String(e)));
-      }
-    }
+    this.state.whereIr = resolveWhereIr(predicate as IrNode | ((entity: unknown) => boolean), params ? Object.keys(params) : []);
     return this;
   }
 
-  /** Append an ORDER BY clause for the given column. Defaults to ascending order. */
+  /** Append an ORDER BY clause. Accepts a pre-built IrOrderBy, a dot-separated
+   *  column string, or an arrow function parsed to a member path at runtime. */
+  orderBy(ir: IrOrderBy): QueryBuilder<C, T>;
+  orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): QueryBuilder<C, T>;
   orderBy(
-      columnOrFn: string | ((row: T) => unknown),
-      direction: OrderDirection = "asc"
+    colOrIr: IrOrderBy | string | ((row: T) => unknown),
+    direction: OrderDirection = "asc"
   ): QueryBuilder<C, T> {
-    let path: string[];
-
-    if (typeof columnOrFn === "function") {
-      // Parse lambda: u => u.company.name → IrMember { param: "u", path: ["company", "name"] }
-      try {
-        const ir = parseArrowToIr(columnOrFn as (u: any) => any, {
-          paramKeys: [],
-        });
-        if (ir.kind !== "member" || !ir.path || ir.path.length === 0) {
-          throw new Error("[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)");
-        }
-        path = ir.path;
-      } catch (e) {
-        throw new Error("Failed to parse orderBy lambda: " + (e instanceof Error ? e.message : String(e)));
-      }
-    } else {
-      // String: "company.name" → ["company", "name"]
-      const segments = columnOrFn.split(".").map((s) => s.trim());
-      if (segments.length === 0 || segments.some((s) => s.length === 0)) {
-        throw new Error('[typhex] orderBy column must be a non-empty dot-separated path (e.g. "company.name")');
-      }
-      path = segments;
-    }
-
-    this.state.orderBy.push({ param: DEFAULT_ROW_PARAM, path, direction });
+    this.state.orderBy.push(resolveOrderBy(colOrIr as IrOrderBy | string | ((row: unknown) => unknown), direction));
     return this;
+  }
+
+  innerJoin(keysOrFn: string[] | ((row: T) => unknown)): QueryBuilder<C, T> {
+    return this.addJoinHints(keysOrFn, "inner");
+  }
+
+  leftJoin(keysOrFn: string[] | ((row: T) => unknown)): QueryBuilder<C, T> {
+    return this.addJoinHints(keysOrFn, "left");
+  }
+
+  rightJoin(keysOrFn: string[] | ((row: T) => unknown)): QueryBuilder<C, T> {
+    return this.addJoinHints(keysOrFn, "right");
+  }
+
+  crossJoin(keysOrFn: string[] | ((row: T) => unknown)): QueryBuilder<C, T> {
+    return this.addJoinHints(keysOrFn, "cross");
+  }
+
+  fullJoin(keysOrFn: string[] | ((row: T) => unknown)): QueryBuilder<C, T> {
+    return this.addJoinHints(keysOrFn, "full");
+  }
+
+  private addJoinHints(
+    keysOrFn: string[] | ((row: T) => unknown),
+    joinType: JoinType
+  ): QueryBuilder<C, T> {
+    const relationKeys = resolveJoinKeys(keysOrFn as string[] | ((row: unknown) => unknown));
+    const newHints: JoinHint[] = relationKeys.map(k => ({ relationKey: k, joinType }));
+    const clone = this.clone();
+    clone.state = {
+      ...clone.state,
+      joinHints: [...(clone.state.joinHints ?? []), ...newHints],
+    };
+    return clone;
   }
 
   /** Set the maximum number of rows to return. */
@@ -282,20 +148,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   select(
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>)
   ): QueryBuilder<C, unknown> {
-    if (typeof columnsOrIr === "function") {
-      const parsed = parseArrowToIrSelect(columnsOrIr);
-      if (!parsed) {
-        throw new Error(
-          "select(): could not parse lambda at runtime. Use the Typhex transformer for complex selects, or pass column names / IrSelect."
-        );
-      }
-      this.state.selectIr = parsed;
-      return this as unknown as QueryBuilder<C, unknown>;
-    }
-    this.state.selectIr = isIrSelect(columnsOrIr)
-      ? columnsOrIr
-      : { param: "u", paths: columnsOrIr.map((c) => [c]) };
-    return this;
+    this.state.selectIr = resolveSelectIr(columnsOrIr as string[] | IrSelect | ((row: unknown) => Record<string, unknown>));
+    return this as unknown as QueryBuilder<C, unknown>;
   }
 
   /** Update matching rows with `set`, then re-fetch and return the updated row,
@@ -356,7 +210,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       this.state.selectIr, this.state.relations, this.state.whereIr,
       this.state.pkColumn, getRootParam(this.state)
     );
-    const rows = await this.executeMainQuery(buildSelectForSql(this.state.selectIr, ctx.columnPaths, ctx.columnAliases));
+    const rows = await this.executeMainQuery(resolveSelectForSql(this.state.selectIr, ctx.columnPaths, ctx.columnAliases));
     await resolveRelations(ctx, this.state.selectIr, qe, rows);
     if (!hydrate) return rows as EntityInstance<C>[];
     return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
@@ -380,7 +234,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const { sql, params: runParams } = dialect.compileCount(tableName, whereSql, params, joinsSql || undefined);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
     const rows = (await qe.query(sql, runParams)) as [{ c: number }];
-    return rows[0]?.c ?? 0;
+    return Number(rows[0]?.c ?? 0);
   }
 
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */

@@ -2,6 +2,27 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {Db, createSqliteDriver, Entity, rel, IrNode} from "../../src/index.js";
 import {clearRegistry, registerEntity} from "../../src/entity/global-driver.js";
 
+// Entities for multi-relation JOIN tests
+const User = Entity("users", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+});
+
+const Category = Entity("categories", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+});
+
+const Post = Entity("posts", {
+  id: "integer primary key autoincrement",
+  title: "text not null",
+  authorId: "integer",
+  categoryId: "integer",
+}, {
+  author: rel.manyToOne(() => User, { foreignKey: "authorId" }),
+  category: rel.manyToOne(() => Category, { foreignKey: "categoryId" }),
+});
+
 describe("relation where (JOIN)", () => {
     let db: Db;
     const Company = Entity("companies", {
@@ -303,4 +324,62 @@ describe("NOT IN / negated .some() (NOT EXISTS)", () => {
             expect((results[0] as any).name).toBe("Alice");
         });
     });
+});
+
+describe("relation where — NULL FK and negated filters", () => {
+  let db: Db;
+
+  beforeEach(async () => {
+    clearRegistry();
+    registerEntity(User);
+    registerEntity(Category);
+    registerEntity(Post);
+    db = new Db(createSqliteDriver({ path: ":memory:" }));
+    await db.migrate();
+  });
+
+  it("excludes rows with null FK when filtering by relation property", async () => {
+    await Post.query().insert({ title: "orphan", authorId: null as any });
+    const results = await Post.query()
+      .where((p: any) => p.author.name === "Alice")
+      .toArray();
+    expect(results).toHaveLength(0);
+  });
+
+  it("filters by negated relation property", async () => {
+    const alice = await User.query().insert({ name: "Alice" });
+    const bob = await User.query().insert({ name: "Bob" });
+    await Post.query().insert({ title: "Alice post", authorId: (alice as any).id });
+    await Post.query().insert({ title: "Bob post", authorId: (bob as any).id });
+
+    const results = await Post.query()
+      .where((p: any) => p.author.name !== "Alice")
+      .toArray();
+    expect(results).toHaveLength(1);
+    expect((results[0] as any).title).toBe("Bob post");
+  });
+
+  it("handles multiple concurrent many-to-one joins in one where()", async () => {
+    const alice = await User.query().insert({ name: "Alice" });
+    const sci = await Category.query().insert({ name: "Science" });
+    const art = await Category.query().insert({ name: "Art" });
+    await Post.query().insert({ title: "Alice Science", authorId: (alice as any).id, categoryId: (sci as any).id });
+    await Post.query().insert({ title: "Alice Art", authorId: (alice as any).id, categoryId: (art as any).id });
+
+    const results = await Post.query()
+      .where((p: any) => p.author.name === "Alice" && p.category.name === "Science")
+      .toArray();
+    expect(results).toHaveLength(1);
+    expect((results[0] as any).title).toBe("Alice Science");
+  });
+
+  it("handles null FK with negated relation filter (null rows excluded)", async () => {
+    await Post.query().insert({ title: "no author", authorId: null as any });
+    const results = await Post.query()
+      .where((p: any) => p.author.name !== "Alice")
+      .toArray();
+    // NULL FK: LEFT JOIN gives NULL for author.name
+    // NULL <> "Alice" is NULL (unknown) in SQL → row excluded
+    expect(results).toHaveLength(0);
+  });
 });

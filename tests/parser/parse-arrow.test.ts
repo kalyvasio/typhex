@@ -109,6 +109,16 @@ describe("parser/parse-arrow", () => {
     }
   });
 
+  it("parses !relation.some(...) as unary NOT wrapping exists", () => {
+    const fn = (u: any) => !u.posts.some((p: any) => p.published);
+    const ir = parseArrowToIr(fn, { paramNames: ["u"] });
+    expect(ir.kind).toBe("unary");
+    if (ir.kind === "unary") {
+      expect(ir.op).toBe("!");
+      expect(ir.operand.kind).toBe("exists");
+    }
+  });
+
   it("parses includes call", () => {
     const fn = (u: { name: string }) => u.name.includes("al");
     const ir = parseArrowToIr(fn);
