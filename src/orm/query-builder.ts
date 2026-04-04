@@ -81,8 +81,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Return a shallow copy of this builder with mutable state (params, orderBy) deep-copied,
    *  so chained calls do not mutate the original. */
-  clone(): QueryBuilder<C, T> {
-    return new QueryBuilder({
+  clone(): this {
+    return new (this.constructor as new (state: QueryState<T>) => this)({
       ...this.state,
       whereParams: { ...this.state.whereParams },
       subqueryParams: { ...this.state.subqueryParams },
@@ -523,3 +523,7 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     return [];
   }
 }
+
+/** Convenience alias — pre-binds entity generics so users only write:
+ *  class PostQuery extends ScopedQueryBuilder<typeof Post> { ... } */
+export type ScopedQueryBuilder<E extends AnyEntityClass> = QueryBuilder<E, EntityInstance<E>>;

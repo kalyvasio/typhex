@@ -75,12 +75,16 @@ export type RelationKind<TType extends RelationType> = TType extends "one-to-man
   ? "many"
   : "one";
 
-/** Resolved relation property type given entity class E and cardinality Kind. */
+/** Resolved relation property type given entity class E and cardinality Kind.
+ *  When the target entity has a custom queryBuilder class, its scope methods (e.g. archived())
+ *  are exposed on the relation so they can be used in select/where callbacks and inlined by the transformer. */
 export type RelatedEntityInstance<
   E extends AnyEntityClass,
   Kind extends "one" | "many",
 > = Kind extends "many"
-  ? RelationQueryBuilder<SelectRow<E>> & EntityInstance<E>[]
+  ? E extends { queryBuilder: new (...args: any[]) => infer QB }
+    ? QB & EntityInstance<E>[]
+    : RelationQueryBuilder<SelectRow<E>> & EntityInstance<E>[]
   : SingleRelation<EntityInstance<E>>;
 
 /** Array-shaped relation property that also exposes a `.query()` builder. */

@@ -30,7 +30,7 @@ export {
 export { loadConfig } from "./config/load-config.js";
 
 // Builder/executor types
-export type { DbOptions, QueryExecutor, OrderDirection } from "./orm/index.js";
+export type { DbOptions, QueryExecutor, OrderDirection, QueryState, ScopedQueryBuilder } from "./orm/index.js";
 
 // Driver types
 export type { Driver, Connection, ExecuteResult, TransactionOptions } from "./driver/types.js";
