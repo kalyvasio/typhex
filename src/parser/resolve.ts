@@ -43,7 +43,7 @@ export function resolveOrderBy(
       );
     }
   }
-  const segments = (input as string).split(".").map((s) => s.trim());
+  const segments = (input).split(".").map((s) => s.trim());
   if (segments.length === 0 || segments.some((s) => s.length === 0)) {
     throw new Error(
       '[typhex] orderBy column must be a non-empty dot-separated path (e.g. "company.name")'
@@ -67,7 +67,7 @@ export function resolveSelectIr(
   }
   if (isIrSelect(input)) return input;
   // string[] — each entry becomes a single-segment path
-  return { param: DEFAULT_ROW_PARAM, paths: (input as string[]).map((c) => [c]), aliases: input as string[] };
+  return { param: DEFAULT_ROW_PARAM, paths: (input).map((c) => [c]), aliases: input };
 }
 
 /** Resolve a join-hint input (string array or arrow fn) to relation key strings. */

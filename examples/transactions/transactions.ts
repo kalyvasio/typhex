@@ -25,7 +25,7 @@ await db.migrate();
 // transaction without needing an explicit `trx` argument.
 
 console.log("\n── 1. Callback API (implicit propagation) ──");
-await db.transaction(async (trx) => {
+await db.transaction(async (_trx) => {
   const user = await User.query().insert({ name: "Alice" });
   await Post.query().insert({ title: "Hello from Alice", authorId: user.id });
   console.log("Inserted Alice and her post inside a transaction");

@@ -5,7 +5,7 @@
 import type { InferTable, InferInsert } from "./schema-inference.js";
 import type { RelationsMap } from "./relations.js";
 import type { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
-import {Db, Trx} from "../orm/db.js";
+import type { Trx } from "../orm/db.js";
 
 export interface TableDef<
   TSchema extends Record<string, string>,

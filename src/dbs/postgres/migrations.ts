@@ -2,7 +2,7 @@
  * PostgreSQL migrations: diff and DDL generation.
  */
 
-import type { Driver, DbMigrations, DiffAction, DbColumnInfo, ColumnDef } from "../types.js";
+import type { Driver, DbMigrations, DiffAction, DbColumnInfo } from "../types.js";
 import { getColumnDef } from "../types.js";
 import { postgresDialect } from "./dialect.js";
 import type { RegisteredEntity } from "../../entity/global-driver.js";
@@ -33,7 +33,6 @@ export const postgresMigrations: DbMigrations = {
   },
 
   async getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]> {
-    const esc = postgresDialect.escapeIdentifier(table);
     const rows = await driver.execute(
       `
       SELECT column_name as name, data_type as type,

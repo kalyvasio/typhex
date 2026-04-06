@@ -19,8 +19,6 @@ async function ensureTrackingTable(driver: Driver): Promise<void> {
 
 async function getApplied(driver: Driver): Promise<Set<string>> {
   await ensureTrackingTable(driver);
-  const dialect = driver.dialect ?? "sqlite";
-  const migrations = getDbMigrations(dialect);
   const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
   const table = esc("_typhex_migrations");
   const rows = (await driver.execute(

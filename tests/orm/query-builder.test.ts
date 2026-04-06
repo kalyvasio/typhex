@@ -3,17 +3,19 @@ import { QueryBuilder } from "../../src/orm/query-builder.js";
 import { whereColumnEq } from "../../src/orm/query-helpers.js";
 import type { IrNode, IrSelect } from "../../src/ir/types.js";
 import { isIrSelect } from "../../src/ir/types.js";
-import { Db, Entity } from "../../src";
+import { Entity } from "../../src";
 import { type MockDb, createMockDb } from "../helpers.js";
 
 const mockSchema = {
   id: "integer primary key autoincrement",
   name: "text not null",
   age: "integer",
-  country: "varchar"
+  country: "varchar",
 } as const;
 
-class MockEntity extends Entity('mock', mockSchema){}
+// Used only in `typeof` for QueryBuilder generics (value reference for Entity()).
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- see above
+const MockEntity = Entity("mock", mockSchema);
 
 function newBuilder(db: MockDb, columnNames = ["id", "name", "age"]) {
   return new QueryBuilder<typeof MockEntity, InstanceType<typeof MockEntity>>({
@@ -55,10 +57,9 @@ describe("QueryBuilder", () => {
     });
 
     it("merges params when provided", () => {
-      const q = newBuilder(db).where(
-        (u: { country: string }) => u.country === "US",
-        { country: "US" }
-      );
+      const q = newBuilder(db).where((u: { country: string }) => u.country === "US", {
+        country: "US",
+      });
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
@@ -67,7 +68,7 @@ describe("QueryBuilder", () => {
         return (window as unknown as { y: number }).y > 1;
       };
       expect(() => newBuilder(db).where(badFn as (u: { x: number }) => boolean)).toThrow(
-        "Failed to parse arrow predicate"
+        "Failed to parse arrow predicate",
       );
     });
   });
@@ -161,7 +162,9 @@ describe("QueryBuilder", () => {
     it("treats plain object with param and paths as IrSelect", async () => {
       const selectIr = { param: "u", paths: [["id"]] };
       expect(isIrSelect(selectIr)).toBe(true);
-      await newBuilder(db).select(selectIr as IrSelect).toArray();
+      await newBuilder(db)
+        .select(selectIr as IrSelect)
+        .toArray();
       const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('"t0"."id"');
     });
@@ -169,7 +172,9 @@ describe("QueryBuilder", () => {
 
   describe("insert", () => {
     it("builds INSERT and calls db.run", async () => {
-      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: "Alice", age: null, country: null }]);
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
+        { id: 1, name: "Alice", age: null, country: null },
+      ]);
       await newBuilder(db).insert({ name: "Alice" });
       expect(db.run).toHaveBeenCalled();
       const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -179,15 +184,23 @@ describe("QueryBuilder", () => {
 
     it("returns hydrated instance with id from driver", async () => {
       (db.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 42, changes: 1 });
-      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 42, name: "Bob", age: null, country: null }]);
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
+        { id: 42, name: "Bob", age: null, country: null },
+      ]);
       const row = await newBuilder(db).insert({ name: "Bob" });
       expect(row).toBeDefined();
-      expect((row as MockEntity).id).toBe(42);
+      expect(row.id).toBe(42);
     });
 
     it("uses DEFAULT VALUES when all fields are undefined", async () => {
-      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: null, age: null, country: null }]);
-      await newBuilder(db).insert({ id: undefined, name: undefined, age: undefined } as unknown as Record<string, unknown>);
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
+        { id: 1, name: null, age: null, country: null },
+      ]);
+      await newBuilder(db).insert({
+        id: undefined,
+        name: undefined,
+        age: undefined,
+      } as unknown as Record<string, unknown>);
       const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("DEFAULT VALUES");
       expect(params).toEqual([]);
@@ -212,10 +225,7 @@ describe("QueryBuilder", () => {
         right: { kind: "const", value: 42 },
       };
       await newBuilder(db).where(ir).toArray();
-      expect(db.query).toHaveBeenCalledWith(
-        expect.stringContaining("?"),
-        [42]
-      );
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining("?"), [42]);
     });
   });
 
@@ -294,7 +304,9 @@ describe("QueryBuilder", () => {
     }
 
     it("returns row when found", async () => {
-      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: "Alice", age: 30 }]);
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
+        { id: 1, name: "Alice", age: 30 },
+      ]);
       const row = await newBuilderWithPk(db).where(whereColumnEq("id", 1)).first();
       expect(row).toEqual({ id: 1, name: "Alice", age: 30 });
     });
@@ -324,7 +336,9 @@ describe("QueryBuilder", () => {
 
     it("builds UPDATE ... WHERE pk = ? SQL", async () => {
       (db.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
-      const changes = await newBuilderWithPk(db).where(whereColumnEq("id", 1)).update({ name: "Updated" });
+      const changes = await newBuilderWithPk(db)
+        .where(whereColumnEq("id", 1))
+        .update({ name: "Updated" });
       expect(changes).toBe(1);
       const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('UPDATE "users"');
@@ -376,7 +390,9 @@ describe("QueryBuilder", () => {
         right: { kind: "const", value: 1 },
       };
       (db.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
-      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([{ id: 1, name: "Updated", age: 30 }]);
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
+        { id: 1, name: "Updated", age: 30 },
+      ]);
       const row = await newBuilder(db).where(ir).patch({ name: "Updated" });
       expect(row).toEqual({ id: 1, name: "Updated", age: 30 });
       expect(db.run).toHaveBeenCalled();

@@ -50,7 +50,7 @@ export function buildRelationContext(
 
   if (hasRelations) {
     const { columnPaths: paths, columnAliases: aliases, relationFetches: fetches } = resolveSelectColumnsAndRelations(
-        selectIr!, relations!, pkColumn,
+        selectIr, relations, pkColumn,
         reusableJoinKeys.size > 0 ? reusableJoinKeys : undefined
     );
     relationFetches = fetches;
@@ -296,7 +296,7 @@ function buildRelationFetchMeta(
   const targetEntity = target && typeof (target as any).query === "function" ? (target as any) : null;
   if (!targetEntity) return null;
 
-  const fkColumn = (relDef._options as RelationOptions).foreignKey!;
+  const fkColumn = (relDef._options as RelationOptions).foreignKey;
 
   switch (relDef._relType) {
     case "many-to-one":

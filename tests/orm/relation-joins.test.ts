@@ -39,7 +39,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "c", path: ["name"] },
         right: { kind: "const", value: "Alice" },
       };
-      const result = buildRelationJoins(ctx, where, null, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toEqual([]);
     });
 
@@ -50,7 +50,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "c", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const result = buildRelationJoins(ctx, where, null, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         relationKey: "company",
@@ -63,23 +63,12 @@ describe("relation-joins", () => {
     });
 
     it("returns empty when relation only in select paths (select-only uses whereIn)", () => {
-      const select: IrSelect = {
-        param: "c",
-        paths: [["company", "id"], ["company", "name"]],
-        aliases: ["company_id", "company_name"],
-      };
-      const result = buildRelationJoins(ctx, null, select, "c");
+      const result = buildRelationJoins(ctx, null, "c");
       expect(result).toEqual([]);
     });
 
     it("returns empty when relation only in select.relations (select-only uses whereIn)", () => {
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"], ["name"]],
-        aliases: ["id", "name"],
-        relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
-      };
-      const result = buildRelationJoins(ctx, null, select, "c");
+      const result = buildRelationJoins(ctx, null, "c");
       expect(result).toEqual([]);
     });
 
@@ -91,24 +80,19 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "d", path: ["employees", "name"] },
         right: { kind: "const", value: "Alice" },
       };
-      const result = buildRelationJoins(ctx, where, null, "d");
+      const result = buildRelationJoins(ctx, where, "d");
       expect(result).toHaveLength(0);
       mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
     });
 
-    it("returns join when relation in both where and select", () => {
+    it("returns join when relation referenced in where (joins are driven by where/orderBy, not select IR)", () => {
       const where: IrNode = {
         kind: "binary",
         op: "===",
         left: { kind: "member", param: "c", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const select: IrSelect = {
-        param: "c",
-        paths: [["company", "name"]],
-        aliases: ["company_name"],
-      };
-      const result = buildRelationJoins(ctx, where, select, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
@@ -119,7 +103,7 @@ describe("relation-joins", () => {
         op: "!",
         operand: { kind: "member", param: "c", path: ["company", "active"] },
       };
-      const result = buildRelationJoins(ctx, where, null, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
@@ -131,7 +115,7 @@ describe("relation-joins", () => {
         receiver: { kind: "member", param: "c", path: ["company", "name"] },
         args: [{ kind: "const", value: "Acm" }],
       };
-      const result = buildRelationJoins(ctx, where, null, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
@@ -143,7 +127,7 @@ describe("relation-joins", () => {
         receiver: { kind: "const", value: ["Acme"] },
         args: [{ kind: "member", param: "c", path: ["company", "name"] }],
       };
-      const result = buildRelationJoins(ctx, where, null, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
@@ -161,7 +145,7 @@ describe("relation-joins", () => {
         param: "c",
         path: ["tags", "name"],
       };
-      const result = buildRelationJoins({ ...ctx, relations: relationsWithJunction }, where, null, "c");
+      const result = buildRelationJoins({ ...ctx, relations: relationsWithJunction }, where, "c");
       expect(result).toHaveLength(0);
     });
 
@@ -179,7 +163,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "c", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const result = buildRelationJoins({ ...ctx, relations: relationsNoFk }, where, null, "c");
+      const result = buildRelationJoins({ ...ctx, relations: relationsNoFk }, where, "c");
       expect(result).toHaveLength(0);
     });
 
@@ -191,7 +175,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "c", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const result = buildRelationJoins(ctx, where, null, "c");
+      const result = buildRelationJoins(ctx, where, "c");
       expect(result).toEqual([]);
     });
 
@@ -199,7 +183,7 @@ describe("relation-joins", () => {
       const orderBy: IrOrderBy[] = [
         { param: "u", path: ["company", "name"], direction: "asc" },
       ];
-      const result = buildRelationJoins(ctx, null, null, "u", orderBy);
+      const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         relationKey: "company",
@@ -214,7 +198,7 @@ describe("relation-joins", () => {
       const orderBy: IrOrderBy[] = [
         { param: "u", path: ["name"], direction: "asc" },
       ];
-      const result = buildRelationJoins(ctx, null, null, "u", orderBy);
+      const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toEqual([]);
     });
 
@@ -228,7 +212,7 @@ describe("relation-joins", () => {
       const orderBy: IrOrderBy[] = [
         { param: "u", path: ["company", "name"], direction: "asc" },
       ];
-      const result = buildRelationJoins(ctx, where, null, "u", orderBy);
+      const result = buildRelationJoins(ctx, where, "u", orderBy);
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
@@ -238,13 +222,13 @@ describe("relation-joins", () => {
       const orderBy: IrOrderBy[] = [
         { param: "u", path: ["employees", "name"], direction: "asc" },
       ];
-      const result = buildRelationJoins(ctx, null, null, "u", orderBy);
+      const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(0);
       mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
     });
 
     it("returns empty when orderBy is undefined", () => {
-      const result = buildRelationJoins(ctx, null, null, "u", undefined);
+      const result = buildRelationJoins(ctx, null, "u", undefined);
       expect(result).toEqual([]);
     });
   });
@@ -426,7 +410,7 @@ describe("relation-joins", () => {
     });
 
     it("returns empty when no joins", () => {
-      const map = buildRelationPathToAlias([], "c");
+      const map = buildRelationPathToAlias([], ["c"]);
       expect(map).toEqual({});
     });
   });

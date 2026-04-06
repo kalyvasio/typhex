@@ -108,7 +108,7 @@ function exprToIr(
       }
       if (ALLOWED_METHODS.has(method)) {
         const receiver = exprToIr(callee.expression, paramNames, freeVars);
-        const args = expr.arguments.map((a) => exprToIr(a as ts.Expression, paramNames, freeVars));
+        const args = expr.arguments.map((a) => exprToIr(a, paramNames, freeVars));
         if (!receiver || args.some((a) => a === null)) return null;
         return { kind: "call", method, receiver, args: args as IrNode[] };
       }
@@ -120,7 +120,7 @@ function exprToIr(
     const arr: unknown[] = [];
     for (const e of expr.elements) {
       if (e.kind === ts.SyntaxKind.SpreadElement) return null;
-      const ir = exprToIr(e as ts.Expression, paramNames, freeVars);
+      const ir = exprToIr(e, paramNames, freeVars);
       if (!ir || ir.kind !== "const") return null;
       arr.push(ir.value);
     }

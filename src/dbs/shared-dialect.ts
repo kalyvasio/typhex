@@ -8,7 +8,7 @@
  * DialectRenderer that each dialect provides to makeCompileNode().
  */
 
-import type { IrNode, IrBinary, IrExists, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
 import type { CompileOptions } from "./types.js";
 
 export const DEFAULT_OPTS: CompileOptions = {
@@ -61,7 +61,7 @@ export function makeCompileNode(renderer: DialectRenderer) {
   function compileNode(node: IrNode, opts: ResolvedOpts, params: unknown[]): string {
     switch (node.kind) {
       case "binary": {
-        const b = node as IrBinary;
+        const b = node;
         const left = compileNode(b.left, opts, params);
         const right = compileNode(b.right, opts, params);
         const op =
@@ -106,7 +106,7 @@ export function makeCompileNode(renderer: DialectRenderer) {
         throw new Error("IN right side must be const array or param");
       }
       case "exists": {
-        const ex = node as IrExists;
+        const ex = node;
         const info = opts.oneToManyExists?.[`${ex.rootParam}.${ex.relationKey}`];
         if (!info) throw new Error(`No oneToManyExists info for ${ex.rootParam}.${ex.relationKey}`);
         const innerOpts = { ...opts, paramToAlias: { ...opts.paramToAlias, [ex.innerParam]: info.alias } };

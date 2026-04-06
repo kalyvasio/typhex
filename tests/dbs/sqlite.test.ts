@@ -5,7 +5,6 @@ import {
   sqliteMigrations,
   getDialect,
 } from "../../src/dbs/index.js";
-import { Entity } from "../../src/entity/entity.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
 
