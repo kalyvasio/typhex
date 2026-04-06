@@ -25,7 +25,7 @@ import {
   resolveGroupByPaths,
   resolveJoinKeys,
 } from "../parser/resolve.js";
-import { type OnConflictClause, type QueryOperation } from "../dbs/types.js";
+import { type OnConflictClause, type QueryOperation, type WithClause } from "../dbs/types.js";
 import { RelationResolver } from "./helpers/relations/relation-resolver.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
 import {
@@ -62,6 +62,10 @@ export interface QueryState<T = unknown> {
   havingIr: IrHaving | null;
   havingParams: Record<string, unknown>;
   entity?: AnyEntityClass;
+  /** WITH clause bodies (full SELECT each); merged when compiling the outer query. */
+  ctes?: WithClause[];
+  /** When set, the outer FROM uses this CTE name instead of the entity table. */
+  fromCteName?: string | null;
 }
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
@@ -88,6 +92,11 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       subqueryParams: { ...this.state.subqueryParams },
       orderBy: [...this.state.orderBy],
       joinHints: this.state.joinHints ? [...this.state.joinHints] : undefined,
+      ctes: this.state.ctes?.map((c) => ({
+        name: c.name,
+        bodySql: c.bodySql,
+        bodyParams: [...c.bodyParams],
+      })),
     });
   }
 
@@ -205,6 +214,37 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
+  /**
+   * Add a common table expression: `WITH name AS (<subquery SQL>)`.
+   * The subquery must be a plain entity query (no nested `withCte` / `fromCte` on the inner builder).
+   */
+  withCte<IC extends AnyEntityClass, IT>(
+    name: string,
+    subquery: QueryBuilder<IC, IT>,
+  ): QueryBuilder<C, T> {
+    const inner = subquery.clone();
+    if (inner.state.ctes?.length) {
+      throw new Error("withCte: subquery must not define CTEs");
+    }
+    if (inner.state.fromCteName) {
+      throw new Error("withCte: subquery must not use fromCte");
+    }
+    const compiler = getQueryCompilerOrThrow(inner.state);
+    const { sql, params } = compiler.compilePlan(
+      QueryPlanBuilder.build(inner.state, { kind: "select" }),
+    );
+    const next = this.clone();
+    next.state.ctes = [...(this.state.ctes ?? []), { name, bodySql: sql, bodyParams: params }];
+    return next;
+  }
+
+  /** Read from a CTE alias instead of the entity's base table (chain after `withCte`). */
+  fromCte(name: string): QueryBuilder<C, T> {
+    const next = this.clone();
+    next.state.fromCteName = name;
+    return next;
+  }
+
   /** Sets the SELECT projection using an arrow function parsed at runtime or by the TypeScript transformer. */
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U>;
   /** Sets the SELECT projection using an explicit list of column names. */
@@ -271,6 +311,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       limitNum: null,
       offsetNum: null,
       selectIr: null,
+      ctes: undefined,
+      fromCteName: undefined,
     });
     return (await fresh.first()) ?? null;
   }

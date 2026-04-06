@@ -60,6 +60,13 @@ export type DiffAction =
 export type { Connection, ExecuteResult };
 export type { TransactionOptions, Driver };
 
+/** Single CTE: name and a full SELECT statement (no leading WITH) as bodySql. */
+export interface WithClause {
+  name: string;
+  bodySql: string;
+  bodyParams: unknown[];
+}
+
 /** Options for compileSelect. */
 export interface CompileSelectOpts {
   table: string;

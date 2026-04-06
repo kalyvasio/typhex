@@ -52,7 +52,7 @@
 import { type IrSelectRelation, type JoinHint } from "../../../ir/types.js";
 import type { RelationType } from "../../../entity/relations.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
-import type { QueryCompiler, QueryOperation } from "../../../dbs/types.js";
+import type { QueryCompiler, QueryOperation, WithClause } from "../../../dbs/types.js";
 import {
   RelationJoinBuilder,
   RelationPathAliasBuilder,
@@ -177,6 +177,11 @@ export interface QueryPlan {
 
   whereParams: Record<string, unknown>;
   havingParams: Record<string, unknown>;
+
+  /** WITH clause bodies (full SELECT each); merged when compiling the outer query. */
+  ctes?: WithClause[];
+  /** When set, the outer FROM uses this CTE name instead of the entity table. */
+  fromCteName?: string;
 }
 
 /**
@@ -337,6 +342,8 @@ export class QueryPlanBuilder {
       skipLoadFor: classified.skipLoadFor,
       whereParams: this.state.whereParams,
       havingParams: this.state.havingParams,
+      ctes: this.state.ctes,
+      fromCteName: this.state.fromCteName ?? undefined,
     };
   }
 

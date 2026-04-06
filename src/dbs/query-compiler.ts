@@ -14,7 +14,9 @@ import type {
   ExpandPlaceholdersResult,
   OnConflictClause,
   QueryCompiler,
+  WithClause,
 } from "./types.js";
+import { wrapWithPostgres, wrapWithSqlite } from "./with-clause.js";
 import { getColumnDef, resolveParamSentinels, SQL_DEFAULT } from "./types.js";
 import type {
   Expr,
@@ -285,7 +287,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       : null;
     const orderByExpanded = expand(this.compileOrderByExpr(plan.orderBy), plan.whereParams);
     const result = this.compileSelect({
-      table: plan.tableName,
+      table: plan.fromCteName ?? plan.tableName,
       tableAlias: plan.tableAlias,
       selectList: selectListExpanded.sql,
       selectListParams: selectListExpanded.params,
@@ -301,20 +303,32 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       havingParams: havingExpanded?.params,
       paramStartIndex,
     });
-    return options.wrap ? { sql: `(${result.sql})`, params: result.params } : result;
+    const wrapped = this.wrapWithCtes(result, plan.ctes);
+    return options.wrap ? { sql: `(${wrapped.sql})`, params: wrapped.params } : wrapped;
   }
 
   protected compileCountPlan(plan: QueryPlan): CompileResult {
     const { expand } = this.createExpander({});
     const joinsSql = plan.joins.map((j) => this.buildJoinClause(j, plan.tableAlias)).join("");
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    return this.compileCount(
-      plan.tableName,
-      plan.tableAlias,
-      whereExpanded.sql,
-      whereExpanded.params,
-      joinsSql || undefined,
+    return this.wrapWithCtes(
+      this.compileCount(
+        plan.fromCteName ?? plan.tableName,
+        plan.tableAlias,
+        whereExpanded.sql,
+        whereExpanded.params,
+        joinsSql || undefined,
+      ),
+      plan.ctes,
     );
+  }
+
+  protected wrapWithCtes(result: CompileResult, withClauses: WithClause[] | undefined): CompileResult {
+    if (!withClauses?.length) return result;
+    if (this.dialect === "postgres") {
+      return wrapWithPostgres(result.sql, result.params, withClauses);
+    }
+    return wrapWithSqlite(result.sql, result.params, withClauses);
   }
 
   protected compileUpdatePlan(plan: QueryPlan): CompileResult {
