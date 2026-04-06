@@ -23,7 +23,7 @@ export interface JunctionOptions {
 }
 
 /** E is the target entity class (for display as RelatedEntityInstance<E>) or legacy instance type. */
-export interface RelationDef<E = unknown, TType extends RelationType = RelationType> {
+export interface RelationDef<_E = unknown, TType extends RelationType = RelationType> {
   readonly _relType: TType;
   readonly _target: () => unknown;
   readonly _options: RelationOptions | JunctionOptions;

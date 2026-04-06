@@ -17,7 +17,6 @@ import type {
   IrExists,
   IrSelect,
   IrSelectRelation,
-  IrOrderBy,
 } from "../ir/types.js";
 
 type AcornNode = acorn.Node;
@@ -426,7 +425,7 @@ function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
         kind: "call",
         method,
         receiver: walk(callee.object!, params, paramKeys),
-        args: (n.arguments ?? []).map((a) => walk(a as AcornNode, params, paramKeys)),
+        args: (n.arguments ?? []).map((a) => walk(a, params, paramKeys)),
       } as IrCall;
     }
 

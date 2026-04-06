@@ -2,7 +2,7 @@
  * SQLite migrations: diff and DDL generation.
  */
 
-import type { Driver, DbMigrations, DiffAction, DbColumnInfo, ColumnDef } from "../types.js";
+import type { Driver, DbMigrations, DiffAction, DbColumnInfo } from "../types.js";
 import { getColumnDef } from "../types.js";
 import { sqliteDialect } from "./dialect.js";
 import type { RegisteredEntity } from "../../entity/global-driver.js";

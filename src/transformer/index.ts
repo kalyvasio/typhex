@@ -21,7 +21,7 @@ function visit(
 ): ts.Node {
   if (ts.isCallExpression(node)) {
     // Visit children first so nested calls (e.g. users.select(...).where(...)) get transformed from the inside out
-    const visited = ts.visitEachChild(node, (n) => visit(n, ctx, checker), ctx) as ts.CallExpression;
+    const visited = ts.visitEachChild(node, (n) => visit(n, ctx, checker), ctx);
     
     // Try each transformer in order
     const rewritten = transformSelectCall(visited, checker)
@@ -40,7 +40,7 @@ function visitSourceFile(
   ctx: ts.TransformationContext,
   checker: ts.TypeChecker
 ): ts.SourceFile {
-  return ts.visitEachChild(node, n => visit(n, ctx, checker), ctx) as ts.SourceFile;
+  return ts.visitEachChild(node, n => visit(n, ctx, checker), ctx);
 }
 
 /** Create the main Typhex transformer. */

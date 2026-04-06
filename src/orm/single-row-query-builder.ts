@@ -3,7 +3,6 @@
  * No _dirty tracking: save() inserts if no pk, else updates all current column values.
  */
 
-import type { Db } from "./db.js";
 import type { QueryState } from "./query-builder.js";
 import { QueryBuilder } from "./query-builder.js";
 import { whereColumnEq } from "./query-helpers.js";

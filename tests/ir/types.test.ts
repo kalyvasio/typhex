@@ -3,7 +3,6 @@ import {
   isIrNode,
   isIrSelect,
   isIrOrderBy,
-  type IrNode,
   type IrBinary,
   type IrMember,
   type IrConst,

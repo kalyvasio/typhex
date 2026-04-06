@@ -3,7 +3,6 @@
  * compile options from a QueryState so dialect compilers have everything they need.
  */
 
-import type { IrOrderBy, IrSelect } from "../ir/types.js";
 import { collectParamNamesFromWhere } from "../ir/types.js";
 import { getDialect } from "../dbs/index.js";
 import type { DialectImpl } from "../dbs/types.js";
@@ -66,7 +65,6 @@ export function getRelationJoins(state: QueryState<unknown>): RelationJoinInfo[]
       resolveTarget: resolveRelationTarget,
     },
     state.whereIr,
-    state.selectIr,
     rootParam,
     state.orderBy,
     state.joinHints

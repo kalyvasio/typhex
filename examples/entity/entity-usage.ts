@@ -25,27 +25,12 @@ const Post = Entity(
   },
   {
     author: rel.manyToOne(() => User, { foreignKey: "authorId" }),
-  }
+  },
 );
 
 class UserEntity extends User {
   get displayName() {
     return this.name ?? this.email ?? "Anonymous";
-  }
-
-  beforeSave() {
-    if (!this.createdAt) this.createdAt = new Date();
-  }
-}
-
-class PostEntity extends Post {
-  get excerpt() {
-    const b = this.body;
-    return b != null ? String(b).slice(0, 80) + "..." : "";
-  }
-
-  beforeSave() {
-    if (!this.createdAt) this.createdAt = new Date();
   }
 }
 
@@ -86,12 +71,18 @@ console.log("Posts:", post1.title, post2.title);
 const allUsers = await User.query().toArray();
 console.log("All users:", allUsers.length);
 
-const adults = await UserEntity.query().where((u) => u.age > 18).toArray();
+const adults = await UserEntity.query()
+  .where((u) => u.age > 18)
+  .toArray();
 console.log("Adults (age > 18):", adults.length);
-const user = await UserEntity.query().where((u) => u.age > 18).first();
+const user = await UserEntity.query()
+  .where((u) => u.age > 18)
+  .first();
 console.log("user displayname:", user?.displayName ?? "n/a");
 
-const firstPost = await Post.query().where((p) => p.published === true).first();
+const firstPost = await Post.query()
+  .where((p) => p.published === true)
+  .first();
 console.log("First published post:", firstPost?.title ?? "none");
 
 const found = await User.query().findById(alice.id!);

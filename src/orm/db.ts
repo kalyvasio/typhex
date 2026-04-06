@@ -55,7 +55,7 @@ export class Db implements QueryExecutor {
   constructor(driver: Driver, _internal: typeof INTERNAL);
   constructor(arg: Driver | DbOptions, internal?: typeof INTERNAL) {
     this._driver = isDriver(arg)
-        ? (arg as Driver)
+        ? (arg)
         : isDriver((arg as { driver?: unknown }).driver)
             ? (arg as { driver: Driver }).driver
             : createDriver(arg as CreateDriverOptions);

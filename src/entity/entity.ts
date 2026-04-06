@@ -114,7 +114,7 @@ function createTableDef<TTable extends string, TSchema extends Record<string, st
 
 /** Entity class type: 3 params only (table, schema def, relations). Use .query() for insert, findById, where, etc. */
 export type EntityClass<
-  TTable extends string,
+  _TTable extends string,
   TSchema extends Record<string, string>,
   TRels extends RelationsMap = {},
 > = (new (data?: Partial<InferTable<TSchema>>) => Row<Materialized<TSchema>, TRels>) & {
@@ -156,7 +156,7 @@ export function Entity<
           : (target as { _selectType?: { table?: TableDef<Record<string, string>, RelationsMap> } })?._selectType;
       const tbl = entityClass?.table;
       if (tbl) {
-        const schema = tbl._schema as Record<string, string>;
+        const schema = tbl._schema;
         return { table: tbl._table, pk: getPkColumn(schema) };
       }
       return null;
@@ -172,12 +172,12 @@ export function Entity<
       columnNames: cols,
       qe: executor ?? resolveDb(),
       pkColumn: pk,
-      whereIr: null as null,
+      whereIr: null,
       whereParams: {} as Record<string, unknown>,
       orderBy: [] as any[],
-      limitNum: null as null,
-      offsetNum: null as null,
-      selectIr: null as null,
+      limitNum: null,
+      offsetNum: null,
+      selectIr: null,
       relations: rels as RelationsMap,
       resolveRelationTarget,
     };

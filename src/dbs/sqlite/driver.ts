@@ -4,7 +4,7 @@
 
 import { createRequire } from "node:module";
 import type { Driver, Connection, ExecuteResult, TransactionOptions } from "../../driver/types.js";
-import {SqliteTrx} from "./trx.js";
+import { SqliteTrx } from "./trx.js";
 
 const require = createRequire(import.meta.url);
 
@@ -28,10 +28,14 @@ function bindableParams(params: unknown[]): unknown[] {
   return params.map(toBindable);
 }
 
-function executeSql(db: import("better-sqlite3").Database, sql: string, params: unknown[]): ExecuteResult {
+function executeSql(
+  db: import("better-sqlite3").Database,
+  sql: string,
+  params: unknown[],
+): ExecuteResult {
   const stmt = db.prepare(sql);
   if (stmt.reader) {
-    return { rows: stmt.all(...bindableParams(params)) as unknown[], changes: 0 };
+    return { rows: stmt.all(...bindableParams(params)), changes: 0 };
   }
   const info = stmt.run(...bindableParams(params)) as { lastInsertRowid: number; changes: number };
   return { rows: [], lastID: info.lastInsertRowid, changes: info.changes };
@@ -51,7 +55,9 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
       async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
         return Promise.resolve(executeSql(db, sql, params));
       },
-      async release(): Promise<void> { /* no-op for SQLite */ },
+      async release(): Promise<void> {
+        /* no-op for SQLite */
+      },
     };
   }
 

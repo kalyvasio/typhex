@@ -63,7 +63,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       whereParams: { ...this.state.whereParams },
       orderBy: [...this.state.orderBy],
       joinHints: this.state.joinHints ? [...this.state.joinHints] : undefined,
-    }) as QueryBuilder<C, T>;
+    });
   }
 
   /** Print the SQL and parameters to stdout when TYPHEX_DEBUG is enabled. */
@@ -162,7 +162,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       limitNum: null,
       offsetNum: null,
       selectIr: null,
-    }) as QueryBuilder<C, T>;
+    });
     return (await fresh.first()) ?? null;
   }
 

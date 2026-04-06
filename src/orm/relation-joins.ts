@@ -4,7 +4,7 @@
  * instead of failing on non-existent column.
  */
 
-import type { IrNode, IrMember, IrSelect, IrOrderBy, JoinHint, JoinType } from "../ir/types.js";
+import type { IrNode, IrSelect, IrOrderBy, JoinHint, JoinType } from "../ir/types.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 
 export interface RelationJoinInfo {
@@ -77,7 +77,7 @@ function collectRelationKeysFromNode(
 ): void {
   if (!node) return;
   if (node.kind === "member") {
-    const m = node as IrMember;
+    const m = node;
     if (m.param === rootParam && m.path.length >= 1 && relations[m.path[0]]) {
       out.add(m.path[0]);
     }
@@ -104,11 +104,7 @@ function collectRelationKeysFromNode(
 
 /** Collect relation keys referenced in a select IR — from dotted paths (e.g. ["company","name"])
  *  and from explicit relation entries in `select.relations`. */
-function collectRelationKeysFromSelect(
-  select: IrSelect | null,
-  relations: RelationsMap,
-  rootParam: string
-): Set<string> {
+function collectRelationKeysFromSelect(select: IrSelect | null, relations: RelationsMap): Set<string> {
   const out = new Set<string>();
   if (!select) return out;
   for (const path of select.paths) {
@@ -135,7 +131,7 @@ export function getReusableJoinKeys(
 ): Set<string> {
   const whereKeys = new Set<string>();
   collectRelationKeysFromNode(whereNode ?? { kind: "const", value: null }, relations, rootParam, whereKeys);
-  const selectKeys = collectRelationKeysFromSelect(selectNode, relations, rootParam);
+  const selectKeys = collectRelationKeysFromSelect(selectNode, relations);
   const reusable = new Set<string>();
   for (const k of whereKeys) {
     if (!selectKeys.has(k)) continue;
@@ -146,12 +142,7 @@ export function getReusableJoinKeys(
   return reusable;
 }
 
-function collectRelationKeysFromOrderBy(
-  orderBy: IrOrderBy[],
-  relations: RelationsMap,
-  _rootParam: string,
-  out: Set<string>
-): void {
+function collectRelationKeysFromOrderBy(orderBy: IrOrderBy[], relations: RelationsMap, out: Set<string>): void {
   for (const order of orderBy) {
     if (order.path.length > 1) {
       const key = order.path[0];
@@ -169,7 +160,7 @@ function collectJoinableRelationKeys(
 ): Set<string> {
   const keys = new Set<string>();
   collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
-  if (orderBy?.length) collectRelationKeysFromOrderBy(orderBy, relations, rootParam, keys);
+  if (orderBy?.length) collectRelationKeysFromOrderBy(orderBy, relations, keys);
   if (joinHints) {
     for (const hint of joinHints) {
       if (hint.relationKey in relations) keys.add(hint.relationKey);
@@ -180,13 +171,11 @@ function collectJoinableRelationKeys(
 
 /**
  * Build JOIN metadata for relations used in the where clause or orderBy.
- * Relations used only in select are loaded via whereIn (separate query).
- * Relations in both where and select reuse the join when select projection <= where projection.
+ * Relations used only in select are loaded via whereIn (separate query); select IR is not consulted here.
  */
 export function buildRelationJoins(
   ctx: RelationJoinContext,
   whereNode: IrNode | null,
-  selectNode: IrSelect | null,
   rootParam: string,
   orderBy?: IrOrderBy[],
   joinHints?: JoinHint[]

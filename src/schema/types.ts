@@ -36,7 +36,7 @@ export function getColumnNames(def: TableDefinition): string[] {
 
 export function sqlType(def: TableDefinition, col: string): string {
   const d = def[col];
-  const c = normalizeCol(d!);
+  const c = normalizeCol(d);
   const lower = c.type.toLowerCase();
   let out = c.type;
   if (c.primaryKey && !lower.includes("primary key")) out += " PRIMARY KEY";

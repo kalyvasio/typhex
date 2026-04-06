@@ -34,7 +34,7 @@ function bindableParams(params: unknown[]): unknown[] {
 function executeSql(db: import("better-sqlite3").Database, sql: string, params: unknown[]): ExecuteResult {
   const stmt = db.prepare(sql);
   if (stmt.reader) {
-    return { rows: stmt.all(...bindableParams(params)) as unknown[], changes: 0 };
+    return { rows: stmt.all(...bindableParams(params)), changes: 0 };
   }
   const info = stmt.run(...bindableParams(params)) as { lastInsertRowid: number; changes: number };
   return { rows: [], lastID: info.lastInsertRowid, changes: info.changes };

@@ -1,0 +1,7 @@
+dist
+node_modules
+coverage
+examples/out
+.worktrees
+.claude
+package-lock.json
