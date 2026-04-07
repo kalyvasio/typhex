@@ -8,6 +8,7 @@ import {
 import { Entity } from "../../src/entity/entity.js";
 import { Db } from "../../src/orm/db.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
+import { SQL_DEFAULT } from "../../src/dbs/types.js";
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
@@ -47,19 +48,43 @@ describe("dbs/postgres", () => {
       expect(result.sql).toContain("$1");
       expect(result.params).toEqual([18]);
     });
-
-    it("compileInsert produces INSERT with RETURNING * and returningRow", () => {
-      const result = postgresDialect.compileInsert(
+    it("compileInsertMany produces multi-row INSERT with RETURNING * and sequential $N placeholders", () => {
+      const { sql, params, returningRow } = postgresDialect.compileInsertMany(
         "users",
         ["name", "age"],
-        ["Alice", 30],
+        [["Alice", 30], ["Bob", 25]],
         "id"
       );
-      expect(result.sql).toContain('INSERT INTO "users"');
-      expect(result.sql).toContain("$1");
-      expect(result.sql).toContain("RETURNING *");
-      expect(result.params).toEqual(["Alice", 30]);
-      expect(result.returningRow).toBe(true);
+      expect(sql).toContain('INSERT INTO "users"');
+      expect(sql).toContain('"name"');
+      expect(sql).toContain('"age"');
+      expect(sql).toContain("VALUES");
+      expect(sql).toContain("RETURNING *");
+      expect(sql).toContain("$1");
+      expect(sql).toContain("$2");
+      expect(sql).toContain("$3");
+      expect(sql).toContain("$4");
+      expect(params).toEqual(["Alice", 30, "Bob", 25]);
+      expect(returningRow).toBe(true);
+    });
+
+    it("compileInsertMany with empty rows returns empty sql", () => {
+      const { sql } = postgresDialect.compileInsertMany("users", ["name"], [], "id");
+      expect(sql).toBe("");
+    });
+
+    it("compileInsertMany emits DEFAULT keyword for SQL_DEFAULT and skips its param slot", () => {
+      const { sql, params } = postgresDialect.compileInsertMany(
+        "users",
+        ["name", "age"],
+        [["Alice", SQL_DEFAULT], [SQL_DEFAULT, 25]],
+        "id"
+      );
+      expect(sql).toContain("DEFAULT");
+      expect(sql).toContain("$1");
+      expect(sql).toContain("$2");
+      // Only non-DEFAULT values become params
+      expect(params).toEqual(["Alice", 25]);
     });
 
     it("compileCount produces SELECT COUNT", () => {

@@ -10,7 +10,7 @@ import type { QueryExecutor } from "./db.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
 import { resolveWhereIr, resolveOrderBy, resolveSelectIr, resolveGroupByPaths, resolveJoinKeys } from "../parser/resolve.js";
-import { resolveParamSentinels } from "../dbs/types.js";
+import { resolveParamSentinels, SQL_DEFAULT, type ExpandPlaceholdersResult, type DialectImpl } from "../dbs/types.js";
 import { buildRelationContext, resolveSelectForSql } from "./relation-context-builder.js";
 import { resolveRelations } from "./relation-resolver.js";
 import { whereColumnEq } from "./query-helpers.js";
@@ -32,25 +32,10 @@ export interface QueryBuilderInterface<C extends AnyEntityClass, T> {
   toArray(): Promise<T[]>;
 }
 
-
-/** Returns true if the IR node tree contains any aggregate function node. */
-function containsAggregate(node: IrNode): boolean {
-  switch (node.kind) {
-    case "aggregate": return true;
-    case "binary": return containsAggregate(node.left) || containsAggregate(node.right);
-    case "unary": return containsAggregate(node.operand);
-    case "in": return containsAggregate(node.left) || containsAggregate(node.right);
-    case "call": return containsAggregate(node.receiver) || node.args.some(containsAggregate);
-    case "exists": return containsAggregate((node as IrExists).innerWhere);
-    default: return false;
-  }
-}
-
-
 export interface QueryState<T = unknown> {
   tableName: string;
   columnNames: string[];
-  qe?: QueryExecutor;
+  qe: QueryExecutor;
   pkColumn?: string | null;
   whereIr: IrNode | null;
   whereParams: Record<string, unknown>;
@@ -67,7 +52,10 @@ export interface QueryState<T = unknown> {
 }
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
-export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityInstance<C>> implements QueryBuilderInterface<C, T> {
+export class QueryBuilder<
+  C extends AnyEntityClass = AnyEntityClass,
+  T = EntityInstance<C>,
+> implements QueryBuilderInterface<C, T> {
   private static readonly isDebugSqlEnabled = ((): boolean => {
     const debugFlag = process?.env?.TYPHEX_DEBUG;
     return debugFlag === "1" || debugFlag === "true" || debugFlag === "yes";
@@ -96,14 +84,10 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
    *  or an arrow function that is parsed to IR at runtime. */
   where(
     predicate: IrNode | ((entity: T) => boolean),
-    params?: Record<string, unknown>
+    params?: Record<string, unknown>,
   ): QueryBuilder<C, T> {
-    const ir = resolveWhereIr(predicate as IrNode | ((entity: unknown) => boolean), params ? Object.keys(params) : []);
-    if (containsAggregate(ir)) {
-      throw new Error("[typhex] Aggregate functions (count, sum, avg, etc.) cannot be used in .where() — use .having() instead.");
-    }
     if (params) Object.assign(this.state.whereParams, params);
-    this.state.whereIr = ir;
+    this.state.whereIr = resolveWhereIr(predicate as IrNode | ((entity: unknown) => boolean), params ? Object.keys(params) : []);
     return this;
   }
 
@@ -113,9 +97,11 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): QueryBuilder<C, T>;
   orderBy(
     colOrIr: IrOrderBy | string | ((row: T) => unknown),
-    direction: OrderDirection = "asc"
+    direction: OrderDirection = "asc",
   ): QueryBuilder<C, T> {
-    this.state.orderBy.push(resolveOrderBy(colOrIr as IrOrderBy | string | ((row: unknown) => unknown), direction));
+    this.state.orderBy.push(
+      resolveOrderBy(colOrIr as IrOrderBy | string | ((row: unknown) => unknown), direction),
+    );
     return this;
   }
 
@@ -141,7 +127,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   private addJoinHints(
     keysOrFn: string[] | ((row: T) => unknown),
-    joinType: JoinType
+    joinType: JoinType,
   ): QueryBuilder<C, T> {
     const relationKeys = resolveJoinKeys(keysOrFn as string[] | ((row: unknown) => unknown));
     const newHints: JoinHint[] = relationKeys.map(k => ({ relationKey: k, joinType }));
@@ -210,34 +196,61 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return (await fresh.first()) ?? null;
   }
 
-  /**
-   * Insert row and return the hydrated instance.
-   * If dialect sets returningRow on compile result, use driver.query() and the returned row; else run then fetch by pk.
-   */
-  async insert(row: Record<string, unknown>): Promise<EntityInstance<C>> {
-    const { tableName, columnNames, pkColumn, hydrate } = this.state;
+  /** Compile and execute an INSERT, hydrating any RETURNING rows.
+   *  Returns hydrated rows (non-empty when dialect supports RETURNING) and lastID (for non-RETURNING fallback). */
+  private async _executeInsert(
+    cols: string[],
+    paramRows: unknown[][]
+  ): Promise<{ hydratedRows: EntityInstance<C>[]; lastID: number | undefined }> {
+    const { tableName, pkColumn, hydrate } = this.state;
     const qe = this.state.qe!;
     const dialect = getDialectOrThrow(this.state);
-    const cols = columnNames.filter((c) => row[c] !== undefined);
-    const params = cols.map((c) => row[c]);
     const pk = pkColumn ?? "id";
 
-    const compiled = dialect.compileInsert(tableName, cols, params, pk);
+    const compiled = dialect.compileInsertMany(tableName, cols, paramRows, pk);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
 
     if (compiled.returningRow) {
-      const rows = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
-      const raw = rows[0];
-      if (raw == null) throw new Error("insert: RETURNING returned no row");
-      if (hydrate) return (await hydrate(raw)) as EntityInstance<C>;
-      return raw as EntityInstance<C>;
+      const returned = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
+      const hydratedRows: EntityInstance<C>[] = [];
+      for (const raw of returned)
+        hydratedRows.push(hydrate ? (await hydrate(raw)) as EntityInstance<C> : raw as EntityInstance<C>);
+      return { hydratedRows, lastID: undefined };
     }
 
     const result = await qe.run(compiled.sql, compiled.params);
-    const lastId = result.lastID ?? 0;
-    const inst = await this.clone().where(whereColumnEq(pk, lastId)).first();
-    if (!inst) throw new Error("insert: insert succeeded but row not found");
+    return { hydratedRows: [], lastID: result.lastID };
+  }
+
+  /** Insert a single row and return the hydrated instance. */
+  async insert(row: Record<string, unknown>): Promise<EntityInstance<C>> {
+    const { columnNames, pkColumn } = this.state;
+    const pk = pkColumn ?? "id";
+
+    const cols = columnNames.filter(c => row[c] !== undefined);
+    if (cols.length === 0) throw new Error("insertMany: no column values provided");
+    const paramRow = cols.map(c => row[c] === undefined ? SQL_DEFAULT : row[c]);
+
+    const { hydratedRows, lastID } = await this._executeInsert(cols, [paramRow]);
+    if (hydratedRows.length > 0) return hydratedRows[0];
+
+    const inst = await this.clone().where(whereColumnEq(pk, lastID ?? 0)).first();
+    if (!inst) throw new Error("insert: row not found after insert");
     return inst;
+  }
+
+  /** Insert multiple rows in one statement. Returns hydrated rows for dialects with RETURNING
+   *  (Postgres); returns [] for SQLite where safe row hydration is not possible after a batch insert. */
+  async insertMany(rows: Record<string, unknown>[]): Promise<EntityInstance<C>[]> {
+    if (rows.length === 0) return [];
+    const { columnNames } = this.state;
+
+    const cols = columnNames.filter(c => rows.some(r => r[c] !== undefined));
+    if (cols.length === 0) throw new Error("insertMany: no column values provided");
+    const paramRows = rows.map(r => cols.map(c => r[c] === undefined ? SQL_DEFAULT : r[c]));
+
+    const { hydratedRows } = await this._executeInsert(cols, paramRows);
+    return hydratedRows;
   }
 
   /** Select single row by primary key. Replaces Entity.findById(). */
@@ -250,13 +263,17 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** Execute the query and return all matching rows, with relations loaded
    *  and the hydration function applied if one is set. */
   async toArray(): Promise<EntityInstance<C>[]> {
-    const { hydrate } = this.state;
-    const qe = this.state.qe!;
+    const { hydrate, qe } = this.state;
     const ctx = buildRelationContext(
-      this.state.selectIr, this.state.relations, this.state.whereIr,
-      this.state.pkColumn, getRootParam(this.state)
+      this.state.selectIr,
+      this.state.relations,
+      this.state.whereIr,
+      this.state.pkColumn,
+      getRootParam(this.state),
     );
-    const rows = await this.executeMainQuery(resolveSelectForSql(this.state.selectIr, ctx.columnPaths, ctx.columnAliases));
+    const rows = await this.executeMainQuery(
+      resolveSelectForSql(this.state.selectIr, ctx.columnPaths, ctx.columnAliases),
+    );
     await resolveRelations(ctx, this.state.selectIr, qe, rows);
     if (!hydrate) return rows as EntityInstance<C>[];
     return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
@@ -268,26 +285,20 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return arr[0];
   }
 
-  /** Compile the current WHERE IR into a SQL fragment and its resolved parameters. */
-  private compileWhereClause(
-    dialect: ReturnType<typeof getDialectOrThrow>,
-    opts: ReturnType<typeof getCompileOpts>
-  ): { whereSql: string; whereParams: unknown[] } {
-    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
-    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
-    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(whereResult.sql, resolved);
-    return { whereSql, whereParams };
-  }
-
   /** Execute a COUNT query and return the total number of rows matching the current WHERE clause. */
   async count(): Promise<number> {
-    const { tableName } = this.state;
-    const qe = this.state.qe!;
+    const { tableName, qe } = this.state;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const { whereSql, whereParams: params } = this.compileWhereClause(dialect, opts);
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const { sql: whereSql, params } = this.expandWithSentinels(dialect, whereResult.sql, whereResult.params, this.state.whereParams);
     const joinsSql = buildJoinsSql(this.state, dialect);
-    const { sql, params: runParams } = dialect.compileCount(tableName, whereSql, params, joinsSql || undefined);
+    const { sql, params: runParams } = dialect.compileCount(
+      tableName,
+      whereSql,
+      params,
+      joinsSql || undefined,
+    );
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
     const rows = (await qe.query(sql, runParams)) as [{ c: number }];
     return Number(rows[0]?.c ?? 0);
@@ -295,11 +306,11 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
   async update(set: Record<string, unknown>): Promise<number> {
-    const { tableName, columnNames } = this.state;
-    const qe = this.state.qe!;
+    const { tableName, columnNames, qe } = this.state;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const { whereSql, whereParams } = this.compileWhereClause(dialect, opts);
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const { sql: whereSql, params: whereParams } = this.expandWithSentinels(dialect, whereResult.sql, whereResult.params, this.state.whereParams);
     const { sql, params } = dialect.compileUpdate(tableName, set, columnNames, whereSql, whereParams);
     if (!sql) return 0;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
@@ -309,11 +320,11 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Execute a DELETE for the current WHERE clause and return the number of affected rows. */
   async delete(): Promise<number> {
-    const { tableName } = this.state;
-    const qe = this.state.qe!;
+    const { tableName, qe } = this.state;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const { whereSql, whereParams: params } = this.compileWhereClause(dialect, opts);
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const { sql: whereSql, params } = this.expandWithSentinels(dialect, whereResult.sql, whereResult.params, this.state.whereParams);
     const { sql, params: runParams } = dialect.compileDelete(tableName, whereSql, params);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
     const result = await qe.run(sql, runParams);
@@ -322,20 +333,22 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Compile and run the main SELECT query, incorporating WHERE, JOINs, ORDER BY,
    *  LIMIT, OFFSET, and the resolved SELECT list. */
-  private async executeMainQuery(selectForSql: IrSelect | null): Promise<Record<string, unknown>[]> {
+  private async executeMainQuery(
+    selectForSql: IrSelect | null,
+  ): Promise<Record<string, unknown>[]> {
     const { tableName, columnNames } = this.state;
     const qe = this.state.qe!;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const { whereSql, whereParams } = this.compileWhereClause(dialect, opts);
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const { sql: whereSql, params: whereParams } = this.expandWithSentinels(dialect, whereResult.sql, whereResult.params, this.state.whereParams);
     const selectList = dialect.compileSelectList(selectForSql, columnNames, opts);
     const orderBySql = dialect.compileOrderBy(this.state.orderBy, opts);
     const joinsSql = buildJoinsSql(this.state, dialect);
     let havingSqlResult: { sql: string; params: unknown[] } | null = null;
     if (this.state.havingIr) {
       const havingResult = dialect.compileWhere(this.state.havingIr, opts);
-      const resolvedHaving = resolveParamSentinels(havingResult.params, this.state.havingParams ?? {});
-      havingSqlResult = dialect.expandPlaceholders(havingResult.sql, resolvedHaving, whereParams.length + 1);
+      havingSqlResult = this.expandWithSentinels(dialect, havingResult.sql, havingResult.params, this.state.havingParams ?? {}, whereParams.length + 1);
     }
     const { sql, params } = dialect.compileSelect({
       table: tableName,
@@ -353,5 +366,15 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     });
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     return qe.query(sql, params) as Promise<Record<string, unknown>[]>;
+  }
+
+  private expandWithSentinels(
+    dialect: DialectImpl,
+    sql: string,
+    params: unknown[],
+    paramValues: Record<string, unknown>,
+    startIdx?: number,
+  ): ExpandPlaceholdersResult {
+    return dialect.expandPlaceholders(sql, resolveParamSentinels(params, paramValues), startIdx);
   }
 }

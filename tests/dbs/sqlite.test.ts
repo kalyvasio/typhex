@@ -7,6 +7,7 @@ import {
 } from "../../src/dbs/index.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
+import { SQL_DEFAULT } from "../../src/dbs/types.js";
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {
@@ -133,24 +134,45 @@ describe("dbs/sqlite", () => {
       expect(result).toContain("company_name");
     });
 
+    it("compileInsertMany produces multi-row INSERT without RETURNING", () => {
+      const { sql, params, returningRow } = sqliteDialect.compileInsertMany(
+        "users",
+        ["name", "age"],
+        [["Alice", 30], ["Bob", 25]],
+        "id"
+      );
+      expect(sql).toContain('INSERT INTO "users"');
+      expect(sql).toContain('"name"');
+      expect(sql).toContain('"age"');
+      expect(sql).toContain("VALUES");
+      expect(sql).not.toContain("RETURNING");
+      expect(params).toEqual(["Alice", 30, "Bob", 25]);
+      expect(returningRow).toBe(false);
+    });
+
+    it("compileInsertMany with empty rows returns empty sql", () => {
+      const { sql } = sqliteDialect.compileInsertMany("users", ["name"], [], "id");
+      expect(sql).toBe("");
+    });
+
+    it("compileInsertMany maps SQL_DEFAULT to null for SQLite", () => {
+      const { sql, params } = sqliteDialect.compileInsertMany(
+        "users",
+        ["name", "age"],
+        [["Alice", SQL_DEFAULT], [SQL_DEFAULT, 25]],
+        "id"
+      );
+      expect(sql).toContain("VALUES");
+      expect(sql).not.toContain("DEFAULT");
+      expect(params).toEqual(["Alice", null, null, 25]);
+    });
+
     it("expandPlaceholders expands IN arrays to multiple ?", () => {
       const sql = '("t0"."id" IN (?))';
       const resolved = [[10, 20]];
       const { sql: outSql, params } = sqliteDialect.expandPlaceholders(sql, resolved);
       expect(outSql).toBe('("t0"."id" IN (?, ?))');
       expect(params).toEqual([10, 20]);
-    });
-
-    it("compileInsert produces INSERT without RETURNING", () => {
-      const { sql, params } = sqliteDialect.compileInsert(
-        "users",
-        ["name", "age"],
-        ["Alice", 30],
-        "id"
-      );
-      expect(sql).toContain('INSERT INTO "users"');
-      expect(sql).not.toContain("RETURNING");
-      expect(params).toEqual(["Alice", 30]);
     });
   });
 

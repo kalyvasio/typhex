@@ -120,6 +120,61 @@ describe("basic CRUD", () => {
   });
 });
 
+// ─── insertMany ───────────────────────────────────────────────────────────────
+
+describe("insertMany", () => {
+  const Product = Entity("products", {
+    id: "integer primary key autoincrement",
+    name: "text not null",
+    price: "integer not null",
+  });
+
+  let db: Db;
+  beforeEach(async () => {
+    clearRegistry();
+    registerEntity(Product);
+    db = freshDb();
+    await db.migrate();
+  });
+  afterEach(async () => { await db.close(); });
+
+  it("inserts multiple rows and rows are persisted (SQLite returns [])", async () => {
+    const rows = await Product.query().insertMany([
+      { name: "Pen",    price: 1 },
+      { name: "Pencil", price: 2 },
+      { name: "Ruler",  price: 3 },
+    ]);
+    expect(rows).toEqual([]);
+    expect(await Product.query().count()).toBe(3);
+  });
+
+  it("returns empty array for empty input without hitting db", async () => {
+    const rows = await Product.query().insertMany([]);
+    expect(rows).toEqual([]);
+    expect(await Product.query().count()).toBe(0);
+  });
+
+  it("sparse rows insert correctly (missing column uses DB default)", async () => {
+    const Product2 = Entity("products2", {
+      id: "integer primary key autoincrement",
+      a: "text",
+      b: "text",
+    });
+    registerEntity(Product2);
+    await db.run(`CREATE TABLE IF NOT EXISTS "products2" ("id" integer primary key autoincrement, "a" text, "b" text)`);
+    await Product2.query().insertMany([
+      { a: "hello" },
+      { b: "world" },
+    ]);
+    const all = await Product2.query().orderBy("id", "asc").toArray();
+    expect(all).toHaveLength(2);
+    expect((all[0] as any).a).toBe("hello");
+    expect((all[0] as any).b).toBeNull();
+    expect((all[1] as any).a).toBeNull();
+    expect((all[1] as any).b).toBe("world");
+  });
+});
+
 // ─── entity subclassing & lifecycle ───────────────────────────────────────────
 
 describe("entity subclassing and lifecycle hooks", () => {

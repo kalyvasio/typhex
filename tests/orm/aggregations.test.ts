@@ -467,26 +467,6 @@ describe("Aggregations", () => {
     });
   });
 
-  describe(".where() aggregate guard", () => {
-    it("throws clear error when aggregate used in .where() via IrNode", () => {
-      const b = newBuilder(qe);
-      const havingIr = {
-        kind: "binary" as const,
-        op: ">" as const,
-        left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
-        right: { kind: "const" as const, value: 5 },
-      };
-      expect(() => b.where(havingIr)).toThrow(/use .having\(\) instead/);
-    });
-
-    it("throws clear error when aggregate used in .where() via arrow", () => {
-      const b = newBuilder(qe);
-      // Use toString override so acorn sees literal aggregate source (bypasses module transform)
-      const fn = Object.assign(() => true, { toString: () => "(o) => count(o.id) > 5" });
-      expect(() => b.where(fn as any)).toThrow(/use .having\(\) instead/);
-    });
-  });
-
   describe(".orderBy() aggregate error message", () => {
     it("throws a specific error when ordering by an aggregate lambda", () => {
       const b = newBuilder(qe);
@@ -559,27 +539,6 @@ describe("Bug fix: compileAggregate uses opts for alias resolution (comment 1)",
     const sql = postgresDialect.compileSelectList(selectIr, ["name"], { tableAlias: "t2", paramToAlias: { u: "t2" } });
     expect(sql).toContain('"t2"."name"');
     expect(sql).not.toContain('"t0"');
-  });
-});
-
-describe("Bug fix: containsAggregate traverses IrExists innerWhere (comment 2)", () => {
-  it("throws when aggregate appears inside EXISTS innerWhere passed to .where()", () => {
-    const qe = createMockQe();
-    const b = newBuilder(qe);
-    // Construct an IrExists node whose innerWhere contains an aggregate
-    const existsWithAggregate = {
-      kind: "exists" as const,
-      rootParam: "u",
-      relationKey: "orders",
-      innerParam: "o",
-      innerWhere: {
-        kind: "binary" as const,
-        op: ">" as const,
-        left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
-        right: { kind: "const" as const, value: 0 },
-      },
-    };
-    expect(() => b.where(existsWithAggregate as any)).toThrow(/use .having\(\) instead/);
   });
 });
 
@@ -813,22 +772,6 @@ describe("Bug fix: groupBy() defaults SELECT to groupBy paths when no prior .sel
     const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(sql).toContain('"price"');
     expect(sql).toContain('"category"');
-  });
-});
-
-describe("Bug fix: .where() does not mutate whereParams when aggregate guard throws", () => {
-  it("whereParams unchanged after rejected aggregate predicate", () => {
-    const qe = createMockQe();
-    const b = newBuilder(qe);
-    const originalParams = { ...b["state"].whereParams };
-    const aggNode = {
-      kind: "binary" as const,
-      op: ">" as const,
-      left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
-      right: { kind: "const" as const, value: 5 },
-    };
-    expect(() => b.where(aggNode, { extra: "value" })).toThrow(/use .having\(\) instead/);
-    expect(b["state"].whereParams).toEqual(originalParams);
   });
 });
 

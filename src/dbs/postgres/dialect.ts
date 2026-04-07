@@ -6,7 +6,7 @@ import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
 import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
 import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts, ResolvedOpts } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
-import { getColumnDef } from "../types.js";
+import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
   quoteId,
   resolveOpts,
@@ -81,13 +81,27 @@ export const postgresDialect: DialectImpl = {
     return getColumnDef(def, "postgres");
   },
 
-  compileInsert(table: string, columns: string[], values: unknown[], pk?: string): CompileResult {
+  compileInsertMany(
+    table: string,
+    columns: string[],
+    rows: unknown[][],
+    pk?: string
+  ): CompileResult {
     const esc = quoteId;
-    if (columns.length === 0) {
-      return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES${pk ? " RETURNING *" : ""}`, params: [], returningRow: !!pk };
-    }
-    const ph = columns.map((_, i) => `$${i + 1}`).join(", ");
-    return { sql: `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})${pk ? " RETURNING *" : ""}`, params: values, returningRow: !!pk };
+    if (rows.length === 0) return { sql: "", params: [], returningRow: false };
+    let paramIdx = 1;
+    const params: unknown[] = [];
+    const rowPlaceholders = rows.map(row => {
+      const phs = row.map(v => {
+        if (v === SQL_DEFAULT) return "DEFAULT";
+        params.push(v);
+        return `$${paramIdx++}`;
+      });
+      return `(${phs.join(", ")})`;
+    });
+    let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${rowPlaceholders.join(", ")}`;
+    if (pk) sql += " RETURNING *";
+    return { sql, params, returningRow: !!pk };
   },
 
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult {
