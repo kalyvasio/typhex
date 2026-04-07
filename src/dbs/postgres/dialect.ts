@@ -3,8 +3,8 @@
  */
 
 import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
-import type { IrNode, IrOrderBy, IrSelect } from "../../ir/types.js";
-import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts } from "../types.js";
+import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
+import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts, ResolvedOpts } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
 import { getColumnDef } from "../types.js";
 import {
@@ -13,23 +13,27 @@ import {
   makeCompileNode,
   compileOrderBy,
   compileSelectList,
-  type DialectRenderer,
+  compileAggregate,
+  compileConcatAggregate,
+  compileStandardAggregate,
+  compileGroupBy,
 } from "../shared-dialect.js";
 
-const renderer: DialectRenderer = {
-  placeholder: (params) => `$${params.length}`,
-
-  compileExists: (targetTable, alias, fkColumn, mainAlias, mainPk, innerSql) =>
-    `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${quoteId(alias)}.${quoteId(fkColumn)} = ${quoteId(mainAlias)}.${quoteId(mainPk)} AND (${innerSql})))`,
-
-  compileLike: (receiver, arg, mode) => {
-    if (mode === "startsWith") return `(${receiver} LIKE ${arg} || '%')`;
-    if (mode === "endsWith")   return `(${receiver} LIKE '%' || ${arg})`;
-    return                            `(${receiver} LIKE '%' || ${arg} || '%')`;
-  },
-};
-
-const compileNode = makeCompileNode(renderer);
+function postgresCompileAggregate(
+  agg: IrAggregate,
+  opts?: ResolvedOpts,
+  compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
+  params?: unknown[]
+): string {
+  // Map GROUP_CONCAT → STRING_AGG (cross-dialect compatibility)
+  if (agg.func === "GROUP_CONCAT" || agg.func === "STRING_AGG") {
+    return compileConcatAggregate("STRING_AGG", agg, "','", opts, compileNodeFn, params);
+  }
+  if (agg.func === "ARRAY_AGG" || agg.func === "JSON_AGG") {
+    return compileStandardAggregate(agg.func, agg, opts, compileNodeFn, params);
+  }
+  return compileAggregate(agg, opts, compileNodeFn, params);
+}
 
 export const postgresDialect: DialectImpl = {
   name: "postgres",
@@ -42,10 +46,10 @@ export const postgresDialect: DialectImpl = {
     return `$${index}`;
   },
 
-  expandPlaceholders(sql: string, resolvedParams: unknown[]): { sql: string; params: unknown[] } {
+  expandPlaceholders(sql: string, resolvedParams: unknown[], startIdx = 1): { sql: string; params: unknown[] } {
     let idx = 0;
     const newParams: unknown[] = [];
-    let paramIndex = 1;
+    let paramIndex = startIdx;
     const newSql = sql.replace(/\$(\d+)/g, () => {
       const v = resolvedParams[idx++];
       if (Array.isArray(v)) {
@@ -70,7 +74,7 @@ export const postgresDialect: DialectImpl = {
   },
 
   compileSelectList(select: IrSelect | null, columns: string[], options: CompileOptions = {}): string {
-    return compileSelectList(select, columns, options);
+    return compileSelectList(select, columns, options, postgresCompileAggregate);
   },
 
   toColumnDef(def: ColumnDef): string {
@@ -109,6 +113,14 @@ export const postgresDialect: DialectImpl = {
   compileSelect(opts: CompileSelectOpts): CompileResult {
     const esc = quoteId;
     const params = [...opts.whereParams];
+    const groupByClause = opts.groupBy && opts.groupBy.length > 0
+      ? ` GROUP BY ${compileGroupBy(opts.groupBy, resolveOpts(opts.compileOpts ?? {}))}`
+      : "";
+    let havingClause = "";
+    if (opts.havingSql) {
+      havingClause = ` HAVING ${opts.havingSql}`;
+      params.push(...(opts.havingParams ?? []));
+    }
     let paramIdx = params.length + 1;
     const ph = () => `$${paramIdx++}`;
     let limitClause = "";
@@ -116,8 +128,21 @@ export const postgresDialect: DialectImpl = {
     if (opts.limitNum != null) { limitClause = ` LIMIT ${ph()}`; params.push(opts.limitNum); }
     if (opts.offsetNum != null) { offsetClause = ` OFFSET ${ph()}`; params.push(opts.offsetNum); }
     const orderClause = opts.orderBySql ? ` ORDER BY ${opts.orderBySql}` : "";
-    return { sql: `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${orderClause}${limitClause}${offsetClause}`, params };
+    const sql = `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`;
+    return { sql, params };
   },
+
+  compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string {
+    return `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${quoteId(alias)}.${quoteId(fkColumn)} = ${quoteId(mainAlias)}.${quoteId(mainPk)} AND (${innerSql})))`;
+  },
+
+  compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string {
+    if (mode === "startsWith") return `(${receiver} LIKE ${arg} || '%')`;
+    if (mode === "endsWith")   return `(${receiver} LIKE '%' || ${arg})`;
+    return                            `(${receiver} LIKE '%' || ${arg} || '%')`;
+  },
+
+  compileAggregate: postgresCompileAggregate,
 
   buildJoinClause(join: RelationJoinInfo): string {
     // Postgres does not allow CROSS JOIN with an ON clause; map to INNER JOIN instead.
@@ -125,3 +150,5 @@ export const postgresDialect: DialectImpl = {
     return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${quoteId("t0")}.${quoteId(join.foreignKey)} = ${quoteId(join.alias)}.${quoteId(join.targetPk)}`;
   },
 };
+
+const compileNode = makeCompileNode(postgresDialect);

@@ -4,7 +4,7 @@
  */
 import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
 import { isIrNode, isIrSelect, isIrOrderBy } from "../ir/types.js";
-import { parseArrowToIr, parseArrowToIrSelect } from "./parse-arrow.js";
+import { parseArrowToIr, parseArrowToIrSelect, parseArrowToGroupByPaths } from "./parse-arrow.js";
 import { DEFAULT_ROW_PARAM } from "../orm/compile-context.js";
 
 /** Resolve a where input (pre-built IR node or arrow fn) to an IrNode. */
@@ -31,6 +31,13 @@ export function resolveOrderBy(
   if (typeof input === "function") {
     try {
       const ir = parseArrowToIr(input as (u: any) => any, { paramKeys: [] });
+      if (ir.kind === "aggregate") {
+        throw new Error(
+          "[typhex] orderBy does not support aggregate functions directly. " +
+          'Select the aggregate with an alias first (e.g. .select(p => ({ total: sum(p.price) }))), ' +
+          'then orderBy the alias as a string: .orderBy("total", "desc").'
+        );
+      }
       if (ir.kind !== "member" || !ir.path || ir.path.length === 0) {
         throw new Error(
           "[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)"
@@ -68,6 +75,28 @@ export function resolveSelectIr(
   if (isIrSelect(input)) return input;
   // string[] — each entry becomes a single-segment path
   return { param: DEFAULT_ROW_PARAM, paths: (input).map((c) => [c]), aliases: input };
+}
+
+/** Resolve a groupBy input (arrow fn, string/number array, or mixed) to Array<string[] | number>. */
+export function resolveGroupByPaths(
+  columnOrFn: string | string[] | number | number[] | ((row: unknown) => unknown),
+  ...rest: (string | number)[]
+): Array<string[] | number> {
+  if (typeof columnOrFn === "function") {
+    const entries = parseArrowToGroupByPaths(columnOrFn as (row: any) => any);
+    if (entries.length === 0) {
+      throw new Error("[typhex] .groupBy() could not parse the provided function — no column paths were resolved.");
+    }
+    return entries;
+  }
+  const cols: Array<string | number> = Array.isArray(columnOrFn)
+    ? columnOrFn
+    : [columnOrFn, ...rest];
+  return cols.map((c): string[] | number => {
+    const n = Number(c);
+    if (Number.isInteger(n)) return n;
+    return String(c).split(".");
+  });
 }
 
 /** Resolve a join-hint input (string array or arrow fn) to relation key strings. */

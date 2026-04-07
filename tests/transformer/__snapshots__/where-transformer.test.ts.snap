@@ -1,5 +1,26 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`having transformer > transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10 1`] = `
+"employees.having({ kind: "binary", op: "&&", left: { kind: "binary", op: ">", left: { kind: "aggregate", func: "AVG", arg: { kind: "member", param: "p", path: ["salary"] } }, right: { kind: "const", value: 50000 } }, right: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 10 } } }, {});
+"
+`;
+
+exports[`having transformer > transforms (p) => count(distinct(p.category)) > 3 with distinct 1`] = `
+"orders.having({ kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["category"] }, distinct: true }, right: { kind: "const", value: 3 } }, {});
+"
+`;
+
+exports[`having transformer > transforms (p) => count(p.id) > 5 1`] = `
+"orders.having({ kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 5 } }, {});
+"
+`;
+
+exports[`having transformer > transforms (p) => sum(p.price) >= minAmount with closure var 1`] = `
+"const minAmount = 100;
+orders.having({ kind: "binary", op: ">=", left: { kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["price"] } }, right: { kind: "param", key: "minAmount" } }, { minAmount });
+"
+`;
+
 exports[`where transformer > transforms (d) => d.employees.some((e) => e.name === 'Alice') 1`] = `
 "depts.where({ kind: "exists", rootParam: "d", relationKey: "employees", innerParam: "e", innerWhere: { kind: "binary", op: "===", left: { kind: "member", param: "e", path: ["name"] }, right: { kind: "const", value: "Alice" } } }, {});
 "

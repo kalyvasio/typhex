@@ -19,7 +19,7 @@ export const TABLE_ALIAS = "t0";
 
 /** Resolve the dialect implementation for the current driver, defaulting to SQLite. */
 export function getDialectOrThrow(state: QueryState<unknown>) {
-  return getDialect(state.qe.dialect ?? "sqlite");
+  return getDialect(state.qe?.dialect ?? "sqlite");
 }
 
 /** Derive the row parameter name used in IR expressions (e.g. "u", "c")

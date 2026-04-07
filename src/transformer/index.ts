@@ -9,7 +9,7 @@
  */
 
 import * as ts from "typescript";
-import { transformWhereCall } from "./where-transformer.js";
+import { transformWhereCall, transformHavingCall } from "./where-transformer.js";
 import { transformSelectCall } from "./select-transformer.js";
 import { transformOrderByCall } from "./orderby-transformer.js";
 import { transformJoinCall } from "./join-transformer.js";
@@ -27,7 +27,8 @@ function visit(
     const rewritten = transformSelectCall(visited, checker)
       || transformWhereCall(visited, checker)
       || transformOrderByCall(visited, checker)
-      || transformJoinCall(visited, checker);
+      || transformJoinCall(visited, checker)
+      || transformHavingCall(visited, checker);
     
     if (rewritten) return rewritten;
     return visited;

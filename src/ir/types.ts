@@ -11,7 +11,8 @@ export type IrNode =
   | IrParam
   | IrCall
   | IrIn
-  | IrExists;
+  | IrExists
+  | IrAggregate;
 
 export interface IrBinary {
   kind: "binary";
@@ -70,6 +71,17 @@ export interface IrCall {
   args: IrNode[];
 }
 
+export interface IrAggregate {
+  kind: "aggregate";
+  func: "SUM" | "AVG" | "MIN" | "MAX" | "COUNT"   // cross-dialect
+      | "GROUP_CONCAT"                              // SQLite
+      | "STRING_AGG" | "ARRAY_AGG" | "JSON_AGG";   // PostgreSQL
+  arg: IrNode | null; // null for COUNT(*)
+  alias?: string;
+  distinct?: boolean;
+  separator?: string; // for GROUP_CONCAT / STRING_AGG
+}
+
 export type OrderDirection = "asc" | "desc";
 
 export interface IrOrderBy {
@@ -103,6 +115,10 @@ export interface IrSelect {
   rest?: boolean;
   /** Relations to load (manyToOne, oneToOne, oneToMany, manyToMany). Loaded via separate queries. */
   relations?: IrSelectRelation[];
+  /** Aggregate columns in SELECT (SUM, AVG, MIN, MAX, COUNT). */
+  aggregates?: IrAggregate[];
+  /** GROUP BY entries: string[] = member path, number = positional column reference (GROUP BY 1). */
+  groupBy?: Array<string[] | number>;
 }
 
 export type JoinType = "inner" | "left" | "right" | "cross" | "full";
@@ -144,7 +160,8 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "param" ||
     k === "in" ||
     k === "call" ||
-    k === "exists"
+    k === "exists" ||
+    k === "aggregate"
   );
 }
 
@@ -188,6 +205,16 @@ export function isIrSelect(node: unknown): node is IrSelect {
         (x.orderBy === undefined || (Array.isArray(x.orderBy) && x.orderBy.every((o: unknown) =>
           typeof o === "object" && o !== null && "param" in o && "path" in o && "direction" in o)));
     })) return false;
+  }
+  if (o.aggregates !== undefined) {
+    if (!Array.isArray(o.aggregates)) return false;
+    if (!o.aggregates.every((a: unknown) => {
+      const x = a as Record<string, unknown>;
+      return x && x.kind === "aggregate" && typeof x.func === "string";
+    })) return false;
+  }
+  if (o.groupBy !== undefined) {
+    if (!Array.isArray(o.groupBy)) return false;
   }
   return true;
 }

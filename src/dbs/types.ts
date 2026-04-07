@@ -2,7 +2,7 @@
  * Multi-database types: Driver, Dialect, DbMigrations.
  */
 
-import type { IrNode, IrOrderBy, IrSelect } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
 import type { Connection, ExecuteResult, Driver } from "../driver/types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import type { RelationJoinInfo } from "../orm/relation-joins.js";
@@ -56,6 +56,10 @@ export interface CompileSelectOpts {
   limitNum: number | null;
   offsetNum: number | null;
   joinsSql?: string;
+  groupBy?: Array<string[] | number>;
+  compileOpts?: CompileOptions;
+  havingSql?: string;
+  havingParams?: unknown[];
 }
 
 /** Resolve __param sentinels to actual values. Shared by all dialects. */
@@ -79,13 +83,30 @@ export interface ExpandPlaceholdersResult {
   params: unknown[];
 }
 
+/** Resolved (non-optional) compile options, produced by resolveOpts(). */
+export type ResolvedOpts = {
+  tableAlias: string;
+  paramToAlias: Record<string, string>;
+  relationPathToAlias?: Record<string, string>;
+  oneToManyExists?: Record<string, { targetTable: string; fkColumn: string; mainPk: string; alias: string }>;
+};
+
 /** Dialect: SQL compilation and schema translation. */
 export interface DialectImpl {
   readonly name: Dialect;
   escapeIdentifier(name: string): string;
   placeholder(index: number): string;
-  /** Replace placeholders in SQL with resolved values; expand IN arrays. */
-  expandPlaceholders(sql: string, resolvedParams: unknown[]): ExpandPlaceholdersResult;
+  /** Replace placeholders in SQL with resolved values; expand IN arrays.
+   *  startIdx: first placeholder number to emit (Postgres only; SQLite ignores it). */
+  expandPlaceholders(sql: string, resolvedParams: unknown[], startIdx?: number): ExpandPlaceholdersResult;
+  compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string;
+  compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string;
+  compileAggregate?(
+    agg: IrAggregate,
+    opts?: ResolvedOpts,
+    compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
+    params?: unknown[]
+  ): string;
   compileWhere(node: IrNode | null, opts: CompileOptions): CompileResult;
   compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): string;
   compileSelectList(select: IrSelect | null, columns: string[], opts: CompileOptions): string;
