@@ -19,6 +19,13 @@ export interface CompileResult {
   returningRow?: boolean;
 }
 
+/** Appended to INSERT ... as ON CONFLICT ... (Postgres / SQLite 3.24+). */
+export interface OnConflictClause {
+  conflictColumns: string[];
+  action: "update" | "nothing";
+  updateColumns?: string[];
+}
+
 export interface CompileOptions {
   tableAlias?: string;
   paramToAlias?: Record<string, string>;
@@ -113,7 +120,20 @@ export interface DialectImpl {
   compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): string;
   compileSelectList(select: IrSelect | null, columns: string[], opts: CompileOptions): string;
   toColumnDef(def: ColumnDef): string;
-  compileInsertMany(table: string, columns: string[], rows: unknown[][], pk?: string): CompileResult;
+  compileInsert(
+    table: string,
+    columns: string[],
+    values: unknown[],
+    pk?: string,
+    onConflict?: OnConflictClause
+  ): CompileResult;
+  compileInsertMany(
+    table: string,
+    columns: string[],
+    rows: unknown[][],
+    pk?: string,
+    onConflict?: OnConflictClause
+  ): CompileResult;
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult;
   compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult;
   compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult;
