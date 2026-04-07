@@ -1,159 +1,190 @@
 /**
- * Transformer for .select() calls: converts object literal arrows to IrSelect.
+ * Transformer for .select() calls: converts object-literal arrows to IrSelect.
  */
 
 import * as ts from "typescript";
-import type { IrSelect, IrAggregate, IrNode } from "../ir/types.js";
+import type { IrSelect, IrAggregate } from "../ir/types.js";
 import {
   isTyphexType,
+  matchTyphexMethodCall,
   memberPath,
   unwrapObjectLiteral,
+  parseTsAggregateCall,
   irSelectToTsLiteral,
   irAggregateToTsLiteral,
 } from "./shared.js";
 
 const DEFAULT_ROW_PARAM = "u";
 
-const AGGREGATE_FUNCS = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG"]);
-
-/** Map JS stub function names to IR func names. */
-function toIrFuncName(rawName: string): string {
-  const lower = rawName.toLowerCase();
-  if (lower === "groupconcat") return "GROUP_CONCAT";
-  if (lower === "stringagg")   return "STRING_AGG";
-  if (lower === "arrayagg")    return "ARRAY_AGG";
-  if (lower === "jsonagg")     return "JSON_AGG";
-  return rawName.toUpperCase();
-}
+// ---------------------------------------------------------------------------
+// Parameter binding extraction — identifier or destructured pattern
+// ---------------------------------------------------------------------------
 
 interface ParamBindings {
   paramName: string;
+  /** For destructured params: maps local name → path segments into the row. */
   bindings: Map<string, string[]> | null;
+  /** Name of the ...rest identifier, if any. */
   restName: string | null;
 }
 
+const NO_BINDINGS: ParamBindings = {
+  paramName: DEFAULT_ROW_PARAM,
+  bindings: null,
+  restName: null,
+};
+
 /**
- * From the arrow's first parameter, derive:
- * - paramName for member access resolution (e.g. "u")
- * - bindings map for destructured patterns ({ id, name })
- * - restName for rest binding ({ id, ...rest })
+ * Inspect the arrow's first parameter: if it's a plain identifier, the row is
+ * bound to that name; if it's destructured (`{ id, name: n, ...rest }`), build
+ * a map from each local binding back to its source key path.
  */
 function getParamBindings(param: ts.BindingName | undefined): ParamBindings {
-  if (!param) return { paramName: DEFAULT_ROW_PARAM, bindings: null, restName: null };
-  if (ts.isIdentifier(param)) return { paramName: param.text, bindings: null, restName: null };
-  if (!ts.isObjectBindingPattern(param)) return { paramName: DEFAULT_ROW_PARAM, bindings: null, restName: null };
+  if (!param) return NO_BINDINGS;
+  if (ts.isIdentifier(param)) {
+    return { paramName: param.text, bindings: null, restName: null };
+  }
+  if (!ts.isObjectBindingPattern(param)) return NO_BINDINGS;
+  return extractDestructuredBindings(param);
+}
 
+/**
+ * Walk an object-destructuring pattern and build the local-name → source-key
+ * map plus the optional rest identifier. Aliased entries (`{ foo: bar }`)
+ * map `bar` back to `["foo"]`.
+ */
+function extractDestructuredBindings(
+  pattern: ts.ObjectBindingPattern
+): ParamBindings {
   const bindings = new Map<string, string[]>();
   let restName: string | null = null;
 
-  for (const el of param.elements) {
+  for (const el of pattern.elements) {
     if (el.dotDotDotToken) {
       if (ts.isIdentifier(el.name)) restName = el.name.text;
       continue;
     }
-    const boundName = ts.isIdentifier(el.name) ? el.name.text : null;
-    if (!boundName) continue;
-    const pathSegment =
-      el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : boundName;
-    bindings.set(boundName, [pathSegment]);
+    if (!ts.isIdentifier(el.name)) continue;
+
+    const localName = el.name.text;
+    // `{ foo: bar }` destructuring aliases — propertyName is the source key.
+    const sourceKey =
+      el.propertyName && ts.isIdentifier(el.propertyName)
+        ? el.propertyName.text
+        : localName;
+    bindings.set(localName, [sourceKey]);
   }
 
-  if (bindings.size === 0 && !restName) {
-    return { paramName: DEFAULT_ROW_PARAM, bindings: null, restName: null };
-  }
-  return { paramName: DEFAULT_ROW_PARAM, bindings: bindings.size > 0 ? bindings : null, restName };
-}
-
-/** Try to parse a CallExpression as an aggregate function call. */
-function tryParseAggregate(call: ts.CallExpression, paramName: string): IrAggregate | null {
-  const callee = call.expression;
-  if (!ts.isIdentifier(callee)) return null;
-  const rawName = callee.text;
-  const funcName = toIrFuncName(rawName);
-  if (!AGGREGATE_FUNCS.has(funcName)) return null;
-
-  const argExpr = call.arguments[0] as ts.Expression | undefined;
-  let arg: IrNode | null = null;
-  let isDistinct = false;
-
-  if (argExpr) {
-    // Detect distinct(field) wrapper: count(distinct(p.id))
-    if (ts.isCallExpression(argExpr)) {
-      const innerCallee = argExpr.expression;
-      if (ts.isIdentifier(innerCallee) && innerCallee.text === "distinct") {
-        const inner = argExpr.arguments[0] as ts.Expression | undefined;
-        if (inner && ts.isPropertyAccessExpression(inner)) {
-          const path = memberPath(inner, paramName);
-          if (path && path.length > 0) {
-            arg = { kind: "member", param: paramName, path };
-            isDistinct = true;
-          }
-        }
-      }
-    } else if (ts.isPropertyAccessExpression(argExpr)) {
-      const path = memberPath(argExpr, paramName);
-      if (path && path.length > 0) arg = { kind: "member", param: paramName, path };
-    }
-  }
-
-  // Extract separator for groupConcat(field, ", ") and stringAgg(field, sep)
-  let separator: string | undefined;
-  if (funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") {
-    const sepExpr = call.arguments[1] as ts.Expression | undefined;
-    if (sepExpr && ts.isStringLiteral(sepExpr)) separator = sepExpr.text;
-  }
-
-  const alias = rawName.toLowerCase();
+  if (bindings.size === 0 && !restName) return NO_BINDINGS;
   return {
-    kind: "aggregate",
-    func: funcName as IrAggregate["func"],
-    arg,
-    alias,
-    ...(isDistinct ? { distinct: true } : {}),
-    ...(separator !== undefined ? { separator } : {}),
+    paramName: DEFAULT_ROW_PARAM,
+    bindings: bindings.size > 0 ? bindings : null,
+    restName,
   };
 }
 
+// ---------------------------------------------------------------------------
+// Top-level arrow dispatch
+// ---------------------------------------------------------------------------
+
+/**
+ * Convert a `.select(arrow)` arrow into an IrSelect. Handles the shorthand
+ * bodies (`p => p`, `p => p.col`, `p => count(p.id)`) as well as object-
+ * literal bodies. Returns null for shapes that don't map cleanly.
+ */
 function arrowToIrSelect(
   fn: ts.ArrowFunction | ts.FunctionExpression,
-  { paramName, bindings, restName }: ParamBindings
+  pb: ParamBindings
 ): IrSelect | null {
-  // Handle single-expression body shorthands (non-block, non-object forms)
+  // Single-expression shorthand bodies: p => p, p => p.id, p => count(p.id)
   if (!ts.isBlock(fn.body)) {
-    const body = fn.body;
-
-    // p => p  →  select *
-    if (ts.isIdentifier(body) && body.text === paramName) {
-      return { param: paramName, paths: [], aliases: [], rest: true };
-    }
-
-    // p => p.id  or  p => p.author.name  →  single column
-    if (ts.isPropertyAccessExpression(body)) {
-      const path = memberPath(body, paramName);
-      if (path && path.length > 0) {
-        const alias = path[path.length - 1];
-        return { param: paramName, paths: [path], aliases: [alias] };
-      }
-    }
-
-    // p => count(p.id)  →  single aggregate
-    if (ts.isCallExpression(body)) {
-      const agg = tryParseAggregate(body, paramName);
-      if (agg) return { param: paramName, paths: [], aliases: [], aggregates: [agg] };
-    }
+    const shorthand = tryParseShorthandBody(fn.body, pb.paramName);
+    if (shorthand) return shorthand;
   }
 
-  let obj: ts.ObjectLiteralExpression | null;
-  if (ts.isBlock(fn.body)) {
-    if (fn.body.statements.length !== 1) return null;
-    const st = fn.body.statements[0];
-    if (!st || !ts.isReturnStatement(st) || !st.expression) return null;
-    obj = unwrapObjectLiteral(st.expression);
-  } else {
-    obj = unwrapObjectLiteral(fn.body);
-  }
+  const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
+  return parseSelectObjectLiteral(obj, pb);
+}
 
+/**
+ * Return the object literal produced by an arrow body — either directly
+ * (expression body) or via a single `return { ... }` statement in a block.
+ */
+function extractReturnedObjectLiteral(
+  fn: ts.ArrowFunction | ts.FunctionExpression
+): ts.ObjectLiteralExpression | null {
+  if (!ts.isBlock(fn.body)) return unwrapObjectLiteral(fn.body);
+
+  if (fn.body.statements.length !== 1) return null;
+  const st = fn.body.statements[0];
+  if (!st || !ts.isReturnStatement(st) || !st.expression) return null;
+  return unwrapObjectLiteral(st.expression);
+}
+
+// ---- Shorthand bodies -------------------------------------------------------
+
+/** Dispatch the single-expression shorthand body shapes to their handlers. */
+function tryParseShorthandBody(
+  body: ts.ConciseBody,
+  paramName: string
+): IrSelect | null {
+  // p => p  →  SELECT *
+  if (ts.isIdentifier(body) && body.text === paramName) {
+    return { param: paramName, paths: [], aliases: [], rest: true };
+  }
+
+  // p => p.id  or  p => p.author.name  →  single column
+  if (ts.isPropertyAccessExpression(body)) {
+    return parseShorthandMemberBody(body, paramName);
+  }
+
+  // p => count(p.id)  →  single aggregate
+  if (ts.isCallExpression(body)) {
+    return parseShorthandAggregateBody(body, paramName);
+  }
+
+  return null;
+}
+
+/** Handle `p => p.id` / `p => p.author.name` — emits a single-column IrSelect aliased to the leaf name. */
+function parseShorthandMemberBody(
+  body: ts.PropertyAccessExpression,
+  paramName: string
+): IrSelect | null {
+  const path = memberPath(body, paramName);
+  if (!path || path.length === 0) return null;
+  const alias = path[path.length - 1];
+  return { param: paramName, paths: [path], aliases: [alias] };
+}
+
+/** Handle `p => count(p.id)` — single aggregate aliased to the lowercased function name. */
+function parseShorthandAggregateBody(
+  body: ts.CallExpression,
+  paramName: string
+): IrSelect | null {
+  const parsed = parseTsAggregateCall(body, [paramName]);
+  if (!parsed) return null;
+  const alias = parsed.rawName.toLowerCase();
+  return {
+    param: paramName,
+    paths: [],
+    aliases: [],
+    aggregates: [{ ...parsed.ir, alias }],
+  };
+}
+
+// ---- Object literal body ---------------------------------------------------
+
+/**
+ * Walk each property of a `{ ... }` select body and accumulate the column
+ * paths, aliases, aggregates, and spread flag into an IrSelect. Returns
+ * null if any property fails to map.
+ */
+function parseSelectObjectLiteral(
+  obj: ts.ObjectLiteralExpression,
+  pb: ParamBindings
+): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
   const aggregates: IrAggregate[] = [];
@@ -161,57 +192,28 @@ function arrowToIrSelect(
 
   for (const prop of obj.properties) {
     if (ts.isSpreadAssignment(prop)) {
-      if (restName && ts.isIdentifier(prop.expression) && prop.expression.text === restName) {
-        rest = true;
-        continue;
-      }
-      if (ts.isIdentifier(prop.expression) && prop.expression.text === paramName) {
-        rest = true;
-        continue;
-      }
-      return null;
-    }
-
-    const name =
-      prop.name && ts.isIdentifier(prop.name) ? prop.name.text
-      : prop.name && ts.isComputedPropertyName(prop.name) ? null
-      : null;
-    if (!name) return null;
-
-    if (ts.isShorthandPropertyAssignment(prop)) {
-      const path = bindings?.get(name);
-      if (path) { paths.push(path); aliases.push(name); continue; }
-      return null;
-    }
-
-    if (!ts.isPropertyAssignment(prop)) return null;
-    const value = prop.initializer;
-
-    if (ts.isPropertyAccessExpression(value)) {
-      const path = memberPath(value, paramName);
-      if (!path || path.length === 0) return null;
-      paths.push(path);
-      aliases.push(name);
+      if (!isRestSpread(prop, pb)) return null;
+      rest = true;
       continue;
     }
 
-    if (bindings && ts.isIdentifier(value)) {
-      const path = bindings.get(value.text);
-      if (path) { paths.push(path); aliases.push(name); continue; }
-    }
+    const keyName = getPropertyKeyName(prop);
+    if (!keyName) return null;
 
-    // { total: count(p.id) }, { max: max(p.salary) }, etc.
-    if (ts.isCallExpression(value)) {
-      const agg = tryParseAggregate(value, paramName);
-      if (agg) { aggregates.push({ ...agg, alias: name }); continue; }
-    }
+    const handled = parseSelectObjectProperty(prop, keyName, pb);
+    if (!handled) return null;
 
-    return null;
+    if (handled.kind === "path") {
+      paths.push(handled.path);
+      aliases.push(keyName);
+    } else {
+      aggregates.push(handled.aggregate);
+    }
   }
 
   if (paths.length === 0 && aggregates.length === 0 && !rest) return null;
   return {
-    param: paramName,
+    param: pb.paramName,
     paths,
     aliases,
     ...(rest ? { rest: true } : {}),
@@ -219,22 +221,85 @@ function arrowToIrSelect(
   };
 }
 
+/** True if the spread refers to the whole row (or the ...rest binding of a destructured param). */
+function isRestSpread(
+  prop: ts.SpreadAssignment,
+  pb: ParamBindings
+): boolean {
+  if (!ts.isIdentifier(prop.expression)) return false;
+  const name = prop.expression.text;
+  return name === pb.restName || name === pb.paramName;
+}
+
+/** Return the property's key text — only plain identifier keys are supported. */
+function getPropertyKeyName(
+  prop: ts.ObjectLiteralElementLike
+): string | null {
+  const name = prop.name;
+  if (!name) return null;
+  if (ts.isIdentifier(name)) return name.text;
+  return null; // computed / literal-string / etc. not supported
+}
+
+type PropertyResult =
+  | { kind: "path"; path: string[] }
+  | { kind: "aggregate"; aggregate: IrAggregate };
+
+/**
+ * Classify a single select-object property as either a column path or an
+ * aggregate. Handles shorthand (`{ id }`), aliased members (`{ x: p.col }`),
+ * destructured locals, and aggregate calls.
+ */
+function parseSelectObjectProperty(
+  prop: ts.ObjectLiteralElementLike,
+  keyName: string,
+  pb: ParamBindings
+): PropertyResult | null {
+  // { id }  →  shorthand refers to destructured binding
+  if (ts.isShorthandPropertyAssignment(prop)) {
+    const path = pb.bindings?.get(keyName);
+    return path ? { kind: "path", path } : null;
+  }
+
+  if (!ts.isPropertyAssignment(prop)) return null;
+  const value = prop.initializer;
+
+  // { col: p.col }  or  { col: p.a.b }
+  if (ts.isPropertyAccessExpression(value)) {
+    const path = memberPath(value, pb.paramName);
+    if (!path || path.length === 0) return null;
+    return { kind: "path", path };
+  }
+
+  // { col: someDestructuredLocal }
+  if (pb.bindings && ts.isIdentifier(value)) {
+    const path = pb.bindings.get(value.text);
+    if (path) return { kind: "path", path };
+  }
+
+  // { total: count(p.id) } / { max: max(p.salary) } / …
+  if (ts.isCallExpression(value)) {
+    const parsed = parseTsAggregateCall(value, [pb.paramName]);
+    if (parsed) return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
+  }
+
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
+
+/** Rewrite a `.select(arrow)` call on a Typhex Table/QueryBuilder into an IrSelect literal. */
 export function transformSelectCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker
 ): ts.CallExpression | null {
-  const expr = call.expression;
-  if (!ts.isPropertyAccessExpression(expr)) return null;
-  if (expr.name.text !== "select") return null;
-  if (!isTyphexType(expr.expression, checker)) return null;
+  const arrow = matchTyphexMethodCall(call, "select", checker, isTyphexType);
+  if (!arrow) return null;
 
-  const args = [...call.arguments];
-  if (args.length === 0) return null;
-  const first = args[0];
-  if (!ts.isArrowFunction(first) && !ts.isFunctionExpression(first)) return null;
-
-  const pb = getParamBindings(first.parameters[0]?.name);
-  const irSelect = arrowToIrSelect(first, pb);
+  const pb = getParamBindings(arrow.parameters[0]?.name);
+  const irSelect = arrowToIrSelect(arrow, pb);
   if (!irSelect) return null;
 
   return ts.factory.updateCallExpression(

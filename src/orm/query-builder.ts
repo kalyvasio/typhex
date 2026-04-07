@@ -268,15 +268,24 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return arr[0];
   }
 
+  /** Compile the current WHERE IR into a SQL fragment and its resolved parameters. */
+  private compileWhereClause(
+    dialect: ReturnType<typeof getDialectOrThrow>,
+    opts: ReturnType<typeof getCompileOpts>
+  ): { whereSql: string; whereParams: unknown[] } {
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
+    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    return { whereSql, whereParams };
+  }
+
   /** Execute a COUNT query and return the total number of rows matching the current WHERE clause. */
   async count(): Promise<number> {
     const { tableName } = this.state;
     const qe = this.state.qe!;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
-    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
-    const { sql: whereSql, params } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    const { whereSql, whereParams: params } = this.compileWhereClause(dialect, opts);
     const joinsSql = buildJoinsSql(this.state, dialect);
     const { sql, params: runParams } = dialect.compileCount(tableName, whereSql, params, joinsSql || undefined);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
@@ -290,9 +299,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const qe = this.state.qe!;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
-    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
-    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    const { whereSql, whereParams } = this.compileWhereClause(dialect, opts);
     const { sql, params } = dialect.compileUpdate(tableName, set, columnNames, whereSql, whereParams);
     if (!sql) return 0;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
@@ -306,9 +313,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const qe = this.state.qe!;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
-    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
-    const { sql: whereSql, params } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    const { whereSql, whereParams: params } = this.compileWhereClause(dialect, opts);
     const { sql, params: runParams } = dialect.compileDelete(tableName, whereSql, params);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
     const result = await qe.run(sql, runParams);
@@ -322,9 +327,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const qe = this.state.qe!;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
-    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
-    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    const { whereSql, whereParams } = this.compileWhereClause(dialect, opts);
     const selectList = dialect.compileSelectList(selectForSql, columnNames, opts);
     const orderBySql = dialect.compileOrderBy(this.state.orderBy, opts);
     const joinsSql = buildJoinsSql(this.state, dialect);

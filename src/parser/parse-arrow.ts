@@ -1,7 +1,10 @@
 /**
  * Runtime parser: arrow function source → IR.
- * Supports a safe subset: comparisons, &&, ||, !, member access, literals, identifiers (params).
- * Also supports parsing select lambdas: (u) => ({ id: u.id, name: u.name }) → IrSelect.
+ *
+ * Supports a safe subset: comparisons, &&, ||, !, member access, literals,
+ * identifiers (params), allowed methods (startsWith/endsWith/includes),
+ * .some()/.every() subqueries, aggregates (SUM/AVG/MIN/MAX/COUNT/…), and
+ * select lambdas including nested relation sub-selects and query chains.
  */
 
 import * as acorn from "acorn";
@@ -17,77 +20,27 @@ import type {
   IrExists,
   IrSelect,
   IrSelectRelation,
-  IrOrderBy,
   IrAggregate,
 } from "../ir/types.js";
 
-type AcornNode = acorn.Node;
+// Acorn's typed AST is opaque; internally we access node properties defensively.
+type N = acorn.Node & Record<string, any>;
 
 // ---------------------------------------------------------------------------
-// Public API: parseArrowToGroupByPaths (groupBy lambdas)
+// Tables / constants
 // ---------------------------------------------------------------------------
-
-function resolveAcornMemberPath(node: any, paramName: string): string[] | null {
-  if (node.type === "Identifier" && node.name === paramName) return [];
-  if (node.type !== "MemberExpression") return null;
-  if (node.computed) return null;
-  const prop = node.property?.name;
-  if (!prop) return null;
-  const parent = resolveAcornMemberPath(node.object, paramName);
-  if (!parent) return null;
-  return [...parent, prop];
-}
-
-export function parseArrowToGroupByPaths(fn: (...args: any[]) => any): Array<string[] | number> {
-  const src = fn.toString();
-  const idx = src.indexOf("=>");
-  if (idx === -1) return [];
-  const body = src.slice(idx + 2).trim();
-  const paramName = src.slice(0, idx).replace(/[()]/g, "").trim() || "u";
-
-  try {
-    const ast = acorn.parse(body, { ecmaVersion: "latest" }) as any;
-    const expr = ast.body[0]?.expression;
-
-    // () => 1  or  o => 2  (single numeric literal → positional)
-    if (expr?.type === "Literal" && typeof expr.value === "number") {
-      return [expr.value];
-    }
-
-    // o => o.category  (single member path)
-    if (expr?.type === "MemberExpression") {
-      const path = resolveAcornMemberPath(expr, paramName);
-      if (path && path.length > 0) return [path];
-    }
-
-    // o => [o.category, o.status, 1]  (array of members and/or positionals)
-    if (expr?.type === "ArrayExpression") {
-      const entries: Array<string[] | number> = [];
-      for (const el of (expr.elements ?? [])) {
-        if (el.type === "Literal" && typeof el.value === "number") {
-          entries.push(el.value);
-        } else {
-          const path = resolveAcornMemberPath(el, paramName);
-          if (path && path.length > 0) entries.push(path);
-        }
-      }
-      return entries;
-    }
-  } catch {}
-  return [];
-}
 
 const AGGREGATE_FUNC_MAP: Record<string, string> = {
-  "groupconcat": "GROUP_CONCAT",
-  "stringagg":   "STRING_AGG",
-  "arrayagg":    "ARRAY_AGG",
-  "jsonagg":     "JSON_AGG",
+  groupconcat: "GROUP_CONCAT",
+  stringagg:   "STRING_AGG",
+  arrayagg:    "ARRAY_AGG",
+  jsonagg:     "JSON_AGG",
 };
-const AGGREGATE_IR_FUNCS = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT", "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG"]);
 
-function toIrFuncName(rawName: string): string {
-  return AGGREGATE_FUNC_MAP[rawName.toLowerCase()] ?? rawName.toUpperCase();
-}
+const AGGREGATE_IR_FUNCS = new Set([
+  "SUM", "AVG", "MIN", "MAX", "COUNT",
+  "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG",
+]);
 
 const BINARY_OPS: Record<string, IrBinary["op"] | undefined> = {
   "&&": "&&", "||": "||",
@@ -97,329 +50,62 @@ const BINARY_OPS: Record<string, IrBinary["op"] | undefined> = {
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
 
-export interface ParseOptions {
-  paramName?: string;
-  paramNames?: string[];
-  paramKeys?: string[];
+const RELATION_QUERY_METHODS = new Set([
+  "query", "where", "orderBy", "limit", "offset", "select",
+]);
+
+// ---------------------------------------------------------------------------
+// Small AST helpers
+// ---------------------------------------------------------------------------
+
+/** True if `node` is an Identifier; if `name` is given, also checks it matches. */
+function isIdent(node: N | null | undefined, name?: string): boolean {
+  if (!node || node.type !== "Identifier") return false;
+  return name === undefined || node.name === name;
+}
+
+/** True if `node` is any acorn Literal (string, number, boolean, null, regex). */
+function isLiteral(node: N | null | undefined): boolean {
+  return !!node && node.type === "Literal";
+}
+
+/** True if `node` is a string literal. */
+function isStringLiteral(node: N): boolean {
+  return node.type === "Literal" && typeof node.value === "string";
+}
+
+/** True if `node` is a numeric literal. */
+function isNumberLiteral(node: N): boolean {
+  return node.type === "Literal" && typeof node.value === "number";
+}
+
+/** Normalize a JS stub identifier (e.g. "groupConcat") to its canonical IR func name. */
+function toIrFuncName(rawName: string): string {
+  return AGGREGATE_FUNC_MAP[rawName.toLowerCase()] ?? rawName.toUpperCase();
+}
+
+/** Parse a single JS expression source string into an acorn AST node; throws on failure. */
+function parseExpressionSource(src: string): N {
+  const ast = acorn.parse(src, { ecmaVersion: "latest", locations: true }) as any;
+  const expr = ast.body?.[0]?.expression;
+  if (!expr) throw new Error("Expected expression: " + src);
+  return expr as N;
+}
+
+/** Slice the original source text covered by an acorn node using its start/end offsets. */
+function sliceNodeSource(node: N, source: string): string | null {
+  if (typeof node.start !== "number" || typeof node.end !== "number") return null;
+  return source.slice(node.start, node.end);
 }
 
 // ---------------------------------------------------------------------------
-// Public API: parseArrowToIr (where predicates)
+// Arrow source helpers (string-level)
 // ---------------------------------------------------------------------------
 
-export function parseArrowToIr(
-  fn: (...args: any[]) => any,
-  options: ParseOptions = {}
-): IrNode {
-  const src = fn.toString();
-  const body = extractArrowBody(src);
-  if (!body) throw new Error("Could not extract arrow body: " + src);
-
-  const expr = parseExpression(body);
-  const params =
-    options.paramNames ??
-    (options.paramName ? [options.paramName] : inferParamNames(src));
-
-  return walk(expr, params, options.paramKeys ?? []);
-}
-
-// ---------------------------------------------------------------------------
-// Public API: parseArrowToIrSelect (select lambdas)
-// ---------------------------------------------------------------------------
-
-export function parseArrowToIrSelect(
-  fn: (...args: any[]) => any
-): IrSelect | null {
-  const src = fn.toString();
-  const body = extractArrowBody(src);
-  if (!body) return null;
-
-  const paramName = inferParamNames(src)[0] ?? "u";
-
-  let exprSrc = body;
-  if (exprSrc.startsWith("(") && exprSrc.endsWith(")")) {
-    exprSrc = exprSrc.slice(1, -1);
-  }
-
-  const fullSrc = `(${exprSrc})`;
-  let ast: { body: Array<{ expression?: AcornNode }> };
-  try {
-    ast = acorn.parse(fullSrc, { ecmaVersion: "latest", locations: true }) as typeof ast;
-  } catch {
-    return null;
-  }
-
-  const expr = ast.body[0]?.expression;
-  if (!expr) return null;
-
-  const exprType = (expr as { type: string }).type;
-
-  // p => p  →  select *
-  if (exprType === "Identifier" && (expr as AcornNode & { name?: string }).name === paramName) {
-    return { param: paramName, paths: [], aliases: [], rest: true };
-  }
-
-  // p => p.id  or  p => p.author.name  →  single column
-  if (exprType === "MemberExpression") {
-    const resolved = resolveMemberFromAcorn(expr as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
-    if (!resolved || resolved.path.length === 0) return null;
-    const alias = resolved.path[resolved.path.length - 1];
-    return { param: paramName, paths: [resolved.path], aliases: [alias] };
-  }
-
-  // p => count(p.id) / groupConcat(p.name, ", ")  →  single aggregate
-  if (exprType === "CallExpression") {
-    const callNode = expr as AcornNode & { callee: AcornNode & { type: string; name?: string }; arguments: AcornNode[] };
-    const callee = callNode.callee;
-    if (callee.type === "Identifier") {
-      const rawName = callee.name ?? "";
-      const funcName = toIrFuncName(rawName);
-      if (AGGREGATE_IR_FUNCS.has(funcName)) {
-        const argNode = callNode.arguments?.[0];
-        let arg: IrNode | null = null;
-        let isDistinct = false;
-        if (argNode) {
-          const argN = argNode as { type: string; callee?: { type: string; name?: string }; arguments?: AcornNode[] };
-          if (argN.type === "CallExpression" && argN.callee?.type === "Identifier" && argN.callee.name === "distinct") {
-            isDistinct = true;
-            const inner = argN.arguments?.[0] ?? null;
-            if (inner) { try { arg = walk(inner as AcornNode, [paramName], []); } catch { arg = null; } }
-          } else {
-            try { arg = walk(argNode as AcornNode, [paramName], []); } catch { arg = null; }
-          }
-        }
-        let separator: string | undefined;
-        if ((funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") && (callNode.arguments?.length ?? 0) >= 2) {
-          const sepNode = callNode.arguments[1] as { type: string; value?: unknown };
-          if (sepNode.type === "Literal" && typeof sepNode.value === "string") separator = sepNode.value;
-        }
-        const alias = rawName.toLowerCase();
-        return { param: paramName, paths: [], aliases: [], aggregates: [{ kind: "aggregate", func: funcName as IrAggregate["func"], arg, alias, ...(isDistinct ? { distinct: true } : {}), ...(separator !== undefined ? { separator } : {}) }] };
-      }
-    }
-    return null;
-  }
-
-  if (exprType !== "ObjectExpression") return null;
-
-  const obj = expr as AcornNode & { properties: AcornNode[] };
-  const paths: string[][] = [];
-  const aliases: string[] = [];
-  const relations: IrSelectRelation[] = [];
-  let rest = false;
-  const aggregates: IrAggregate[] = [];
-
-  for (const raw of obj.properties) {
-    const prop = raw as AcornNode & {
-      type: string;
-      argument?: AcornNode & { name?: string };
-      key?: AcornNode & { name?: string; value?: string };
-      value?: AcornNode;
-      computed?: boolean;
-      shorthand?: boolean;
-    };
-    if (prop.type === "SpreadElement") {
-      if (prop.argument && (prop.argument as { type?: string; name?: string }).type === "Identifier" && (prop.argument as { name?: string }).name === paramName) {
-        rest = true;
-        continue;
-      }
-      return null;
-    }
-    if (prop.type !== "Property") return null;
-    if (prop.computed) return null;
-
-    const keyName = prop.key?.name ?? prop.key?.value;
-    if (typeof keyName !== "string") return null;
-
-    const val = prop.value;
-    if (!val) return null;
-
-    const valType = (val as { type: string }).type;
-
-    if (valType === "ObjectExpression") {
-      const sub = parseRelationSubSelect(val as AcornNode & { properties: AcornNode[] }, paramName);
-      if (!sub) return null;
-      relations.push({ name: sub.relation, outputKey: keyName, subPaths: sub.subPaths });
-    } else if (valType === "CallExpression") {
-      // Check if it's an aggregate function call (SUM, AVG, MIN, MAX, COUNT, groupConcat)
-      const callNode = val as AcornNode & { callee: AcornNode & { type: string; name?: string }; arguments: AcornNode[] };
-      const callee = callNode.callee as AcornNode & { type: string; name?: string };
-      if (callee.type === "Identifier") {
-        const rawName = callee.name ?? "";
-        const funcName = toIrFuncName(rawName);
-        if (AGGREGATE_IR_FUNCS.has(funcName)) {
-          const argNode = callNode.arguments?.[0];
-          let arg: IrNode | null = null;
-          let isDistinct = false;
-          if (argNode) {
-            const argN = argNode as { type: string; callee?: { type: string; name?: string }; arguments?: AcornNode[] };
-            if (argN.type === "CallExpression" && argN.callee?.type === "Identifier" && argN.callee.name === "distinct") {
-              isDistinct = true;
-              const inner = argN.arguments?.[0] ?? null;
-              if (inner) { try { arg = walk(inner as AcornNode, [paramName], []); } catch { arg = null; } }
-            } else {
-              try { arg = walk(argNode as AcornNode, [paramName], []); } catch { arg = null; }
-            }
-          }
-          let separator: string | undefined;
-          if ((funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") && (callNode.arguments?.length ?? 0) >= 2) {
-            const sepNode = callNode.arguments[1] as { type: string; value?: unknown };
-            if (sepNode.type === "Literal" && typeof sepNode.value === "string") separator = sepNode.value;
-          }
-          aggregates.push({ kind: "aggregate", func: funcName as IrAggregate["func"], arg, alias: keyName, ...(isDistinct ? { distinct: true } : {}), ...(separator !== undefined ? { separator } : {}) });
-          continue;
-        }
-      }
-      // Fall through to relation query chain handling
-      const rel = parseRelationQueryChain(val as AcornNode & { callee: AcornNode; arguments: AcornNode[] }, paramName, keyName, fullSrc);
-      if (!rel) return null;
-      relations.push(rel);
-    } else {
-      const resolved = resolveMemberFromAcorn(val as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
-      if (!resolved || resolved.path.length === 0) return null;
-      paths.push(resolved.path);
-      aliases.push(keyName);
-    }
-  }
-
-  if (paths.length === 0 && relations.length === 0 && !rest && aggregates.length === 0) return null;
-  const result: IrSelect = { param: paramName, paths, aliases };
-  if (relations.length > 0) result.relations = relations;
-  if (rest) result.rest = true;
-  if (aggregates.length > 0) result.aggregates = aggregates;
-  return result;
-}
-
-/** Parse nested object like { id: p.author.id, name: p.author.name } → relation "author" with subPaths. */
-function parseRelationSubSelect(
-  obj: { properties: AcornNode[] },
-  paramName: string
-): { relation: string; subPaths: string[][] } | null {
-  const subPaths: string[][] = [];
-  let relation: string | null = null;
-
-  for (const raw of obj.properties) {
-    const prop = raw as AcornNode & {
-      type: string;
-      key?: AcornNode & { name?: string };
-      value?: AcornNode;
-      computed?: boolean;
-    };
-    if (prop.type !== "Property" || prop.computed) return null;
-
-    const keyName = prop.key?.name ?? (prop.key as { value?: string })?.value;
-    if (typeof keyName !== "string") return null;
-
-    const val = prop.value;
-    if (!val) return null;
-
-    const resolved = resolveMemberFromAcorn(val as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [paramName]);
-    if (!resolved || resolved.path.length < 2) return null;
-
-    const rel = resolved.path[0];
-    const subPath = resolved.path.slice(1);
-    if (relation !== null && relation !== rel) return null;
-    relation = rel;
-    subPaths.push(subPath);
-  }
-
-  if (!relation || subPaths.length === 0) return null;
-  return { relation, subPaths };
-}
-
-const RELATION_QUERY_METHODS = new Set(["query", "where", "orderBy", "limit", "offset", "select"]);
-
-/** Parse relation.query().where().orderBy().limit().offset().select() chain → IrSelectRelation. */
-function parseRelationQueryChain(
-  node: AcornNode & { type: string; callee: AcornNode; arguments: AcornNode[] },
-  parentParamName: string,
-  outputKey: string,
-  source: string
-): IrSelectRelation | null {
-  const methods: { name: string; args: AcornNode[] }[] = [];
-  let current: AcornNode | null = node;
-
-  while (current && (current as { type: string }).type === "CallExpression") {
-    const call = current as AcornNode & { callee: AcornNode & { type: string; object?: AcornNode; property?: AcornNode & { name?: string } }; arguments: AcornNode[] };
-    const callee = call.callee as AcornNode & { type: string; object?: AcornNode; property?: AcornNode & { name?: string } };
-    if (callee.type !== "MemberExpression") return null;
-    const prop = callee.property as AcornNode & { name?: string };
-    const methodName = prop?.name;
-    if (!methodName || !RELATION_QUERY_METHODS.has(methodName)) return null;
-    methods.push({ name: methodName, args: call.arguments ?? [] });
-    current = (callee as { object?: AcornNode }).object ?? null;
-  }
-
-  if (!current || (current as { type: string }).type !== "MemberExpression") return null;
-  const resolved = resolveMemberFromAcorn(current as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, [parentParamName]);
-  if (!resolved || resolved.path.length !== 1) return null;
-
-  const relation = resolved.path[0];
-  const result: IrSelectRelation = { name: relation, outputKey };
-
-  for (const m of methods) {
-    if (m.name === "query") {
-      if (m.args.length !== 0) return null;
-    } else if (m.name === "where") {
-      if (m.args.length !== 1 || (m.args[0] as { type: string }).type !== "ArrowFunctionExpression") return null;
-      const arg = m.args[0] as AcornNode & { start?: number; end?: number };
-      const argSrc = typeof arg.start === "number" && typeof arg.end === "number" ? source.slice(arg.start, arg.end) : null;
-      if (!argSrc) return null;
-      try {
-        const whereFn = new Function("return " + argSrc)();
-        const paramNames = inferParamNames(argSrc);
-        const whereIr = parseArrowToIr(whereFn, { paramNames });
-        result.whereIr = whereIr;
-        result.whereParams = {};
-      } catch {
-        return null;
-      }
-    } else if (m.name === "orderBy") {
-      if (m.args.length < 1 || m.args.length > 2) return null;
-      const col = (m.args[0] as AcornNode & { type: string; value?: string }).type === "Literal"
-        ? String((m.args[0] as { value?: string }).value)
-        : null;
-      if (!col) return null;
-      const dir = m.args.length === 2 && (m.args[1] as { value?: string }).value === "desc" ? "desc" : "asc";
-      result.orderBy = result.orderBy ?? [];
-      result.orderBy.push({ param: "u", path: [col], direction: dir });
-    } else if (m.name === "limit") {
-      if (m.args.length !== 1) return null;
-      const n = (m.args[0] as AcornNode & { type: string; value?: number }).type === "Literal"
-        ? Number((m.args[0] as { value?: number }).value)
-        : NaN;
-      if (!Number.isFinite(n) || n < 0) return null;
-      result.limitNum = Math.floor(n);
-    } else if (m.name === "offset") {
-      if (m.args.length !== 1) return null;
-      const n = (m.args[0] as AcornNode & { type: string; value?: number }).type === "Literal"
-        ? Number((m.args[0] as { value?: number }).value)
-        : NaN;
-      if (!Number.isFinite(n) || n < 0) return null;
-      result.offsetNum = Math.floor(n);
-    } else if (m.name === "select") {
-      if (m.args.length !== 1 || (m.args[0] as { type: string }).type !== "ArrowFunctionExpression") return null;
-      const arg = m.args[0] as AcornNode & { start?: number; end?: number };
-      const argSrc = typeof arg.start === "number" && typeof arg.end === "number" ? source.slice(arg.start, arg.end) : null;
-      if (!argSrc) return null;
-      try {
-        const selectFn = new Function("return " + argSrc)();
-        const sub = parseArrowToIrSelect(selectFn);
-        if (!sub || !sub.paths.length) return null;
-        result.subPaths = sub.paths;
-      } catch {
-        return null;
-      }
-    }
-  }
-
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Arrow body extraction (supports expression and single-return block bodies)
-// ---------------------------------------------------------------------------
-
+/**
+ * Extract the body expression source from an arrow function's `toString()`.
+ * Supports expression bodies and single-`return` block bodies.
+ */
 function extractArrowBody(src: string): string | null {
   const idx = src.indexOf("=>");
   if (idx === -1) return null;
@@ -432,235 +118,914 @@ function extractArrowBody(src: string): string | null {
   return returnMatch[1].replace(/;\s*$/, "").trim();
 }
 
-// ---------------------------------------------------------------------------
-// Parameter name inference
-// ---------------------------------------------------------------------------
-
+/**
+ * Parse parameter names out of an arrow's source text, handling
+ * `async` prefixes, parenthesized lists, and inline type annotations.
+ * Returns `["u"]` if nothing can be inferred.
+ */
 function inferParamNames(src: string): string[] {
   const idx = src.indexOf("=>");
   if (idx === -1) return ["u"];
 
   let before = src.slice(0, idx).replace(/^\s*async\s+/, "").trim();
-
   if (before.startsWith("(") && before.endsWith(")")) {
     before = before.slice(1, -1);
   }
   if (!before) return ["u"];
 
-  const names = before.split(",").map(part => part.trim().split(/[\s:]/)[0]).filter(Boolean);
+  const names = before
+    .split(",")
+    .map(p => p.trim().split(/[\s:]/)[0])
+    .filter(Boolean);
   return names.length > 0 ? names : ["u"];
 }
 
 // ---------------------------------------------------------------------------
-// Expression parsing helper
+// Member-path resolution — `u.author.name` → { param: "u", path: [author, name] }
 // ---------------------------------------------------------------------------
 
-function parseExpression(exprSrc: string): AcornNode {
-  const ast = acorn.parse(exprSrc, { ecmaVersion: "latest" }) as {
-    body: Array<{ expression?: AcornNode }>;
-  };
-  const expr = ast.body[0]?.expression;
-  if (!expr) throw new Error("Expected expression: " + exprSrc);
-  return expr;
-}
-
-// ---------------------------------------------------------------------------
-// AST walker: acorn Node → IrNode
-// ---------------------------------------------------------------------------
-
-function walk(node: AcornNode, params: string[], paramKeys: string[]): IrNode {
-  const n = node as {
-    type: string;
-    left?: AcornNode;
-    right?: AcornNode;
-    argument?: AcornNode;
-    operand?: AcornNode;
-    object?: AcornNode;
-    property?: AcornNode;
-    computed?: boolean;
-    name?: string;
-    value?: unknown;
-    callee?: AcornNode;
-    arguments?: AcornNode[];
-    operator?: string;
-  };
-
-  switch (n.type) {
-    case "BinaryExpression":
-    case "LogicalExpression": {
-      if (n.operator === "in") {
-        return {
-          kind: "in",
-          left: walk(n.left!, params, paramKeys),
-          right: walk(n.right!, params, paramKeys),
-        } as IrIn;
-      }
-      const op = BINARY_OPS[n.operator!];
-      if (!op) throw new Error("Unsupported binary operator: " + n.operator);
-      return {
-        kind: "binary",
-        op,
-        left: walk(n.left!, params, paramKeys),
-        right: walk(n.right!, params, paramKeys),
-      } as IrBinary;
-    }
-
-    case "UnaryExpression": {
-      if (n.operator !== "!") throw new Error("Unsupported unary: " + n.operator);
-      const inner = walk(n.argument ?? n.operand!, params, paramKeys);
-      // Optimization: !(.in.) → negated IrIn instead of IrUnary(IrIn)
-      if (inner.kind === "in") return { ...inner, negated: !inner.negated };
-      return {
-        kind: "unary",
-        op: "!",
-        operand: inner,
-      } as IrUnary;
-    }
-
-    case "MemberExpression": {
-      const result = resolveMemberFromAcorn(n, params);
-      if (result) return { kind: "member", param: result.param, path: result.path } as IrMember;
-      throw new Error("Unsupported member expression");
-    }
-
-    case "Identifier": {
-      const name = n.name ?? "";
-      if (params.includes(name)) return { kind: "member", param: name, path: [] } as IrMember;
-      if (paramKeys.includes(name)) return { kind: "param", key: name } as IrParam;
-      throw new Error("Unknown identifier (not param or entity): " + name);
-    }
-
-    case "Literal":
-      return { kind: "const", value: n.value } as IrConst;
-
-    case "CallExpression": {
-      const callee = n.callee as {
-        type: string;
-        object?: AcornNode;
-        property?: { name?: string };
-        name?: string;
-      };
-
-      // Detect aggregate functions: SUM(expr), AVG(expr), MIN(expr), MAX(expr), COUNT(expr), groupConcat/stringAgg/arrayAgg/jsonAgg
-      if (callee.type === "Identifier") {
-        const rawName = callee.name ?? "";
-        const funcName = toIrFuncName(rawName);
-        if (AGGREGATE_IR_FUNCS.has(funcName)) {
-          const argNode = n.arguments?.length ? n.arguments[0] : null;
-          let arg: IrNode | null = null;
-          let isDistinct = false;
-
-          if (argNode) {
-            const argN = argNode as { type: string; callee?: { type: string; name?: string }; arguments?: AcornNode[] };
-            // Detect distinct(field) wrapper: count(distinct(p.id))
-            if (argN.type === "CallExpression" && argN.callee?.type === "Identifier" && argN.callee.name === "distinct") {
-              const inner = argN.arguments?.[0] ?? null;
-              if (inner) {
-                try {
-                  arg = walk(inner as AcornNode, params, paramKeys);
-                  isDistinct = true;
-                } catch {
-                  throw new Error(`Unsupported DISTINCT aggregate expression in ${rawName}(): could not parse distinct(...) argument`);
-                }
-              } else {
-                throw new Error(`Unsupported DISTINCT aggregate expression in ${rawName}(): missing inner argument`);
-              }
-            } else {
-              try { arg = walk(argNode as AcornNode, params, paramKeys); } catch { arg = null; }
-            }
-          }
-
-          // Extract separator for GROUP_CONCAT / STRING_AGG
-          let separator: string | undefined;
-          if ((funcName === "GROUP_CONCAT" || funcName === "STRING_AGG") && (n.arguments?.length ?? 0) >= 2) {
-            const sepNode = n.arguments![1] as { type: string; value?: unknown };
-            if (sepNode.type === "Literal" && typeof sepNode.value === "string") separator = sepNode.value;
-          }
-
-          return {
-            kind: "aggregate",
-            func: funcName as IrAggregate["func"],
-            arg,
-            ...(isDistinct ? { distinct: true } : {}),
-            ...(separator !== undefined ? { separator } : {}),
-          } as IrAggregate;
-        }
-      }
-
-      if (callee.type !== "MemberExpression") throw new Error("Unsupported call expression");
-      const method = callee.property?.name;
-      if ((method === "some" || method === "every") && n.arguments?.length === 1) {
-        const receiverResolved = resolveMemberFromAcorn(callee.object as AcornNode & { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string }, params);
-        if (receiverResolved && receiverResolved.path.length >= 1) {
-          const arg = n.arguments[0] as AcornNode & { type: string; params?: AcornNode[]; body?: AcornNode };
-          if (arg.type === "ArrowFunctionExpression" || arg.type === "FunctionExpression") {
-            const innerParam = (arg.params?.[0] as AcornNode & { name?: string })?.name ?? "e";
-            const innerBody = arg.body as AcornNode & { type: string; body?: AcornNode[] };
-            let innerExpr: AcornNode;
-            if (innerBody?.type === "BlockStatement" && innerBody.body?.[0]) {
-              const ret = innerBody.body[0] as { expression?: AcornNode };
-              if (!ret.expression) throw new Error(`Unsupported .${method}() callback: need return`);
-              innerExpr = ret.expression;
-            } else {
-              innerExpr = innerBody;
-            }
-            if (!innerExpr) throw new Error(`Unsupported .${method}() callback body`);
-            const innerWhere = walk(innerExpr, [innerParam], paramKeys);
-            return {
-              kind: "exists",
-              ...(method === "every" ? { negated: true } : {}),
-              rootParam: receiverResolved.param,
-              relationKey: receiverResolved.path[0],
-              innerParam,
-              innerWhere,
-            } as IrExists;
-          }
-        }
-      }
-      if (!method || !ALLOWED_METHODS.has(method))
-        throw new Error("Unsupported method: " + method);
-      return {
-        kind: "call",
-        method,
-        receiver: walk(callee.object!, params, paramKeys),
-        args: (n.arguments ?? []).map((a) => walk(a, params, paramKeys)),
-      } as IrCall;
-    }
-
-    case "ArrayExpression": {
-      const elements = (n as AcornNode & { elements: AcornNode[] }).elements ?? [];
-      const arr = elements.map((e) => {
-        if (!e || (e as { type: string }).type === "SpreadElement")
-          throw new Error("Unsupported array element");
-        const ir = walk(e, params, paramKeys);
-        if (ir.kind !== "const") throw new Error("IN array must contain literals");
-        return ir.value;
-      });
-      return { kind: "const", value: arr } as IrConst;
-    }
-
-    default:
-      throw new Error("Unsupported node type: " + (n as { type: string }).type);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Acorn member path resolution
-// ---------------------------------------------------------------------------
-
-function resolveMemberFromAcorn(
-  node: { type: string; object?: AcornNode; property?: AcornNode; computed?: boolean; name?: string },
+/**
+ * Walk a MemberExpression chain rooted at one of `params` and return the
+ * parameter name and the property path. Returns null if the chain isn't
+ * rooted at a known parameter or uses computed/non-identifier accesses.
+ */
+function resolveMemberPath(
+  node: N,
   params: string[]
 ): { param: string; path: string[] } | null {
   if (node.type === "Identifier" && params.includes(node.name ?? "")) {
-    return { param: node.name!, path: [] };
+    return { param: node.name, path: [] };
   }
-  if (node.type !== "MemberExpression") return null;
-  const prop = node.property as AcornNode & { name?: string };
-  if (node.computed || !prop || prop.type !== "Identifier") return null;
+  if (node.type !== "MemberExpression" || node.computed) return null;
 
-  const obj = node.object! as AcornNode & { type: string; name?: string; object?: AcornNode; property?: AcornNode; computed?: boolean };
-  const parent = resolveMemberFromAcorn(obj, params);
+  const prop = node.property as N;
+  if (!prop || prop.type !== "Identifier") return null;
+
+  const parent = resolveMemberPath(node.object as N, params);
   if (!parent) return null;
-  return { param: parent.param, path: [...parent.path, prop.name!] };
+  return { param: parent.param, path: [...parent.path, prop.name] };
+}
+
+/** Same as resolveMemberPath but constrained to a single parameter name. */
+function resolvePathFromParam(node: N, paramName: string): string[] | null {
+  const resolved = resolveMemberPath(node, [paramName]);
+  return resolved ? resolved.path : null;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: parseArrowToGroupByPaths — groupBy lambdas
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a `.groupBy(...)` arrow into an array of member paths and/or
+ * positional column references.
+ *
+ * Supported shapes:
+ * - `o => o.category`              → `[["category"]]`
+ * - `o => 1`                       → `[1]` (positional)
+ * - `o => [o.a, o.b, 2]`           → `[["a"], ["b"], 2]`
+ *
+ * Returns an empty array for unrecognized shapes.
+ */
+export function parseArrowToGroupByPaths(
+  fn: (...args: any[]) => any
+): Array<string[] | number> {
+  const src = fn.toString();
+  const idx = src.indexOf("=>");
+  if (idx === -1) return [];
+
+  const body = src.slice(idx + 2).trim();
+  const paramName = src.slice(0, idx).replace(/[()]/g, "").trim() || "u";
+
+  let expr: N;
+  try {
+    expr = parseExpressionSource(body);
+  } catch {
+    return [];
+  }
+
+  return extractGroupByEntries(expr, paramName);
+}
+
+/** Dispatch groupBy body expression to the right extractor for its shape. */
+function extractGroupByEntries(
+  expr: N,
+  paramName: string
+): Array<string[] | number> {
+  // o => 1 — positional column reference
+  if (isNumberLiteral(expr)) return [expr.value as number];
+
+  // o => o.category — single member path
+  if (expr.type === "MemberExpression") {
+    const path = resolvePathFromParam(expr, paramName);
+    return path && path.length > 0 ? [path] : [];
+  }
+
+  // o => [o.category, o.status, 1] — mix of member paths and positionals
+  if (expr.type === "ArrayExpression") {
+    return collectGroupByArrayElements(expr.elements ?? [], paramName);
+  }
+
+  return [];
+}
+
+/**
+ * Collect member paths and positional literals from an ArrayExpression body.
+ * Elements that don't match either shape are silently skipped.
+ */
+function collectGroupByArrayElements(
+  elements: N[],
+  paramName: string
+): Array<string[] | number> {
+  const entries: Array<string[] | number> = [];
+  for (const el of elements) {
+    if (!el) continue;
+    if (isNumberLiteral(el)) {
+      entries.push(el.value as number);
+      continue;
+    }
+    const path = resolvePathFromParam(el, paramName);
+    if (path && path.length > 0) entries.push(path);
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: parseArrowToIr — where predicates
+// ---------------------------------------------------------------------------
+
+export interface ParseOptions {
+  paramName?: string;
+  paramNames?: string[];
+  paramKeys?: string[];
+}
+
+/**
+ * Parse a `.where()` / `.having()` arrow predicate into an IR tree.
+ * Throws on unsupported syntax — callers typically fall back to evaluating
+ * the arrow at runtime if parsing fails.
+ */
+export function parseArrowToIr(
+  fn: (...args: any[]) => any,
+  options: ParseOptions = {}
+): IrNode {
+  const src = fn.toString();
+  const body = extractArrowBody(src);
+  if (!body) throw new Error("Could not extract arrow body: " + src);
+
+  const expr = parseExpressionSource(body);
+  const params = resolveParamsFromOptions(src, options);
+
+  return walk(expr, params, options.paramKeys ?? []);
+}
+
+/** Pick the effective parameter names from explicit options or inference. */
+function resolveParamsFromOptions(src: string, options: ParseOptions): string[] {
+  if (options.paramNames) return options.paramNames;
+  if (options.paramName) return [options.paramName];
+  return inferParamNames(src);
+}
+
+// ---------------------------------------------------------------------------
+// AST walker: acorn node → IrNode (dispatch + one handler per node kind)
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively convert an acorn expression node into an IR node.
+ * Dispatches to a per-kind handler; throws on unsupported shapes.
+ */
+function walk(node: N, params: string[], paramKeys: string[]): IrNode {
+  switch (node.type) {
+    case "BinaryExpression":
+    case "LogicalExpression":
+      return walkBinaryLike(node, params, paramKeys);
+
+    case "UnaryExpression":
+      return walkUnary(node, params, paramKeys);
+
+    case "MemberExpression":
+      return walkMember(node, params);
+
+    case "Identifier":
+      return walkIdentifier(node, params, paramKeys);
+
+    case "Literal":
+      return { kind: "const", value: node.value } as IrConst;
+
+    case "CallExpression":
+      return walkCall(node, params, paramKeys);
+
+    case "ArrayExpression":
+      return walkArrayLiteral(node, params, paramKeys);
+
+    default:
+      throw new Error("Unsupported node type: " + node.type);
+  }
+}
+
+/** Handle BinaryExpression / LogicalExpression — includes `in` → IrIn. */
+function walkBinaryLike(node: N, params: string[], paramKeys: string[]): IrNode {
+  const left  = walk(node.left as N,  params, paramKeys);
+  const right = walk(node.right as N, params, paramKeys);
+
+  if (node.operator === "in") {
+    return { kind: "in", left, right } as IrIn;
+  }
+
+  const op = BINARY_OPS[node.operator];
+  if (!op) throw new Error("Unsupported binary operator: " + node.operator);
+  return { kind: "binary", op, left, right } as IrBinary;
+}
+
+/** Handle `!expr` — only logical-not is supported; collapses `!(x in y)`. */
+function walkUnary(node: N, params: string[], paramKeys: string[]): IrNode {
+  if (node.operator !== "!") throw new Error("Unsupported unary: " + node.operator);
+
+  const inner = walk((node.argument ?? node.operand) as N, params, paramKeys);
+
+  // Optimization: !(x in arr) → flip the IrIn's negated flag rather than
+  // wrapping with an IrUnary. The query layer can then emit NOT IN directly.
+  if (inner.kind === "in") return { ...inner, negated: !inner.negated };
+
+  return { kind: "unary", op: "!", operand: inner } as IrUnary;
+}
+
+/** Handle a MemberExpression — resolves to IrMember or throws. */
+function walkMember(node: N, params: string[]): IrMember {
+  const resolved = resolveMemberPath(node, params);
+  if (!resolved) throw new Error("Unsupported member expression");
+  return { kind: "member", param: resolved.param, path: resolved.path };
+}
+
+/** Handle a bare identifier — either a parameter, a closure param key, or an error. */
+function walkIdentifier(node: N, params: string[], paramKeys: string[]): IrNode {
+  const name = node.name ?? "";
+  if (params.includes(name))    return { kind: "member", param: name, path: [] } as IrMember;
+  if (paramKeys.includes(name)) return { kind: "param",  key: name } as IrParam;
+  throw new Error("Unknown identifier (not param or entity): " + name);
+}
+
+/** Handle `[a, b, c]` — allowed only for IN right-hand-sides, contents must be constant. */
+function walkArrayLiteral(node: N, params: string[], paramKeys: string[]): IrConst {
+  const elements = (node.elements ?? []) as N[];
+  const values = elements.map((e) => {
+    if (!e || e.type === "SpreadElement") throw new Error("Unsupported array element");
+    const ir = walk(e, params, paramKeys);
+    if (ir.kind !== "const") throw new Error("IN array must contain literals");
+    return (ir as IrConst).value;
+  });
+  return { kind: "const", value: values };
+}
+
+// ---- CallExpression dispatch -----------------------------------------------
+
+/**
+ * Handle `CallExpression` nodes. Identifier callees must be aggregate
+ * functions; member callees may be `.some()/.every()` subqueries or one of
+ * the allowed string methods. Throws on anything else.
+ */
+function walkCall(node: N, params: string[], paramKeys: string[]): IrNode {
+  const callee = node.callee as N;
+
+  // Identifier callee: only aggregates (SUM, COUNT, groupConcat, …) allowed.
+  if (callee.type === "Identifier") {
+    const aggregate = tryParseAggregate(node, params, paramKeys, { strictDistinct: true });
+    if (aggregate) return aggregate.ir;
+    throw new Error("Unsupported call expression");
+  }
+
+  if (callee.type !== "MemberExpression") {
+    throw new Error("Unsupported call expression");
+  }
+
+  const method = (callee.property as N)?.name as string | undefined;
+
+  // Subqueries: relation.some(...) / .every(...)
+  const exists = tryParseSomeEvery(node, method, params, paramKeys);
+  if (exists) return exists;
+
+  // Allowed string methods: startsWith / endsWith / includes
+  if (!method || !ALLOWED_METHODS.has(method)) {
+    throw new Error("Unsupported method: " + method);
+  }
+  return {
+    kind: "call",
+    method,
+    receiver: walk(callee.object as N, params, paramKeys),
+    args: ((node.arguments ?? []) as N[]).map(a => walk(a, params, paramKeys)),
+  } as IrCall;
+}
+
+// ---- .some() / .every() ----------------------------------------------------
+
+/**
+ * Parse a relation-collection `.some(cb)` or `.every(cb)` call into an
+ * `IrExists` subquery. `.every` is represented as a negated exists.
+ * Returns null when the shape isn't a subquery call.
+ */
+function tryParseSomeEvery(
+  node: N,
+  method: string | undefined,
+  params: string[],
+  paramKeys: string[]
+): IrExists | null {
+  if (method !== "some" && method !== "every") return null;
+
+  const args = (node.arguments ?? []) as N[];
+  if (args.length !== 1) return null;
+
+  const callee = node.callee as N;
+  const receiver = resolveMemberPath(callee.object as N, params);
+  if (!receiver || receiver.path.length < 1) return null;
+
+  const cb = args[0];
+  if (cb.type !== "ArrowFunctionExpression" && cb.type !== "FunctionExpression") return null;
+
+  const innerParam = ((cb.params?.[0] as N)?.name as string) ?? "e";
+  const innerExpr = extractCallbackExpression(cb.body as N, method);
+  const innerWhere = walk(innerExpr, [innerParam], paramKeys);
+
+  return {
+    kind: "exists",
+    ...(method === "every" ? { negated: true } : {}),
+    rootParam: receiver.param,
+    relationKey: receiver.path[0],
+    innerParam,
+    innerWhere,
+  } as IrExists;
+}
+
+/**
+ * Extract the inner expression from a `.some()/.every()` callback body.
+ * Supports expression bodies and block bodies whose first statement exposes
+ * an `.expression` field. Throws on other shapes.
+ */
+function extractCallbackExpression(body: N, method: string): N {
+  if (body?.type === "BlockStatement") {
+    const first = (body.body as N[])?.[0];
+    const expr = first?.expression as N | undefined;
+    if (!expr) throw new Error(`Unsupported .${method}() callback: need return`);
+    return expr;
+  }
+  if (!body) throw new Error(`Unsupported .${method}() callback body`);
+  return body;
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate call parsing — shared by walk() and select-lambda parsing
+// ---------------------------------------------------------------------------
+
+interface AggregateParseResult {
+  ir: IrAggregate;       // no alias set — caller assigns it
+  rawName: string;       // original identifier text, e.g. "count" or "groupConcat"
+}
+
+/**
+ * Parse SUM/AVG/MIN/MAX/COUNT/groupConcat/stringAgg/… calls.
+ * Returns null if the callee is not a recognized aggregate identifier.
+ *
+ * When `strictDistinct` is true, malformed `distinct(...)` wrappers throw.
+ * When false (select-lambda contexts), they are swallowed so the caller can
+ * fall through to other parsing strategies (e.g. relation query chains).
+ */
+function tryParseAggregate(
+  callNode: N,
+  params: string[],
+  paramKeys: string[],
+  opts: { strictDistinct: boolean }
+): AggregateParseResult | null {
+  const callee = callNode.callee as N;
+  if (!callee || callee.type !== "Identifier") return null;
+
+  const rawName = (callee.name as string) ?? "";
+  const funcName = toIrFuncName(rawName);
+  if (!AGGREGATE_IR_FUNCS.has(funcName)) return null;
+
+  const args = (callNode.arguments ?? []) as N[];
+  const { arg, distinct } = parseAggregateArg(args[0] ?? null, params, paramKeys, rawName, opts);
+  const separator = parseAggregateSeparator(funcName, args);
+
+  const ir: IrAggregate = {
+    kind: "aggregate",
+    func: funcName as IrAggregate["func"],
+    arg,
+    ...(distinct ? { distinct: true } : {}),
+    ...(separator !== undefined ? { separator } : {}),
+  };
+  return { ir, rawName };
+}
+
+/**
+ * Parse an aggregate's first argument, handling the optional
+ * `distinct(...)` wrapper. Non-distinct argument errors are swallowed to a
+ * null arg (historic behavior); distinct errors respect `opts.strictDistinct`.
+ */
+function parseAggregateArg(
+  argNode: N | null,
+  params: string[],
+  paramKeys: string[],
+  rawName: string,
+  opts: { strictDistinct: boolean }
+): { arg: IrNode | null; distinct: boolean } {
+  if (!argNode) return { arg: null, distinct: false };
+
+  // distinct(expr) wrapper — e.g. count(distinct(p.id))
+  if (argNode.type === "CallExpression" && isIdent(argNode.callee as N, "distinct")) {
+    return parseDistinctWrapper(argNode, params, paramKeys, rawName, opts);
+  }
+
+  // Regular expression argument — swallow walk errors to null (matches legacy).
+  try {
+    return { arg: walk(argNode, params, paramKeys), distinct: false };
+  } catch {
+    return { arg: null, distinct: false };
+  }
+}
+
+/**
+ * Parse the inner expression of a `distinct(expr)` wrapper.
+ * In strict mode, missing/unparseable inner expressions throw; in lenient
+ * mode they return `{ arg: null, distinct: false }` so callers can fall back.
+ */
+function parseDistinctWrapper(
+  distinctCall: N,
+  params: string[],
+  paramKeys: string[],
+  rawName: string,
+  opts: { strictDistinct: boolean }
+): { arg: IrNode | null; distinct: boolean } {
+  const inner = ((distinctCall.arguments ?? []) as N[])[0];
+
+  if (!inner) {
+    if (opts.strictDistinct) {
+      throw new Error(
+        `Unsupported DISTINCT aggregate expression in ${rawName}(): missing inner argument`
+      );
+    }
+    return { arg: null, distinct: false };
+  }
+
+  try {
+    return { arg: walk(inner, params, paramKeys), distinct: true };
+  } catch {
+    if (opts.strictDistinct) {
+      throw new Error(
+        `Unsupported DISTINCT aggregate expression in ${rawName}(): could not parse distinct(...) argument`
+      );
+    }
+    return { arg: null, distinct: false };
+  }
+}
+
+/**
+ * Extract the string-literal separator argument of `GROUP_CONCAT` /
+ * `STRING_AGG`; returns undefined for other aggregates or missing separators.
+ */
+function parseAggregateSeparator(funcName: string, args: N[]): string | undefined {
+  if (funcName !== "GROUP_CONCAT" && funcName !== "STRING_AGG") return undefined;
+  if (args.length < 2) return undefined;
+  const sep = args[1];
+  return isStringLiteral(sep) ? (sep.value as string) : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Public API: parseArrowToIrSelect — select lambdas
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a `.select()` arrow into an `IrSelect` describing columns, nested
+ * relations, aggregates, and/or rest-spread. Returns null if the arrow's
+ * shape cannot be mapped onto the supported select subset.
+ */
+/**
+ * Strip outer parens from `({ … })` bodies and wrap in `(…)` so the source
+ * parses as an expression (object literal) rather than a block statement.
+ */
+function normalizeSelectBodySource(body: string): string {
+  const inner = body.startsWith("(") && body.endsWith(")") ? body.slice(1, -1) : body;
+  return `(${inner})`;
+}
+
+export function parseArrowToIrSelect(
+  fn: (...args: any[]) => any
+): IrSelect | null {
+  const src = fn.toString();
+  const body = extractArrowBody(src);
+  if (!body) return null;
+
+  const paramName = inferParamNames(src)[0] ?? "u";
+
+  // We keep `fullSrc` around so nested arrow callbacks (inside relation
+  // query chains) can be re-materialized via start/end offsets.
+  const fullSrc = normalizeSelectBodySource(body);
+
+  let expr: N;
+  try {
+    expr = parseExpressionSource(fullSrc);
+  } catch {
+    return null;
+  }
+
+  return parseTopLevelSelectExpression(expr, paramName, fullSrc);
+}
+
+/**
+ * Dispatch the top-level expression of a select arrow to the matching
+ * handler: bare param (SELECT *), single member, single aggregate, or
+ * object literal.
+ */
+function parseTopLevelSelectExpression(
+  expr: N,
+  paramName: string,
+  fullSrc: string
+): IrSelect | null {
+  // p => p  →  SELECT *
+  if (isIdent(expr, paramName)) {
+    return { param: paramName, paths: [], aliases: [], rest: true };
+  }
+
+  // p => p.id  →  single column
+  if (expr.type === "MemberExpression") {
+    return parseSingleColumnSelect(expr, paramName);
+  }
+
+  // p => count(p.id)  →  single aggregate
+  if (expr.type === "CallExpression") {
+    return parseSingleAggregateSelect(expr, paramName);
+  }
+
+  // p => ({ … })  →  object literal of paths / relations / aggregates
+  if (expr.type === "ObjectExpression") {
+    return parseSelectObjectLiteral(expr, paramName, fullSrc);
+  }
+
+  return null;
+}
+
+/** Build an IrSelect for `p => p.x.y` — single column aliased to the last path segment. */
+function parseSingleColumnSelect(expr: N, paramName: string): IrSelect | null {
+  const resolved = resolveMemberPath(expr, [paramName]);
+  if (!resolved || resolved.path.length === 0) return null;
+  const alias = resolved.path[resolved.path.length - 1];
+  return { param: paramName, paths: [resolved.path], aliases: [alias] };
+}
+
+/** Build an IrSelect for `p => count(p.id)` — single aggregate aliased to the lowercased func name. */
+function parseSingleAggregateSelect(callNode: N, paramName: string): IrSelect | null {
+  const parsed = safeParseAggregate(callNode, paramName);
+  if (!parsed) return null;
+
+  const alias = parsed.rawName.toLowerCase();
+  return {
+    param: paramName,
+    paths: [],
+    aliases: [],
+    aggregates: [{ ...parsed.ir, alias }],
+  };
+}
+
+/** Lenient (select-lambda) aggregate parser — never throws. */
+function safeParseAggregate(callNode: N, paramName: string): AggregateParseResult | null {
+  try {
+    return tryParseAggregate(callNode, [paramName], [], { strictDistinct: false });
+  } catch {
+    return null;
+  }
+}
+
+// ---- Select object literal --------------------------------------------------
+
+/**
+ * Parse an object-literal select body, collecting columns, relations,
+ * aggregates, and rest-spread markers into a single `IrSelect`.
+ */
+function parseSelectObjectLiteral(
+  obj: N,
+  paramName: string,
+  fullSrc: string
+): IrSelect | null {
+  const paths: string[][] = [];
+  const aliases: string[] = [];
+  const relations: IrSelectRelation[] = [];
+  const aggregates: IrAggregate[] = [];
+  let rest = false;
+
+  for (const raw of (obj.properties as N[])) {
+    if (raw.type === "SpreadElement") {
+      // Only `...p` rest is supported. Anything else = bail.
+      if (!isIdent(raw.argument as N, paramName)) return null;
+      rest = true;
+      continue;
+    }
+
+    if (raw.type !== "Property" || raw.computed) return null;
+
+    const keyName = (raw.key as N)?.name ?? (raw.key as N)?.value;
+    if (typeof keyName !== "string") return null;
+
+    const value = raw.value as N | undefined;
+    if (!value) return null;
+
+    const handled = parseSelectProperty(value, keyName, paramName, fullSrc);
+    if (!handled) return null;
+
+    applySelectPropertyResult(handled, keyName, paths, aliases, relations, aggregates);
+  }
+
+  if (paths.length === 0 && relations.length === 0 && aggregates.length === 0 && !rest) {
+    return null;
+  }
+
+  const result: IrSelect = { param: paramName, paths, aliases };
+  if (relations.length  > 0) result.relations  = relations;
+  if (rest)                  result.rest       = true;
+  if (aggregates.length > 0) result.aggregates = aggregates;
+  return result;
+}
+
+type SelectPropertyResult =
+  | { kind: "path";      path: string[] }
+  | { kind: "relation";  relation: IrSelectRelation }
+  | { kind: "aggregate"; aggregate: IrAggregate };
+
+/**
+ * Classify a single `{ key: value }` entry in a select object literal as a
+ * path, a relation (nested object or query chain), or an aggregate.
+ */
+function parseSelectProperty(
+  value: N,
+  keyName: string,
+  paramName: string,
+  fullSrc: string
+): SelectPropertyResult | null {
+  // { author: { id: p.author.id, name: p.author.name } } → nested relation sub-select
+  if (value.type === "ObjectExpression") {
+    return parseNestedRelationProperty(value, keyName, paramName);
+  }
+
+  // { total: SUM(p.amount) }   — aggregate, OR
+  // { posts: p.author.query().where(…) } — relation query chain
+  if (value.type === "CallExpression") {
+    return parseCallSelectProperty(value, keyName, paramName, fullSrc);
+  }
+
+  // { name: p.name } / { authorName: p.author.name }
+  const resolved = resolveMemberPath(value, [paramName]);
+  if (!resolved || resolved.path.length === 0) return null;
+  return { kind: "path", path: resolved.path };
+}
+
+/**
+ * Parse a nested object literal property value as a relation sub-select
+ * (all values must be `paramName.<relation>.<field>`).
+ */
+function parseNestedRelationProperty(
+  value: N,
+  keyName: string,
+  paramName: string
+): SelectPropertyResult | null {
+  const sub = parseRelationSubSelect(value, paramName);
+  if (!sub) return null;
+  return {
+    kind: "relation",
+    relation: { name: sub.relation, outputKey: keyName, subPaths: sub.subPaths },
+  };
+}
+
+/**
+ * Parse a CallExpression property value — first try as an aggregate, then
+ * fall back to a relation query chain (`p.author.query().where(...)`).
+ */
+function parseCallSelectProperty(
+  value: N,
+  keyName: string,
+  paramName: string,
+  fullSrc: string
+): SelectPropertyResult | null {
+  const parsed = safeParseAggregate(value, paramName);
+  if (parsed) {
+    return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
+  }
+
+  const relation = parseRelationQueryChain(value, paramName, keyName, fullSrc);
+  if (!relation) return null;
+  return { kind: "relation", relation };
+}
+
+/** Push a parsed property result into the appropriate accumulator bucket. */
+function applySelectPropertyResult(
+  result: SelectPropertyResult,
+  keyName: string,
+  paths: string[][],
+  aliases: string[],
+  relations: IrSelectRelation[],
+  aggregates: IrAggregate[]
+): void {
+  switch (result.kind) {
+    case "path":
+      paths.push(result.path);
+      aliases.push(keyName);
+      return;
+    case "relation":
+      relations.push(result.relation);
+      return;
+    case "aggregate":
+      aggregates.push(result.aggregate);
+      return;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Nested relation sub-selects — { author: { id: p.author.id, name: p.author.name } }
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse a nested object literal like `{ id: p.author.id, name: p.author.name }`
+ * into `{ relation: "author", subPaths: [["id"], ["name"]] }`. All values
+ * must share the same root relation name; returns null otherwise.
+ */
+function parseRelationSubSelect(
+  obj: N,
+  paramName: string
+): { relation: string; subPaths: string[][] } | null {
+  const subPaths: string[][] = [];
+  let relation: string | null = null;
+
+  for (const raw of (obj.properties as N[])) {
+    if (raw.type !== "Property" || raw.computed) return null;
+
+    const keyName = (raw.key as N)?.name ?? (raw.key as N)?.value;
+    if (typeof keyName !== "string") return null;
+
+    const value = raw.value as N | undefined;
+    if (!value) return null;
+
+    const resolved = resolveMemberPath(value, [paramName]);
+    // Need at least two path components — first is the relation name,
+    // the rest is the column path inside the related entity.
+    if (!resolved || resolved.path.length < 2) return null;
+
+    const rel = resolved.path[0];
+    if (relation !== null && relation !== rel) return null;
+    relation = rel;
+    subPaths.push(resolved.path.slice(1));
+  }
+
+  if (!relation || subPaths.length === 0) return null;
+  return { relation, subPaths };
+}
+
+// ---------------------------------------------------------------------------
+// Relation query chains — relation.query().where(...).orderBy(...).limit(n)
+// ---------------------------------------------------------------------------
+
+interface ChainMethod {
+  name: string;
+  args: N[];
+}
+
+/**
+ * Parse a `p.<relation>.query().where(...).orderBy(...).limit(n)` style
+ * chain into an `IrSelectRelation` with attached sub-query options.
+ * Returns null for any unsupported shape.
+ */
+function parseRelationQueryChain(
+  node: N,
+  parentParamName: string,
+  outputKey: string,
+  source: string
+): IrSelectRelation | null {
+  const chain = collectChainMethods(node);
+  if (!chain) return null;
+
+  const headPath = resolveMemberPath(chain.head, [parentParamName]);
+  if (!headPath || headPath.path.length !== 1) return null;
+
+  const result: IrSelectRelation = { name: headPath.path[0], outputKey };
+
+  for (const method of chain.methods) {
+    if (!applyChainMethod(method, result, source)) return null;
+  }
+  return result;
+}
+
+/**
+ * Walk down a chain of `.method(...)` calls until we hit a non-call node
+ * (the "head" — should be a member expression referring to a relation).
+ * Returns the methods in outer→inner order.
+ */
+function collectChainMethods(node: N): { methods: ChainMethod[]; head: N } | null {
+  const methods: ChainMethod[] = [];
+  let current: N | null = node;
+
+  while (current && current.type === "CallExpression") {
+    const callee = current.callee as N;
+    if (!callee || callee.type !== "MemberExpression") return null;
+
+    const methodName = (callee.property as N)?.name as string | undefined;
+    if (!methodName || !RELATION_QUERY_METHODS.has(methodName)) return null;
+
+    methods.push({ name: methodName, args: (current.arguments ?? []) as N[] });
+    current = (callee.object as N) ?? null;
+  }
+
+  if (!current || current.type !== "MemberExpression") return null;
+  return { methods, head: current };
+}
+
+/** Dispatch a single chain method to its specific applier; returns false on error. */
+function applyChainMethod(
+  method: ChainMethod,
+  result: IrSelectRelation,
+  source: string
+): boolean {
+  switch (method.name) {
+    case "query":   return method.args.length === 0;
+    case "where":   return applyWhereMethod(method.args, result, source);
+    case "orderBy": return applyOrderByMethod(method.args, result);
+    case "limit":   return applyLimitOrOffsetMethod(method.args, result, "limit");
+    case "offset":  return applyLimitOrOffsetMethod(method.args, result, "offset");
+    case "select":  return applySelectMethod(method.args, result, source);
+    default:        return false;
+  }
+}
+
+/**
+ * Apply a `.where(arrow)` chain method: re-materialize the arrow source
+ * via offsets, eval it back to a function, and parse it via `parseArrowToIr`.
+ */
+function applyWhereMethod(args: N[], result: IrSelectRelation, source: string): boolean {
+  if (args.length !== 1 || args[0].type !== "ArrowFunctionExpression") return false;
+
+  const argSrc = sliceNodeSource(args[0], source);
+  if (!argSrc) return false;
+
+  try {
+    const whereFn = new Function("return " + argSrc)();
+    const paramNames = inferParamNames(argSrc);
+    result.whereIr = parseArrowToIr(whereFn, { paramNames });
+    result.whereParams = {};
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Apply an `.orderBy(column[, dir])` chain method. The column must be a
+ * literal (stringified) and the optional direction a string literal; defaults
+ * to ascending when direction is missing or not "desc".
+ */
+function applyOrderByMethod(args: N[], result: IrSelectRelation): boolean {
+  if (args.length < 1 || args.length > 2) return false;
+
+  const colNode = args[0];
+  if (!isLiteral(colNode)) return false;
+  const col = String(colNode.value);
+  if (!col) return false;
+
+  const dir = args.length === 2 && (args[1] as N).value === "desc" ? "desc" : "asc";
+  result.orderBy = result.orderBy ?? [];
+  result.orderBy.push({ param: "u", path: [col], direction: dir });
+  return true;
+}
+
+/** Apply `.limit(n)` or `.offset(n)` — both require a single finite non-negative literal. */
+function applyLimitOrOffsetMethod(
+  args: N[],
+  result: IrSelectRelation,
+  kind: "limit" | "offset"
+): boolean {
+  if (args.length !== 1) return false;
+
+  const node = args[0];
+  if (!isLiteral(node)) return false;
+
+  const n = Number(node.value);
+  if (!Number.isFinite(n) || n < 0) return false;
+
+  if (kind === "limit") result.limitNum  = Math.floor(n);
+  else                  result.offsetNum = Math.floor(n);
+  return true;
+}
+
+/**
+ * Apply a `.select(arrow)` chain method by reparsing the nested lambda via
+ * `parseArrowToIrSelect` and lifting its paths into the enclosing relation.
+ */
+function applySelectMethod(args: N[], result: IrSelectRelation, source: string): boolean {
+  if (args.length !== 1 || args[0].type !== "ArrowFunctionExpression") return false;
+
+  const argSrc = sliceNodeSource(args[0], source);
+  if (!argSrc) return false;
+
+  try {
+    const selectFn = new Function("return " + argSrc)();
+    const sub = parseArrowToIrSelect(selectFn);
+    if (!sub || !sub.paths.length) return false;
+    result.subPaths = sub.paths;
+    return true;
+  } catch {
+    return false;
+  }
 }

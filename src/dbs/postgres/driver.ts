@@ -94,18 +94,24 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
     void sql; // used in wrapError only
   }
 
+  async function runQuery(
+    queryable: { query(sql: string, params: unknown[]): Promise<pg.QueryResult> },
+    sql: string,
+    params: unknown[] = []
+  ): Promise<ExecuteResult> {
+    const bound = params.map(toBindable);
+    try {
+      const result = await queryable.query(sql, bound);
+      return toExecuteResult(result, sql);
+    } catch (e) {
+      wrapError(e, sql);
+    }
+  }
+
   function makeConnection(client: PoolClient): Connection {
     return {
       dialect: "postgres" as const,
-      async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
-        const bound = params.map(toBindable);
-        try {
-          const result = await client.query(sql, bound);
-          return toExecuteResult(result, sql);
-        } catch (e) {
-          wrapError(e, sql);
-        }
-      },
+      execute: (sql, params) => runQuery(client, sql, params),
       async release(): Promise<void> {
         client.release();
       },
@@ -115,15 +121,7 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
   return {
     dialect: "postgres",
 
-    async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
-      const bound = params.map(toBindable);
-      try {
-        const result = await pool.query(sql, bound);
-        return toExecuteResult(result, sql);
-      } catch (e) {
-        wrapError(e, sql);
-      }
-    },
+    execute: (sql, params) => runQuery(pool, sql, params),
 
     async connect(): Promise<Connection> {
       const client = await pool.connect();

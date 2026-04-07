@@ -142,19 +142,58 @@ export function compileGroupBy(
   }).join(", ");
 }
 
+type CompileNodeFn = (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string;
+
+function compileInNode(
+  node: IrNode & { kind: "in" },
+  opts: ResolvedOpts,
+  params: unknown[],
+  dialect: DialectImpl,
+  compileNode: CompileNodeFn
+): string {
+  const left = compileNode(node.left, opts, params);
+  const op = node.negated ? "NOT IN" : "IN";
+  if (node.right.kind === "const" && Array.isArray(node.right.value)) {
+    const list = node.right.value;
+    if (list.length === 0) return node.negated ? "1=1" : "1=0";
+    const placeholders = list.map(v => { params.push(v); return dialect.placeholder(params.length); });
+    return `${left} ${op} (${placeholders.join(", ")})`;
+  }
+  if (node.right.kind === "param") {
+    params.push({ __param: node.right.key });
+    return `${left} ${op} (${dialect.placeholder(params.length)})`;
+  }
+  throw new Error("IN right side must be const array or param");
+}
+
+function compileExistsNode(
+  node: IrNode & { kind: "exists" },
+  opts: ResolvedOpts,
+  params: unknown[],
+  dialect: DialectImpl,
+  compileNode: CompileNodeFn
+): string {
+  const info = opts.oneToManyExists?.[`${node.rootParam}.${node.relationKey}`];
+  if (!info) throw new Error(`No oneToManyExists info for ${node.rootParam}.${node.relationKey}`);
+  const innerOpts = { ...opts, paramToAlias: { ...opts.paramToAlias, [node.innerParam]: info.alias } };
+  const innerSql = compileNode(node.innerWhere, innerOpts, params);
+  const wrappedSql = node.negated ? `(NOT (${innerSql}))` : innerSql;
+  const existsSql = dialect.compileExists(info.targetTable, info.alias, info.fkColumn, opts.tableAlias, info.mainPk, wrappedSql);
+  return node.negated ? `(NOT ${existsSql})` : existsSql;
+}
+
 export function makeCompileNode(dialect: DialectImpl) {
   function compileNode(node: IrNode, opts: ResolvedOpts, params: unknown[]): string {
     switch (node.kind) {
       case "binary": {
-        const b = node;
-        const left = compileNode(b.left, opts, params);
-        const right = compileNode(b.right, opts, params);
+        const left = compileNode(node.left, opts, params);
+        const right = compileNode(node.right, opts, params);
         const op =
-          b.op === "==" || b.op === "===" ? "=" :
-          b.op === "!=" || b.op === "!==" ? "<>" :
-          b.op;
-        if (b.op === "&&") return `(${left} AND ${right})`;
-        if (b.op === "||") return `(${left} OR ${right})`;
+          node.op === "==" || node.op === "===" ? "=" :
+          node.op === "!=" || node.op === "!==" ? "<>" :
+          node.op;
+        if (node.op === "&&") return `(${left} AND ${right})`;
+        if (node.op === "||") return `(${left} OR ${right})`;
         return `(${left} ${op} ${right})`;
       }
       case "unary":
@@ -175,39 +214,17 @@ export function makeCompileNode(dialect: DialectImpl) {
       case "param":
         params.push({ __param: node.key });
         return dialect.placeholder(params.length);
-      case "in": {
-        const left = compileNode(node.left, opts, params);
-        const op = node.negated ? "NOT IN" : "IN";
-        if (node.right.kind === "const" && Array.isArray(node.right.value)) {
-          const list = node.right.value;
-          if (list.length === 0) return node.negated ? "1=1" : "1=0";
-          const placeholders = list.map(v => { params.push(v); return dialect.placeholder(params.length); });
-          return `${left} ${op} (${placeholders.join(", ")})`;
-        }
-        if (node.right.kind === "param") {
-          params.push({ __param: node.right.key });
-          return `${left} ${op} (${dialect.placeholder(params.length)})`;
-        }
-        throw new Error("IN right side must be const array or param");
-      }
-      case "exists": {
-        const ex = node;
-        const info = opts.oneToManyExists?.[`${ex.rootParam}.${ex.relationKey}`];
-        if (!info) throw new Error(`No oneToManyExists info for ${ex.rootParam}.${ex.relationKey}`);
-        const innerOpts = { ...opts, paramToAlias: { ...opts.paramToAlias, [ex.innerParam]: info.alias } };
-        const innerSql = compileNode(ex.innerWhere, innerOpts, params);
-        const wrappedSql = ex.negated ? `(NOT (${innerSql}))` : innerSql;
-        const existsSql = dialect.compileExists(info.targetTable, info.alias, info.fkColumn, opts.tableAlias, info.mainPk, wrappedSql);
-        return ex.negated ? `(NOT ${existsSql})` : existsSql;
-      }
+      case "in":
+        return compileInNode(node, opts, params, dialect, compileNode);
+      case "exists":
+        return compileExistsNode(node, opts, params, dialect, compileNode);
       case "call": {
         const receiver = compileNode(node.receiver, opts, params);
-        const method = node.method;
-        if (method === "startsWith" || method === "endsWith" || method === "includes") {
+        if (node.method === "startsWith" || node.method === "endsWith" || node.method === "includes") {
           const arg = compileNode(node.args[0], opts, params);
-          return dialect.compileLike(receiver, arg, method);
+          return dialect.compileLike(receiver, arg, node.method);
         }
-        throw new Error(`Unsupported method: ${method}`);
+        throw new Error(`Unsupported method: ${node.method}`);
       }
       case "aggregate":
         return dialect.compileAggregate?.(node as IrAggregate, opts, compileNode, params)
