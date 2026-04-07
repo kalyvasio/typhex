@@ -13,7 +13,7 @@ import type {
   ResolvedOpts,
   OnConflictClause,
 } from "../types.js";
-import type { RelationJoinInfo } from "../../orm/relation-joins.js";
+import type { RelationJoinInfo } from "../../orm/helpers/relations/relation-joins.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
   quoteId,
@@ -58,6 +58,13 @@ function appendOnConflict(
 
 export const sqliteDialect: DialectImpl = {
   name: "sqlite",
+  insertCapabilities: {
+    supportsReturning: true,
+    supportsSequences: false,
+  },
+  compileNextSequenceValues(): CompileResult {
+    throw new Error("SQLite does not support sequence allocation");
+  },
 
   escapeIdentifier(name: string): string {
     return '"' + String(name).replaceAll('"', '""') + '"';

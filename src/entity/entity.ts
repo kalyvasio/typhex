@@ -7,12 +7,13 @@ import type { Trx } from "../orm/trx.js";
 import type { QueryExecutor } from "../orm/db.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
-import {QueryBuilder, QueryState} from "../orm/query-builder.js";
+import { QueryBuilder, QueryState } from "../orm/query-builder.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
 import type { InferTable, InferInsert, Flatten, Materialized, MaterializeShape } from "./schema-inference.js";
-import type { RelationDef, RelationsMap, RelationQueryable, RelationQueryBuilder, ManyRelation } from "./relations.js";
+import type { JunctionOptions, RelationDef, RelationsMap, RelationQueryable, RelationQueryBuilder, ManyRelation } from "./relations.js";
+import { toArray } from "../utils.js";
 import type { TableDef, EntityBase } from "./types.js";
-import { getDefaultDb, registerEntity } from "./global-driver.js";
+import { getDefaultDb, getEntityByTableName, registerEntity } from "./global-driver.js";
 import { getActiveTrx } from "../orm/db.js";
 
 /** Loaded value for a relation (data only when E is a concrete entity class; when E is unknown or any, use queryable type so subclass declare can narrow). */
@@ -37,7 +38,11 @@ export type Row<TShape extends Record<string, unknown>, TRels extends RelationsM
   Flatten<MaterializeShape<TShape> & { [K in keyof TRels]: RelationLoadedValue<TRels[K]> }> & EntityBase;
 
 /** Canonical static entity contract used across entity/query/relation type layers. */
-export type AnyEntityClass = (new (...args: any[]) => any) & { table: TableDef<any, any> };
+export interface AnyEntityClass {
+  table: TableDef<Record<string, string>, RelationsMap>;
+  query<C extends AnyEntityClass>(this: C, executor?: QueryExecutor): QueryBuilder<C, EntityInstance<C>>;
+  transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T>;
+}
 
 /** Extract schema/relations from an entity class. */
 export type EntitySchema<E extends AnyEntityClass> = E["table"] extends TableDef<infer S, any> ? S : never;
@@ -119,15 +124,14 @@ function createTableDef<TTable extends string, TSchema extends Record<string, st
 }
 
 /** Entity class type: 3 params only (table, schema def, relations). Use .query() for insert, findById, where, etc. */
-export type EntityClass<
+export interface EntityClass<
   _TTable extends string,
   TSchema extends Record<string, string>,
   TRels extends RelationsMap = {},
-> = (new (data?: Partial<InferTable<TSchema>>) => Row<Materialized<TSchema>, TRels>) & {
+> extends AnyEntityClass {
+  new (data?: Partial<InferTable<TSchema>>): Row<Materialized<TSchema>, TRels>;
   table: TableDef<TSchema, TRels>;
-  query<C extends AnyEntityClass>(this: C, trx?: Trx): QueryBuilder<C, EntityInstance<C>>;
-  transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T>;
-};
+}
 
 /**
  * Define an entity. Schema keys and SQL-like type strings are inferred so that
@@ -206,6 +210,19 @@ export function Entity<
       return db.transaction(fn);
     }
 
+    static _registerJunctions(): void {
+      for (const rd of Object.values(rels)) {
+        if (rd._relType !== "many-to-many") continue;
+        const opts = rd._options as JunctionOptions;
+        if (getEntityByTableName(opts.junction)) continue;
+        const fkCols = toArray(opts.foreignKey);
+        const refCols = toArray(opts.referenceKey);
+        const junctionSchema: Record<string, string> = {};
+        for (const c of [...fkCols, ...refCols]) junctionSchema[c] = "integer not null";
+        Entity(opts.junction, junctionSchema);
+      }
+    }
+
     private static _resolveRelations(Ctor: any): RelationsMap {
       const classRels = Ctor.relations as RelationsMap | undefined;
       return classRels && Object.keys(classRels).length > 0 ? classRels : rels as RelationsMap;
@@ -216,6 +233,7 @@ export function Entity<
       const effectiveRels = EntityClassImpl._resolveRelations(Ctor);
       return new QueryBuilder({
         ...baseState(executor),
+        entity: Ctor as unknown as AnyEntityClass,
         relations: effectiveRels,
         async hydrate(row: Record<string, unknown>) {
           const inst = new Ctor(row);

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { fetchRelations } from "../../src/orm/relation-fetcher.js";
-import type { RelationFetchMetadata } from "../../src/orm/relation-context-builder.js";
+import { fetchRelations } from "../../src/orm/helpers/relations/relation-fetcher.js";
+import type { RelationFetchMetadata } from "../../src/orm/helpers/relations/relation-context-builder.js";
+import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 
 /** Builds a spy-able query builder chain whose toArray returns `rows`. */
 function makeChain(rows: Record<string, unknown>[]) {
@@ -178,11 +179,18 @@ describe("fetchRelations", () => {
     ];
     const tagRows = [{ id: 10, name: "ts" }, { id: 20, name: "js" }];
     const chain = makeChain(tagRows);
+    const junctionChain = makeChain(junctionRows);
     const qe = {
       dialect: "sqlite" as const,
       query: vi.fn().mockResolvedValue(junctionRows),
       run: vi.fn(),
     };
+
+    clearRegistry();
+    registerEntity({
+      table: { _table: "user_tags", _schema: { userId: "integer not null", tagId: "integer not null" } },
+      query: () => junctionChain,
+    } as any);
 
     const meta: RelationFetchMetadata = {
       relationType: "many-to-many",
@@ -200,7 +208,7 @@ describe("fetchRelations", () => {
     // parent 1 → 2 tags; parent 2 → 1 tag
     expect(map.get(JSON.stringify(1))).toHaveLength(2);
     expect(map.get(JSON.stringify(2))).toHaveLength(1);
-    // junction query used dialect escaping
-    expect(qe.query).toHaveBeenCalledTimes(1);
+    // junction was queried via the registered junction entity
+    expect(junctionChain.toArray).toHaveBeenCalledTimes(1);
   });
 });

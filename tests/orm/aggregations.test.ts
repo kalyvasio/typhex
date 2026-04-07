@@ -6,7 +6,7 @@ import type { IrSelect, IrAggregate } from "../../src/ir/types.js";
 import { isIrNode } from "../../src/ir/types.js";
 import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
 import { compileAggregate } from "../../src/dbs/shared-dialect.js";
-import { resolveSelectForSql } from "../../src/orm/relation-context-builder.js";
+import { resolveSelectForSql } from "../../src/orm/helpers/relations/relation-context-builder.js";
 
 const orderSchema = {
   id: "integer primary key autoincrement",
@@ -26,11 +26,11 @@ function createMockQe(dialect: "sqlite" | "postgres" = "sqlite"): QueryExecutor 
 }
 
 function newBuilder(qe: QueryExecutor, columnNames = ["id", "category", "price", "status"]): QueryBuilder<typeof OrderEntity> {
-  return new QueryBuilder<typeof OrderEntity>({
+  return new QueryBuilder<typeof OrderEntity, InstanceType<typeof OrderEntity>>({
     tableName: "orders",
     columnNames,
     qe,
-    pkColumn: "id",
+    pkColumns: ["id"],
     whereIr: null,
     whereParams: {},
     orderBy: [],

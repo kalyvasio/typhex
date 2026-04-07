@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
   buildRelationContext,
-} from "../../src/orm/relation-context-builder.js";
-import type { RelationFetchMetadata } from "../../src/orm/relation-context-builder.js";
-import { assembleJoined, assembleFetched } from "../../src/orm/relation-assembler.js";
+} from "../../src/orm/helpers/relations/relation-context-builder.js";
+import type { RelationFetchMetadata } from "../../src/orm/helpers/relations/relation-context-builder.js";
+import { assembleJoined, assembleFetched } from "../../src/orm/helpers/relations/relation-assembler.js";
 import type { IrSelect } from "../../src/ir/types.js";
 
 const mockRelations = {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildRelationJoins, buildRelationPathToAlias, buildOneToManyExists, getReusableJoinKeys } from "../../src/orm/relation-joins.js";
+import { buildRelationJoins, buildRelationPathToAlias, buildOneToManyExists, getReusableJoinKeys } from "../../src/orm/helpers/relations/relation-joins.js";
 import type { IrNode, IrOrderBy, IrSelect, JoinType } from "../../src/ir/types.js";
 import type { RelationsMap } from "../../src/entity/relations.js";
 

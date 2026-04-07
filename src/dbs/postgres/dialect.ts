@@ -13,7 +13,7 @@ import type {
   ResolvedOpts,
   OnConflictClause,
 } from "../types.js";
-import type { RelationJoinInfo } from "../../orm/relation-joins.js";
+import type { RelationJoinInfo } from "../../orm/helpers/relations/relation-joins.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
   quoteId,
@@ -63,6 +63,13 @@ function appendOnConflict(
 
 export const postgresDialect: DialectImpl = {
   name: "postgres",
+  insertCapabilities: {
+    supportsReturning: true,
+    supportsSequences: false,
+  },
+  compileNextSequenceValues(): CompileResult {
+    throw new Error("Postgres sequence allocation is not configured for this dialect yet");
+  },
 
   escapeIdentifier(name: string): string {
     return '"' + String(name).replaceAll('"', '""') + '"';

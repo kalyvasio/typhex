@@ -75,6 +75,12 @@ describe("dbs/sqlite", () => {
       expect(sqliteDialect.placeholder(2)).toBe("?");
     });
 
+    it("rejects sequence allocation compilation", () => {
+      expect(() =>
+        sqliteDialect.compileNextSequenceValues("users", "id", 2),
+      ).toThrow("SQLite does not support sequence allocation");
+    });
+
     it("escapes identifiers", () => {
       expect(sqliteDialect.escapeIdentifier("users")).toBe('"users"');
       expect(sqliteDialect.escapeIdentifier('a"b')).toBe('"a""b"');

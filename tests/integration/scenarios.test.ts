@@ -742,8 +742,6 @@ describe("many-to-many relation", () => {
     registerEntity(Post);
     db = freshDb();
     await db.migrate();
-    // junction table is not an Entity so we create it manually
-    await db.run("CREATE TABLE post_tags (postId INTEGER NOT NULL, tagId INTEGER NOT NULL)");
 
     const ts  = await Tag.query().insert({ name: "typescript" });
     const orm = await Tag.query().insert({ name: "orm" });

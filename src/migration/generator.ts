@@ -11,6 +11,7 @@ import type { DiffAction, MigrationFile } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import { getDbMigrations } from "../dbs/index.js";
 import { parseFkDependencies, topoSort } from "./topo-sort.js";
+import { groupBy } from "../utils.js";
 
 function timestamp(): string {
   const d = new Date();
@@ -48,21 +49,14 @@ interface GroupedActions {
 }
 
 function groupByTable(actions: DiffAction[]): GroupedActions[] {
-  const map = new Map<string, DiffAction[]>();
-  for (const a of actions) {
-    const list = map.get(a.table) ?? [];
-    list.push(a);
-    map.set(a.table, list);
-  }
-  return Array.from(map.entries()).map(([table, actions]) => ({ table, actions }));
+  return [...groupBy(actions, (a) => a.table)].map(([table, actions]) => ({ table, actions }));
 }
 
 export async function generateMigrationFiles(
   driver: Driver,
   entities: readonly RegisteredEntity[]
 ): Promise<MigrationFile[]> {
-  const dialect = driver.dialect ?? "sqlite";
-  const migrations = getDbMigrations(dialect);
+  const migrations = getDbMigrations(driver.dialect);
   const actions = await migrations.diffSchema(driver, entities);
   if (actions.length === 0) return [];
 

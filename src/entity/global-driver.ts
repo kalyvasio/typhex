@@ -18,12 +18,14 @@ export function setDefaultDb(db: Db | null): void {
 
 export interface RegisteredEntity {
   table: { _table: string; _schema: Record<string, string> };
+  _registerJunctions?: () => void;
 }
 
 const entityRegistry: RegisteredEntity[] = [];
 
 export function registerEntity(entity: RegisteredEntity): void {
   entityRegistry.push(entity);
+  entity._registerJunctions?.();
 }
 
 export function getRegisteredEntities(): readonly RegisteredEntity[] {
