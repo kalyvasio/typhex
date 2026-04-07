@@ -42,8 +42,8 @@ const companyJoinWhereIr = {
 function makeToOneFetch(overrides: Partial<RelationFetchMetadata> = {}): RelationFetchMetadata {
   return {
     relation: { name: "company", outputKey: "company" },
-    fkColumn: "companyId",
-    targetPk: "id",
+    fkColumns: ["companyId"],
+    targetPkColumns: ["id"],
     targetEntity: null as any,
     isArray: false,
     ...overrides,
@@ -53,8 +53,8 @@ function makeToOneFetch(overrides: Partial<RelationFetchMetadata> = {}): Relatio
 function makeToManyFetch(overrides: Partial<RelationFetchMetadata> = {}): RelationFetchMetadata {
   return {
     relation: { name: "posts", outputKey: "posts" },
-    fkColumn: "userId",
-    targetPk: "id",
+    fkColumns: ["userId"],
+    targetPkColumns: ["id"],
     targetEntity: null as any,
     isArray: true,
     ...overrides,
@@ -136,7 +136,7 @@ describe("relation-resolver", () => {
     it("attaches to-one relation using fkColumn lookup", () => {
       const rows: Record<string, unknown>[] = [{ id: 1, companyId: 10 }];
       const fetch = makeToOneFetch();
-      const companyMap = new Map<unknown, unknown>([[10, { id: 10, name: "Acme" }]]);
+      const companyMap = new Map<string, unknown>([["10", { id: 10, name: "Acme" }]]);
       const fetched = new Map<string, any>([["company", companyMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
@@ -157,7 +157,7 @@ describe("relation-resolver", () => {
     it("sets to-one relation to null when fk not found in fetched map", () => {
       const rows: Record<string, unknown>[] = [{ id: 1, companyId: 99 }];
       const fetch = makeToOneFetch();
-      const companyMap = new Map<unknown, unknown>(); // 99 not in map
+      const companyMap = new Map<string, unknown>(); // "99" not in map
       const fetched = new Map<string, any>([["company", companyMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
@@ -165,10 +165,10 @@ describe("relation-resolver", () => {
       expect(rows[0].company).toBeNull();
     });
 
-    it("attaches to-many relation using id lookup", () => {
+    it("attaches to-many relation using composite PK lookup", () => {
       const rows: Record<string, unknown>[] = [{ id: 5 }];
       const fetch = makeToManyFetch();
-      const postsMap = new Map<unknown, unknown[]>([[5, [{ id: 1, userId: 5 }, { id: 2, userId: 5 }]]]);
+      const postsMap = new Map<string, unknown[]>([["5", [{ id: 1, userId: 5 }, { id: 2, userId: 5 }]]]);
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
@@ -187,16 +187,16 @@ describe("relation-resolver", () => {
       expect(rows[0].posts).toEqual([]);
     });
 
-    it("sets to-many to empty array when row has no id", () => {
-      const rows: Record<string, unknown>[] = [{ userId: 5 }]; // no "id" key
+    it("sets to-many to empty array when row has no parentPkColumn value", () => {
+      const rows: Record<string, unknown>[] = [{ userId: 5 }]; // no "id" key, parentPkColumns defaults to ["id"]
       const fetch = makeToManyFetch();
-      const postsMap = new Map<unknown, unknown[]>([[5, [{ id: 1 }]]]);
+      const postsMap = new Map<unknown, unknown[]>([["5", [{ id: 1 }]]]);
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
 
-      // pk = row["id"] (undefined) ?? row[fkColumn] (5) → 5, so it should match
-      expect(rows[0].posts).toEqual([{ id: 1 }]);
+      // parentPkCol = "id" (default), row["id"] = undefined → no match → empty
+      expect(rows[0].posts).toEqual([]);
     });
 
     it("sets to-many to empty array when row has neither id nor fkColumn", () => {
@@ -212,7 +212,7 @@ describe("relation-resolver", () => {
     it("skips attachment when relation is in skip set", () => {
       const rows: Record<string, unknown>[] = [{ id: 1, companyId: 10 }];
       const fetch = makeToOneFetch();
-      const companyMap = new Map<unknown, unknown>([[10, { id: 10, name: "Acme" }]]);
+      const companyMap = new Map<unknown, unknown>([["10", { id: 10, name: "Acme" }]]);
       const fetched = new Map<string, any>([["company", companyMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set(["company"]));
@@ -239,7 +239,7 @@ describe("relation-resolver", () => {
         aliases: ["id", "name"],
         relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
       expect(ctx.columnPaths).toContainEqual(["company", "id"]);
       expect(ctx.columnPaths).toContainEqual(["company", "name"]);
       expect(ctx.relationFetches).toHaveLength(0);
@@ -251,7 +251,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company", "name"]],
         aliases: ["id", "company_name"],
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
       expect(ctx.columnPaths).toContainEqual(["company", "name"]);
       expect(ctx.columnAliases).toContain("company_name");
       expect(ctx.relationFetches).toHaveLength(0);
@@ -263,7 +263,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
       expect(ctx.columnPaths).not.toContainEqual(["company"]);
       expect(ctx.relationFetches).toHaveLength(1);
       expect(ctx.relationFetches[0].relation.name).toBe("company");
@@ -276,7 +276,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company", "name"]],
         aliases: ["id", "company_name"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
       expect(ctx.columnPaths).not.toContainEqual(["company", "name"]);
       expect(ctx.relationFetches).toHaveLength(1);
       expect(ctx.relationFetches[0].relation.name).toBe("company");
@@ -285,7 +285,7 @@ describe("relation-resolver", () => {
     it("excludes relation with unsupported type from fetches", () => {
       const badRelations = {
         company: {
-          _relType: "many-to-many",
+          _relType: "unknown-relation-kind",
           _target: () => ({ query: () => ({}) }),
           _options: { foreignKey: "companyId" },
         },
@@ -295,12 +295,12 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const ctx = buildRelationContext(select, badRelations, null, "id", "c");
+      const ctx = buildRelationContext(select, badRelations, null, ["id"], "c");
       expect(ctx.relationFetches).toHaveLength(0);
     });
 
     it("returns null columnPaths when select is null", () => {
-      const ctx = buildRelationContext(null, mockRelations, null, "id", "c");
+      const ctx = buildRelationContext(null, mockRelations, null, ["id"], "c");
       expect(ctx.columnPaths).toBeNull();
       expect(ctx.columnAliases).toBeNull();
       expect(ctx.relationFetches).toHaveLength(0);
@@ -312,7 +312,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
       // "companyId" FK must be appended so the fetched rows can be correlated
       expect(ctx.columnPaths!.some((p) => p[0] === "companyId")).toBe(true);
     });
@@ -323,7 +323,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["companyId"], ["company"]],
         aliases: ["id", "companyId", "company"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
       expect(ctx.columnPaths!.filter((p) => p[0] === "companyId")).toHaveLength(1);
     });
 
@@ -334,7 +334,7 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
       expect(ctx.relationFetches).toHaveLength(1);
       expect(ctx.relationFetches[0].relation.name).toBe("company");
       expect(ctx.columnPaths).not.toContainEqual(["company", "id"]);
@@ -350,7 +350,7 @@ describe("relation-resolver", () => {
           { name: "company", outputKey: "employer" }, // duplicate outputKey → skipped
         ],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
       expect(ctx.relationFetches).toHaveLength(1);
     });
 
@@ -361,7 +361,7 @@ describe("relation-resolver", () => {
         paths: [["company"]],
         aliases: ["company"],
       };
-      const ctx = buildRelationContext(select, mockRelations, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, null, ["id"], "c");
       expect(ctx.relationFetches).toHaveLength(0);
     });
 
@@ -371,7 +371,7 @@ describe("relation-resolver", () => {
         paths: [["name"], ["posts"]],
         aliases: ["name", "posts"],
       };
-      const ctx = buildRelationContext(select, mockRelationsToMany, null, "id", "u");
+      const ctx = buildRelationContext(select, mockRelationsToMany, null, ["id"], "u");
       expect(ctx.columnPaths!.some((p) => p[0] === "id")).toBe(true);
     });
 
@@ -381,31 +381,32 @@ describe("relation-resolver", () => {
         paths: [["id"], ["posts"]],
         aliases: ["id", "posts"],
       };
-      const ctx = buildRelationContext(select, mockRelationsToMany, null, "id", "u");
+      const ctx = buildRelationContext(select, mockRelationsToMany, null, ["id"], "u");
       expect(ctx.columnPaths!.filter((p) => p[0] === "id")).toHaveLength(1);
     });
 
-    it("skips PK column addition when pkColumn is null (to-many)", () => {
+    it("adds default 'id' PK column when pkColumns is null (to-many)", () => {
       const select: IrSelect = {
         param: "u",
         paths: [["name"], ["posts"]],
         aliases: ["name", "posts"],
       };
       const ctx = buildRelationContext(select, mockRelationsToMany, null, null, "u");
-      expect(ctx.columnPaths!.some((p) => p[0] === "id")).toBe(false);
+      // pkColumns null → defaults to ["id"] so "id" is added to ensure to-many correlation works
+      expect(ctx.columnPaths!.some((p) => p[0] === "id")).toBe(true);
     });
   });
 
   describe("buildRelationContext", () => {
     it("returns null columnPaths when no select", () => {
-      const ctx = buildRelationContext(null, undefined, null, "id", "c");
+      const ctx = buildRelationContext(null, undefined, null, ["id"], "c");
       expect(ctx.columnPaths).toBeNull();
       expect(ctx.relationFetches).toHaveLength(0);
     });
 
     it("returns null columnPaths when select has no relation paths", () => {
       const select: IrSelect = { param: "c", paths: [["id"], ["name"]], aliases: ["id", "name"] };
-      const ctx = buildRelationContext(select, mockRelations, null, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, null, ["id"], "c");
       expect(ctx.columnPaths).toBeNull();
     });
 
@@ -425,7 +426,7 @@ describe("relation-resolver", () => {
         select,
         mockRelationsWithTarget,
         whereIr as any,
-        "id",
+        ["id"],
         "c"
       );
       expect(ctx.reusableJoinKeys.has("company")).toBe(true);
@@ -446,7 +447,7 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company" }], // no subPaths → subPaths?.length = undefined → ?? 0
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, whereIr as any, "id", "c");
+      const ctx = buildRelationContext(select, mockRelationsWithTarget, whereIr as any, ["id"], "c");
       // subPaths undefined → (r.subPaths?.length ?? 0) = 0 → not > 0 → hasReusableRelationInSelect = false
       expect(ctx.hasReusableRelationInSelect).toBe(false);
     });
@@ -470,7 +471,7 @@ describe("relation-resolver", () => {
         select,
         mockRelationsWithTarget,
         whereIr as any,
-        "id",
+        ["id"],
         "c"
       );
       // reusableJoinKeys has "company" but hasReusableRelationInSelect = false (no matching path/relation)
@@ -495,7 +496,7 @@ describe("relation-resolver", () => {
         select,
         mockRelationsWithTarget,
         whereIr as any,
-        "id",
+        ["id"],
         "c"
       );
       expect(ctx.skipLoadFor.has("company")).toBe(true);
@@ -511,7 +512,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["name"], ["company", "name"]],
         aliases: [], // shorter → aliases[i] is undefined → fallback
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
       expect(ctx.columnPaths).toContainEqual(["id"]);
       expect(ctx.columnAliases).toContain("id");
       expect(ctx.columnAliases).toContain("name");
@@ -524,7 +525,7 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company", "name"]],
         aliases: [], // empty → aliases[1] for ["company","name"] is undefined
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
       expect(ctx.columnAliases).toContain("company_name");
     });
   });
@@ -537,7 +538,7 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company", subPaths: [[]] }], // empty subPath
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, "id", "c");
+      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
       // empty sub produces no column path
       expect(ctx.columnPaths).not.toContainEqual(["company"]);
       expect(ctx.columnPaths!.filter((p) => p[0] === "company")).toHaveLength(0);

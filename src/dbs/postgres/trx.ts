@@ -27,7 +27,7 @@ export class PostgresTrx extends Trx {
 
   private compileBeginStatement(): string {
     const parts: string[] = ["BEGIN"];
-    const iso = this._options.isolationLevel?.replace(/_/g, " ");
+    const iso = this._options.isolationLevel?.replaceAll("_", " ");
     if (iso) parts.push(`ISOLATION LEVEL ${iso}`);
     if (this._options.readOnly) parts.push("READ ONLY");
     if (this._options.deferrable) parts.push("DEFERRABLE");

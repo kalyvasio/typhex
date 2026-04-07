@@ -5,6 +5,7 @@
 
 import type { IrSelect } from "../ir/types.js";
 import type { RelationFetchMetadata } from "./relation-context-builder.js";
+import { makeCompositeKey } from "./query-helpers.js";
 
 /**
  * Reconstruct nested objects from flat JOIN columns
@@ -29,7 +30,7 @@ export function assembleJoined(
 export function assembleFetched(
   rows: Record<string, unknown>[],
   fetches: RelationFetchMetadata[],
-  fetched: Map<string, Map<unknown, unknown> | Map<unknown, unknown[]>>,
+  fetched: Map<string, Map<string, unknown> | Map<string, unknown[]>>,
   skip: Set<string>
 ): void {
   for (const meta of fetches) {
@@ -37,9 +38,9 @@ export function assembleFetched(
     const data = fetched.get(meta.relation.name);
     if (!data) continue;
     if (meta.isArray) {
-      attachToManyRelation(rows, meta, data as Map<unknown, unknown[]>);
+      attachToManyRelation(rows, meta, data as Map<string, unknown[]>);
     } else {
-      attachToOneRelation(rows, meta, data as Map<unknown, unknown>);
+      attachToOneRelation(rows, meta, data as Map<string, unknown>);
     }
   }
 }
@@ -93,27 +94,28 @@ function buildNestedObject(
 }
 
 /** Set `row[outputKey]` to the array of related rows from `data`,
- *  looked up by the row's PK ("id") with a fallback to its FK column. */
+ *  looked up by the composite key of the parent's PK columns. */
 function attachToManyRelation(
   rows: Record<string, unknown>[],
   meta: RelationFetchMetadata,
-  data: Map<unknown, unknown[]>
+  data: Map<string, unknown[]>
 ): void {
+  const pkCols = meta.parentPkColumns ?? ["id"];
   for (const row of rows) {
-    const pk = row["id"] ?? row[meta.fkColumn];
-    row[meta.relation.outputKey] = pk != null ? data.get(pk) ?? [] : [];
+    const key = makeCompositeKey(row, pkCols);
+    row[meta.relation.outputKey] = data.get(key) ?? [];
   }
 }
 
 /** Set `row[outputKey]` to the single related row from `data`,
- *  looked up by the row's FK value, or null if the FK is absent or unmatched. */
+ *  looked up by the composite key of the row's FK columns, or null if unmatched. */
 function attachToOneRelation(
   rows: Record<string, unknown>[],
   meta: RelationFetchMetadata,
-  data: Map<unknown, unknown>
+  data: Map<string, unknown>
 ): void {
   for (const row of rows) {
-    const fk = row[meta.fkColumn];
-    row[meta.relation.outputKey] = fk != null ? data.get(fk) ?? null : null;
+    const key = makeCompositeKey(row, meta.fkColumns);
+    row[meta.relation.outputKey] = data.get(key) ?? null;
   }
 }

@@ -195,7 +195,7 @@ export function parseArrowToGroupByPaths(
   if (idx === -1) return [];
 
   const body = src.slice(idx + 2).trim();
-  const paramName = src.slice(0, idx).replace(/[()]/g, "").trim() || "u";
+  const paramName = src.slice(0, idx).replaceAll(/[()]/g, "").trim() || "u";
 
   let expr: N;
   try {

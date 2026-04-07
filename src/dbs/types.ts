@@ -32,7 +32,7 @@ export interface CompileOptions {
   /** Map "param.relationKey" (e.g. "p.author") to joined table alias (e.g. "t1") */
   relationPathToAlias?: Record<string, string>;
   /** One-to-many relations in where: compile as EXISTS. Key "param.relationKey" -> EXISTS subquery info. */
-  oneToManyExists?: Record<string, { targetTable: string; fkColumn: string; mainPk: string; alias: string }>;
+  oneToManyExists?: Record<string, { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }>;
 }
 
 export interface DbColumnInfo {
@@ -99,7 +99,7 @@ export type ResolvedOpts = {
   tableAlias: string;
   paramToAlias: Record<string, string>;
   relationPathToAlias?: Record<string, string>;
-  oneToManyExists?: Record<string, { targetTable: string; fkColumn: string; mainPk: string; alias: string }>;
+  oneToManyExists?: Record<string, { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }>;
 };
 
 /** Dialect: SQL compilation and schema translation. */
@@ -108,7 +108,7 @@ export interface DialectImpl {
   escapeIdentifier(name: string): string;
   placeholder(index: number): string;
   expandPlaceholders(sql: string, resolvedParams: unknown[], startIdx?: number): ExpandPlaceholdersResult;
-  compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string;
+  compileExists(targetTable: string, alias: string, fkColumns: string[], mainAlias: string, mainPk: string[], innerSql: string): string;
   compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string;
   compileAggregate?(
     agg: IrAggregate,
@@ -124,14 +124,14 @@ export interface DialectImpl {
     table: string,
     columns: string[],
     values: unknown[],
-    pk?: string,
+    pk?: string[],
     onConflict?: OnConflictClause
   ): CompileResult;
   compileInsertMany(
     table: string,
     columns: string[],
     rows: unknown[][],
-    pk?: string,
+    pk?: string[],
     onConflict?: OnConflictClause
   ): CompileResult;
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult;

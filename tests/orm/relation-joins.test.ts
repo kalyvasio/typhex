@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { buildRelationJoins, buildRelationPathToAlias, buildOneToManyExists, getReusableJoinKeys } from "../../src/orm/relation-joins.js";
-import type {IrNode, IrOrderBy, IrSelect} from "../../src/ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, JoinType } from "../../src/ir/types.js";
 import type { RelationsMap } from "../../src/entity/relations.js";
 
-const mockResolveTarget = vi.fn(() => ({ table: "companies", pk: "id" }));
+const mockResolveTarget = vi.fn(() => ({ table: "companies", pk: ["id"] }));
 
 const mockRelations: RelationsMap = {
   company: {
@@ -22,13 +22,13 @@ const ctx = {
   relations: mockRelations,
   tableName: "contacts",
   columnNames: ["id", "name", "companyId"],
-  pkColumn: "id",
+  pkColumns: ["id"],
   resolveTarget: mockResolveTarget,
 };
 
 describe("relation-joins", () => {
   beforeEach(() => {
-    mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
+    mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
   });
 
   describe("buildRelationJoins", () => {
@@ -55,8 +55,8 @@ describe("relation-joins", () => {
       expect(result[0]).toMatchObject({
         relationKey: "company",
         targetTable: "companies",
-        targetPk: "id",
-        foreignKey: "companyId",
+        targetPkColumns: ["id"],
+        foreignKeys: ["companyId"],
         relType: "many-to-one",
       });
       expect(result[0].alias).toMatch(/^t\d+$/);
@@ -73,7 +73,7 @@ describe("relation-joins", () => {
     });
 
     it("does not add one-to-many to joins (uses EXISTS instead)", () => {
-      mockResolveTarget.mockReturnValue({ table: "employees", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
       const where: IrNode = {
         kind: "binary",
         op: "===",
@@ -82,7 +82,7 @@ describe("relation-joins", () => {
       };
       const result = buildRelationJoins(ctx, where, "d");
       expect(result).toHaveLength(0);
-      mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
     });
 
     it("returns join when relation referenced in where (joins are driven by where/orderBy, not select IR)", () => {
@@ -188,8 +188,8 @@ describe("relation-joins", () => {
       expect(result[0]).toMatchObject({
         relationKey: "company",
         targetTable: "companies",
-        targetPk: "id",
-        foreignKey: "companyId",
+        targetPkColumns: ["id"],
+        foreignKeys: ["companyId"],
         relType: "many-to-one",
       });
     });
@@ -218,13 +218,13 @@ describe("relation-joins", () => {
     });
 
     it("does not join one-to-many relation from orderBy", () => {
-      mockResolveTarget.mockReturnValue({ table: "employees", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
       const orderBy: IrOrderBy[] = [
         { param: "u", path: ["employees", "name"], direction: "asc" },
       ];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(0);
-      mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
     });
 
     it("returns empty when orderBy is undefined", () => {
@@ -316,21 +316,21 @@ describe("relation-joins", () => {
 
   describe("buildOneToManyExists", () => {
     it("returns EXISTS info for one-to-many relation in where", () => {
-      mockResolveTarget.mockReturnValue({ table: "employees", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
       const where: IrNode = {
         kind: "binary",
         op: "===",
         left: { kind: "member", param: "d", path: ["employees", "name"] },
         right: { kind: "const", value: "Alice" },
       };
-      const result = buildOneToManyExists(where, mockRelations, "d", "id", mockResolveTarget);
+      const result = buildOneToManyExists(where, mockRelations, "d", ["id"], mockResolveTarget);
       expect(result["d.employees"]).toMatchObject({
         targetTable: "employees",
-        fkColumn: "departmentId",
-        mainPk: "id",
+        fkColumns: ["departmentId"],
+        mainPk: ["id"],
       });
       expect(result["d.employees"].alias).toMatch(/^ex\d+$/);
-      mockResolveTarget.mockReturnValue({ table: "companies", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
     });
 
     it("skips junction relations in EXISTS", () => {
@@ -341,13 +341,13 @@ describe("relation-joins", () => {
           _options: { junction: "post_tags", foreignKey: "postId" } as any,
         } as any,
       };
-      mockResolveTarget.mockReturnValue({ table: "tags", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "tags", pk: ["id"] });
       const where: IrNode = {
         kind: "member",
         param: "c",
         path: ["tags", "name"],
       };
-      const result = buildOneToManyExists(where, relationsWithJunction, "c", "id", mockResolveTarget);
+      const result = buildOneToManyExists(where, relationsWithJunction, "c", ["id"], mockResolveTarget);
       expect(Object.keys(result)).toHaveLength(0);
     });
 
@@ -359,7 +359,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "d", path: ["employees", "name"] },
         right: { kind: "const", value: "Alice" },
       };
-      const result = buildOneToManyExists(where, mockRelations, "d", "id", mockResolveTarget);
+      const result = buildOneToManyExists(where, mockRelations, "d", ["id"], mockResolveTarget);
       expect(Object.keys(result)).toHaveLength(0);
     });
 
@@ -371,13 +371,13 @@ describe("relation-joins", () => {
           _options: {} as any,
         } as any,
       };
-      mockResolveTarget.mockReturnValue({ table: "posts", pk: "id" });
+      mockResolveTarget.mockReturnValue({ table: "posts", pk: ["id"] });
       const where: IrNode = {
         kind: "member",
         param: "u",
         path: ["posts", "title"],
       };
-      const result = buildOneToManyExists(where, relNoFk, "u", "id", mockResolveTarget);
+      const result = buildOneToManyExists(where, relNoFk, "u", ["id"], mockResolveTarget);
       expect(Object.keys(result)).toHaveLength(0);
     });
 
@@ -388,7 +388,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "c", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const result = buildOneToManyExists(where, mockRelations, "c", "id", mockResolveTarget);
+      const result = buildOneToManyExists(where, mockRelations, "c", ["id"], mockResolveTarget);
       expect(result).toEqual({});
     });
   });
@@ -400,8 +400,9 @@ describe("relation-joins", () => {
           relationKey: "company",
           alias: "t1",
           targetTable: "companies",
-          targetPk: "id",
-          foreignKey: "companyId",
+          targetPkColumns: ["id"],
+          foreignKeys: ["companyId"],
+          joinType: 'left' as JoinType,
           relType: "many-to-one" as const,
         },
       ];

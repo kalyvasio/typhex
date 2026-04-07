@@ -61,7 +61,7 @@ export function getRelationJoins(state: QueryState<unknown>): RelationJoinInfo[]
       relations,
       tableName: state.tableName,
       columnNames: state.columnNames,
-      pkColumn: state.pkColumn ?? "id",
+      pkColumns: state.pkColumns ?? ["id"],
       resolveTarget: resolveRelationTarget,
     },
     state.whereIr,
@@ -83,7 +83,7 @@ export function getCompileOpts(state: QueryState<unknown>) {
   const joins = getRelationJoins(state);
   const rootParam = getRootParam(state);
   const relationPathToAlias = buildRelationPathToAlias(joins, Object.keys(paramToAlias));
-  const mainPk = state.pkColumn ?? "id";
+  const mainPk = state.pkColumns ?? ["id"];
   const oneToManyExists =
     state.relations && state.resolveRelationTarget
       ? buildOneToManyExists(

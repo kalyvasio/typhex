@@ -12,8 +12,8 @@ export type RelationType =
   | "many-to-many";
 
 export interface RelationOptions {
-  foreignKey: string;
-  references?: string;
+  foreignKey: string | string[];
+  references?: string | string[];
 }
 
 export interface JunctionOptions {
@@ -146,20 +146,20 @@ export function manyToOne(
 /** oneToMany: FK on target table. Pass a thunk (() => EntityClass) to handle circular imports. */
 export function oneToMany<E extends AnyEntityClass>(
   target: () => E,
-  options: { foreignKey: string }
+  options: { foreignKey: string | string[] }
 ): RelationDef<E, "one-to-many">;
 export function oneToMany<TTarget>(
   target: () => { _selectType: TTarget },
-  options: { foreignKey: string }
+  options: { foreignKey: string | string[] }
 ): RelationDef<TTarget, "one-to-many">;
 /** Manual typing: pass E explicitly when thunk is () => unknown (e.g. createRequire). Use with import type. */
 export function oneToMany<E extends AnyEntityClass>(
   target: () => unknown,
-  options: { foreignKey: string }
+  options: { foreignKey: string | string[] }
 ): RelationDef<E, "one-to-many">;
 export function oneToMany(
   target: () => unknown,
-  options: { foreignKey: string }
+  options: { foreignKey: string | string[] }
 ): RelationDef<unknown, "one-to-many"> {
   return makeRelation("one-to-many", target, options);
 }

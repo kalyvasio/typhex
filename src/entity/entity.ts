@@ -88,14 +88,20 @@ export type EntityClassOf<T> = T extends EntityInstance<infer E> ? E : (T extend
 
 function hasPrimaryKey(def: string): boolean {
   const stripped = def
-    .replace(/'[^']*'/g, "")
-    .replace(/--[^\n]*/g, "");
+    .replaceAll(/'[^']*'/g, "")
+    .replaceAll(/--[^\n]*/g, "");
   return /\bprimary\s+key\b/i.test(stripped);
 }
 
-function getPkColumn(schema: Record<string, string>): string {
+function getPkColumns(schema: Record<string, string>): string[] {
   const names = Object.keys(schema);
-  return names.find((c) => hasPrimaryKey(schema[c])) ?? names[0];
+  const pks = names.filter((c) => hasPrimaryKey(schema[c]));
+  return pks.length > 0 ? pks : [names[0]];
+}
+
+/** Public helper for relation loading: primary key column names from a schema map. */
+export function getPkColumnsFromSchema(schema: Record<string, string>): string[] {
+  return getPkColumns(schema);
 }
 
 function createTableDef<TTable extends string, TSchema extends Record<string, string>, TRels extends RelationsMap>(
@@ -139,7 +145,7 @@ export function Entity<
   const rels = (relations ?? {}) as TRels;
   const tableDef = createTableDef(tableName, schema, rels);
   const cols = getColumnNames(schema as TableDefinition);
-  const pk = getPkColumn(schema);
+  const pkCols = getPkColumns(schema);
 
   function resolveDb() {
     const resolved = getDefaultDb();
@@ -147,7 +153,7 @@ export function Entity<
     return resolved;
   }
 
-  function resolveRelationTarget(rel: RelationDef): { table: string; pk: string } | null {
+  function resolveRelationTarget(rel: RelationDef): { table: string; pk: string[] } | null {
     try {
       const target = rel._target();
       const entityClass =
@@ -157,7 +163,7 @@ export function Entity<
       const tbl = entityClass?.table;
       if (tbl) {
         const schema = tbl._schema;
-        return { table: tbl._table, pk: getPkColumn(schema) };
+        return { table: tbl._table, pk: getPkColumns(schema) };
       }
       return null;
     } catch (e) {
@@ -171,7 +177,7 @@ export function Entity<
       tableName,
       columnNames: cols,
       qe: executor ?? resolveDb(),
-      pkColumn: pk,
+      pkColumns: pkCols,
       whereIr: null,
       whereParams: {} as Record<string, unknown>,
       orderBy: [] as any[],
@@ -226,7 +232,7 @@ export function Entity<
       for (const key of Object.keys(row)) {
         if (row[key] !== undefined) (this as Record<string, unknown>)[key] = row[key];
       }
-      this._isNew = (this as any)[pk] === undefined;
+      this._isNew = !pkCols.every((c) => (this as Record<string, unknown>)[c] !== undefined);
       this._dirty = new Set(Object.keys(row).filter((k) => cols.includes(k)));
     }
 
@@ -235,7 +241,7 @@ export function Entity<
         this as unknown as Record<string, unknown>,
         baseState(executor ?? getActiveTrx()),
         runHook,
-        pk,
+        pkCols,
         cols,
       );
     }

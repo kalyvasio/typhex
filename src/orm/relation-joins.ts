@@ -5,22 +5,22 @@
  */
 
 import type { IrNode, IrSelect, IrOrderBy, JoinHint, JoinType } from "../ir/types.js";
-import type { RelationsMap, RelationDef } from "../entity/relations.js";
+import type { RelationsMap, RelationDef, JunctionOptions } from "../entity/relations.js";
 
 export interface RelationJoinInfo {
   relationKey: string;
   alias: string;
   targetTable: string;
-  targetPk: string;
-  foreignKey: string;
+  targetPkColumns: string[];
+  foreignKeys: string[];
   relType: "many-to-one" | "one-to-one";
   joinType: JoinType;
 }
 
 export interface OneToManyExistsInfo {
   targetTable: string;
-  fkColumn: string;
-  mainPk: string;
+  fkColumns: string[];
+  mainPk: string[];
   alias: string;
 }
 
@@ -32,8 +32,8 @@ export function buildOneToManyExists(
   whereNode: IrNode | null,
   relations: RelationsMap,
   rootParam: string,
-  mainPk: string,
-  resolveTarget: (rel: RelationDef) => { table: string; pk: string } | null,
+  mainPk: string[],
+  resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null,
   aliasPrefix = "ex"
 ): Record<string, OneToManyExistsInfo> {
   const keys = new Set<string>();
@@ -47,11 +47,12 @@ export function buildOneToManyExists(
     if ("junction" in opts) continue;
     const target = resolveTarget(rel);
     if (!target) continue;
-    const fk = "foreignKey" in opts ? opts.foreignKey : "";
-    if (!fk) continue;
+    const fkRaw = "foreignKey" in opts ? opts.foreignKey : "";
+    if (!fkRaw || (Array.isArray(fkRaw) && fkRaw.length === 0)) continue;
+    const fkColumns = Array.isArray(fkRaw) ? fkRaw : [fkRaw];
     result[`${rootParam}.${relKey}`] = {
       targetTable: target.table,
-      fkColumn: fk,
+      fkColumns,
       mainPk,
       alias: `${aliasPrefix}${idx++}`,
     };
@@ -63,8 +64,8 @@ export interface RelationJoinContext {
   relations: RelationsMap;
   tableName: string;
   columnNames: string[];
-  pkColumn: string;
-  resolveTarget: (rel: RelationDef) => { table: string; pk: string } | null;
+  pkColumns: string[];
+  resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null;
 }
 
 /** Walk an IR node tree and collect every relation key referenced via member access
@@ -191,7 +192,7 @@ export function buildRelationJoins(
     if (!rel) continue;
 
     const opts = rel._options;
-    if ("junction" in opts) continue;
+    if ((opts as JunctionOptions).junction) continue;
 
     const relType = rel._relType;
     if (relType !== "many-to-one" && relType !== "one-to-one") continue;
@@ -199,8 +200,9 @@ export function buildRelationJoins(
     const target = ctx.resolveTarget(rel);
     if (!target) continue;
 
-    const fk = "foreignKey" in opts ? opts.foreignKey : "";
-    if (!fk) continue;
+    const fkRaw = opts.foreignKey ? opts.foreignKey : "";
+    const fkCols = Array.isArray(fkRaw) ? fkRaw : (fkRaw ? [fkRaw] : []);
+    if (fkCols.length === 0) continue;
 
     const hint = joinHints?.slice().reverse().find(h => h.relationKey === relKey);
     const joinType: JoinType = hint?.joinType ?? "left";
@@ -208,8 +210,8 @@ export function buildRelationJoins(
       relationKey: relKey,
       alias: `t${aliasIndex++}`,
       targetTable: target.table,
-      targetPk: target.pk,
-      foreignKey: fk,
+      targetPkColumns: target.pk,
+      foreignKeys: fkCols,
       relType,
       joinType,
     });

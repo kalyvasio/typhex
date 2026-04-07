@@ -2,7 +2,7 @@
  * Shared utilities for Typhex transformers.
  */
 
-import * as ts from "typescript";
+import ts from "typescript";
 import type {
   IrNode,
   IrSelect,
@@ -35,7 +35,7 @@ export function checkSymbolIsTyphex(symbol: ts.Symbol): boolean {
 
 /** Check whether a source file path points at Typhex's ORM Table/QueryBuilder definitions. */
 function isTyphexDeclarationFile(rawPath: string): boolean {
-  const normalized = rawPath.replace(/\\/g, "/");
+  const normalized = rawPath.replaceAll("\\", "/");
   const inTyphexPackage =
     normalized.includes("/typhex/") || normalized.includes("/typhex\\");
   const inOrmModule =
@@ -277,7 +277,7 @@ export function parseTsAggregateCall(
     func: funcName as IrAggregate["func"],
     arg,
     ...(distinct ? { distinct: true } : {}),
-    ...(separator !== undefined ? { separator } : {}),
+    ...(separator === undefined ? {} : { separator }),
   };
   return { ir, rawName };
 }
@@ -357,7 +357,8 @@ function valueToTsExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
       (value as unknown[]).map(v => valueToTsExpression(v, f))
     );
   }
-  return f.createStringLiteral(String(value));
+  // JSON.stringify returns undefined at runtime for undefined/functions/symbols
+  return f.createStringLiteral(JSON.stringify(value) ?? String(value));
 }
 
 /** Build a `["a", "b", "c"]` array-literal node from a JS string array. */
@@ -379,19 +380,25 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
 
   switch (ir.kind) {
     case "aggregate":
-      return irAggregateToTsLiteral(ir as IrAggregate);
+      return irAggregateToTsLiteral(ir);
     case "binary":
-      props.push(f.createPropertyAssignment("op",    f.createStringLiteral(ir.op)));
-      props.push(f.createPropertyAssignment("left",  irNodeToTsLiteral(ir.left)));
-      props.push(f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)));
+      props.push(
+        f.createPropertyAssignment("op",    f.createStringLiteral(ir.op)),
+        f.createPropertyAssignment("left",  irNodeToTsLiteral(ir.left)),
+        f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)),
+      );
       break;
     case "unary":
-      props.push(f.createPropertyAssignment("op",      f.createStringLiteral(ir.op)));
-      props.push(f.createPropertyAssignment("operand", irNodeToTsLiteral(ir.operand)));
+      props.push(
+        f.createPropertyAssignment("op",      f.createStringLiteral(ir.op)),
+        f.createPropertyAssignment("operand", irNodeToTsLiteral(ir.operand)),
+      );
       break;
     case "member":
-      props.push(f.createPropertyAssignment("param", f.createStringLiteral(ir.param)));
-      props.push(f.createPropertyAssignment("path",  stringArrayLiteral(ir.path, f)));
+      props.push(
+        f.createPropertyAssignment("param", f.createStringLiteral(ir.param)),
+        f.createPropertyAssignment("path",  stringArrayLiteral(ir.path, f)),
+      );
       break;
     case "const":
       props.push(f.createPropertyAssignment("value", valueToTsExpression(ir.value, f)));
@@ -400,21 +407,27 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
       break;
     case "in":
-      props.push(f.createPropertyAssignment("left",  irNodeToTsLiteral(ir.left)));
-      props.push(f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)));
+      props.push(
+        f.createPropertyAssignment("left",  irNodeToTsLiteral(ir.left)),
+        f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)),
+      );
       break;
     case "call":
-      props.push(f.createPropertyAssignment("method",   f.createStringLiteral(ir.method)));
-      props.push(f.createPropertyAssignment("receiver", irNodeToTsLiteral(ir.receiver)));
-      props.push(f.createPropertyAssignment("args",
-        f.createArrayLiteralExpression(ir.args.map(a => irNodeToTsLiteral(a)))
-      ));
+      props.push(
+        f.createPropertyAssignment("method",   f.createStringLiteral(ir.method)),
+        f.createPropertyAssignment("receiver", irNodeToTsLiteral(ir.receiver)),
+        f.createPropertyAssignment("args",
+          f.createArrayLiteralExpression(ir.args.map(a => irNodeToTsLiteral(a)))
+        ),
+      );
       break;
     case "exists":
-      props.push(f.createPropertyAssignment("rootParam",   f.createStringLiteral(ir.rootParam)));
-      props.push(f.createPropertyAssignment("relationKey", f.createStringLiteral(ir.relationKey)));
-      props.push(f.createPropertyAssignment("innerParam",  f.createStringLiteral(ir.innerParam)));
-      props.push(f.createPropertyAssignment("innerWhere",  irNodeToTsLiteral(ir.innerWhere)));
+      props.push(
+        f.createPropertyAssignment("rootParam",   f.createStringLiteral(ir.rootParam)),
+        f.createPropertyAssignment("relationKey", f.createStringLiteral(ir.relationKey)),
+        f.createPropertyAssignment("innerParam",  f.createStringLiteral(ir.innerParam)),
+        f.createPropertyAssignment("innerWhere",  irNodeToTsLiteral(ir.innerWhere)),
+      );
       break;
   }
   return f.createObjectLiteralExpression(props);
