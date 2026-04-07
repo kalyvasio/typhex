@@ -719,3 +719,112 @@ describe("explicit join type hints", () => {
     expect((rows as any[]).map((r) => r.title)).toEqual(["Alice article", "Bob article", "Orphan article"]);
   });
 });
+
+// ─── many-to-many via junction table ─────────────────────────────────────────
+
+describe("many-to-many relation", () => {
+  const Tag = Entity("tags", {
+    id: "integer primary key autoincrement",
+    name: "text not null",
+  });
+
+  const Post = Entity(
+    "posts",
+    { id: "integer primary key autoincrement", title: "text not null" },
+    { tags: rel.manyToMany(() => Tag, { junction: "post_tags", foreignKey: "postId", referenceKey: "tagId" }) }
+  );
+
+  // Junction table is a plain table — not an entity, just created via raw migration
+  let db: Db;
+  beforeEach(async () => {
+    clearRegistry();
+    registerEntity(Tag);
+    registerEntity(Post);
+    db = freshDb();
+    await db.migrate();
+    // junction table is not an Entity so we create it manually
+    await db.run("CREATE TABLE post_tags (postId INTEGER NOT NULL, tagId INTEGER NOT NULL)");
+
+    const ts  = await Tag.query().insert({ name: "typescript" });
+    const orm = await Tag.query().insert({ name: "orm" });
+    const sqlTag = await Tag.query().insert({ name: "sql" });
+    const p1  = await Post.query().insert({ title: "Intro to TS" });
+    const p2  = await Post.query().insert({ title: "ORM patterns" });
+    await Post.query().insert({ title: "No tags post" });
+
+    // p1 → typescript, orm; p2 → orm, sql; p3 → (none)
+    await db.run("INSERT INTO post_tags VALUES (?, ?)", [(p1 as any).id, (ts as any).id]);
+    await db.run("INSERT INTO post_tags VALUES (?, ?)", [(p1 as any).id, (orm as any).id]);
+    await db.run("INSERT INTO post_tags VALUES (?, ?)", [(p2 as any).id, (orm as any).id]);
+    await db.run("INSERT INTO post_tags VALUES (?, ?)", [(p2 as any).id, (sqlTag as any).id]);
+  });
+  afterEach(async () => { await db.close(); });
+
+  it("loads all tags per post via junction table", async () => {
+    const rows = await Post.query()
+      .select((p: any) => ({ id: p.id, title: p.title, tags: p.tags }))
+      .orderBy("id", "asc")
+      .toArray();
+
+    expect(rows).toHaveLength(3);
+    expect((rows[0] as any).tags).toHaveLength(2);
+    expect((rows[1] as any).tags).toHaveLength(2);
+    expect((rows[2] as any).tags).toHaveLength(0);
+
+    const p1TagNames = (rows[0] as any).tags.map((t: any) => t.name).sort();
+    expect(p1TagNames).toEqual(["orm", "typescript"]);
+
+    const p2TagNames = (rows[1] as any).tags.map((t: any) => t.name).sort();
+    expect(p2TagNames).toEqual(["orm", "sql"]);
+  });
+
+  it("partial select on tags includes only selected fields (plus anchor PK for correlation)", async () => {
+    const rows = await Post.query()
+      .select((p: any) => ({
+        id: p.id,
+        tags: p.tags.query().select((t: any) => ({ name: t.name })),
+      }))
+      .orderBy("id", "asc")
+      .toArray();
+
+    // name is present; unselected fields like a hypothetical "slug" would be absent
+    expect((rows[0] as any).tags[0]).toHaveProperty("name");
+    expect((rows[0] as any).tags[0]).not.toHaveProperty("createdAt");
+  });
+
+  it("post with no junction rows gets an empty tags array", async () => {
+    const rows = await Post.query()
+      .select((p: any) => ({ id: p.id, title: p.title, tags: p.tags }))
+      .where((p: any) => p.title === "No tags post", { "No tags post": "No tags post" })
+      .toArray();
+
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as any).tags).toEqual([]);
+  });
+
+  it("orderBy asc on tags relation returns tags in ascending name order", async () => {
+    const rows = await Post.query()
+      .select((p: any) => ({
+        id: p.id,
+        tags: p.tags.query().orderBy("name", "asc"),
+      }))
+      .where((p: any) => p.title === "Intro to TS", { "Intro to TS": "Intro to TS" })
+      .toArray();
+
+    const tagNames = (rows[0] as any).tags.map((t: any) => t.name);
+    expect(tagNames).toEqual(["orm", "typescript"]); // alphabetical ASC
+  });
+
+  it("orderBy desc on tags relation returns tags in descending name order", async () => {
+    const rows = await Post.query()
+      .select((p: any) => ({
+        id: p.id,
+        tags: p.tags.query().orderBy("name", "desc"),
+      }))
+      .where((p: any) => p.title === "Intro to TS", { "Intro to TS": "Intro to TS" })
+      .toArray();
+
+    const tagNames = (rows[0] as any).tags.map((t: any) => t.name);
+    expect(tagNames).toEqual(["typescript", "orm"]); // alphabetical DESC
+  });
+});

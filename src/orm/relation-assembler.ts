@@ -37,7 +37,7 @@ export function assembleFetched(
     if (skip.has(meta.relation.name)) continue;
     const data = fetched.get(meta.relation.name);
     if (!data) continue;
-    if (meta.isArray) {
+    if (meta.relationType === "one-to-many" || meta.relationType === "many-to-many") {
       attachToManyRelation(rows, meta, data as Map<string, unknown[]>);
     } else {
       attachToOneRelation(rows, meta, data as Map<string, unknown>);
