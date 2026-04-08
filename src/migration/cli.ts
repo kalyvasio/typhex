@@ -52,6 +52,24 @@ function resolveWithinCwd(pathArg: string, label: string): string {
   return resolved;
 }
 
+/** Create a driver, run callback, and always close — regardless of outcome. */
+async function withDriver<T>(
+  config: TyphexConfig,
+  dbPath: string,
+  callback: (driver: Awaited<ReturnType<typeof createDriver>>) => Promise<T>
+): Promise<T> {
+  const driver = createDriver({
+    dialect: config.dialect,
+    database: dbPath,
+    url: config.url,
+  });
+  try {
+    return await callback(driver);
+  } finally {
+    await driver.close();
+  }
+}
+
 function usage(): never {
   console.log(`
 typhex — migration CLI
@@ -98,14 +116,8 @@ async function main() {
       console.error("migrate:generate requires --entities or config.entities");
       process.exit(1);
     }
-
     const entitiesResolved = resolveWithinCwd(entitiesPath, "--entities");
-    const driver = createDriver({
-      dialect: config.dialect,
-      database: dbPath,
-      url: config.url,
-    });
-    try {
+    await withDriver(config, dbPath, async (driver) => {
       await import(entitiesResolved);
       const entities = getRegisteredEntities();
       if (entities.length === 0) {
@@ -120,16 +132,9 @@ async function main() {
       const paths = writeMigrationFiles(dir, files);
       console.log(`Generated ${paths.length} migration(s):`);
       for (const p of paths) console.log(`  ${p}`);
-    } finally {
-      await driver.close();
-    }
-  } else if (command === "migrate:run") {
-    const driver = createDriver({
-      dialect: config.dialect,
-      database: dbPath,
-      url: config.url,
     });
-    try {
+  } else if (command === "migrate:run") {
+    await withDriver(config, dbPath, async (driver) => {
       const result = await runMigrations(driver, dir);
       if (result.applied.length === 0) {
         console.log("No pending migrations.");
@@ -140,35 +145,22 @@ async function main() {
       if (result.skipped.length > 0) {
         console.log(`Skipped ${result.skipped.length} (already applied).`);
       }
-    } finally {
-      await driver.close();
-    }
-  } else if (command === "migrate:status") {
-    const driver = createDriver({
-      dialect: config.dialect,
-      database: dbPath,
-      url: config.url,
     });
-    try {
+  } else if (command === "migrate:status") {
+    await withDriver(config, dbPath, async (driver) => {
       const status = await migrationStatus(driver, dir);
       if (status.applied.length > 0) {
         console.log("Applied migrations:");
-        for (const r of status.applied) {
-          console.log(`  ✓ ${r.name}  (${r.applied_at})`);
-        }
+        for (const r of status.applied) console.log(`  ✓ ${r.name}  (${r.applied_at})`);
       }
       if (status.pending.length > 0) {
         console.log("Pending migrations:");
-        for (const n of status.pending) {
-          console.log(`  ○ ${n}`);
-        }
+        for (const n of status.pending) console.log(`  ○ ${n}`);
       }
       if (status.applied.length === 0 && status.pending.length === 0) {
         console.log("No migrations found.");
       }
-    } finally {
-      await driver.close();
-    }
+    });
   } else {
     console.error(`Unknown command: ${command}`);
     usage();

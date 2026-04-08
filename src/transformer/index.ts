@@ -14,6 +14,11 @@ import { transformSelectCall } from "./select-transformer.js";
 import { transformOrderByCall } from "./orderby-transformer.js";
 import { transformJoinCall } from "./join-transformer.js";
 
+/**
+ * Recursive visitor: for every CallExpression, visit children first (so
+ * nested chains are rewritten inside-out) and then try each per-method
+ * transformer in turn. Non-call nodes are walked through unchanged.
+ */
 function visit(
   node: ts.Node,
   ctx: ts.TransformationContext,
@@ -36,6 +41,7 @@ function visit(
   return ts.visitEachChild(node, (n) => visit(n, ctx, checker), ctx);
 }
 
+/** Entry point for a single source file — walks its top-level children through `visit`. */
 function visitSourceFile(
   node: ts.SourceFile,
   ctx: ts.TransformationContext,
@@ -53,6 +59,7 @@ export function createTyphexTransformer(program: ts.Program) {
   };
 }
 
+/** ttsc/ts-patch plugin entry point — wires the transformer into the `before` phase. */
 export default function (program: ts.Program) {
   return {
     before: createTyphexTransformer(program),

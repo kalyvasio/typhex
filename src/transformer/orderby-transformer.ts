@@ -1,48 +1,76 @@
-import * as ts from "typescript";
-import { isTyphexType, memberPath, irOrderByToTsLiteral } from "./shared.js";
+/**
+ * Transformer for .orderBy() calls: converts a column-selector lambda
+ * and optional direction into an IrOrderBy literal.
+ */
 
+import * as ts from "typescript";
+import {
+  isTyphexType,
+  matchTyphexMethodCall,
+  memberPath,
+  irOrderByToTsLiteral,
+} from "./shared.js";
+
+type Direction = "asc" | "desc";
+
+/**
+ * Rewrite a `.orderBy(p => p.col, "asc"|"desc")` call on a Typhex
+ * Table/QueryBuilder into an IrOrderBy literal. Returns null when the call
+ * shape isn't supported — the runtime parser handles it then.
+ */
 export function transformOrderByCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker
 ): ts.CallExpression | null {
-  const expr = call.expression;
-  if (!ts.isPropertyAccessExpression(expr)) return null;
-  if (expr.name.text !== "orderBy") return null;
-  if (!isTyphexType(expr.expression, checker)) return null;
+  const fn = matchTyphexMethodCall(call, "orderBy", checker, isTyphexType);
+  if (!fn) return null;
 
-  const args = [...call.arguments];
-  if (args.length === 0) return null;
-  const first = args[0];
-  if (!ts.isArrowFunction(first) && !ts.isFunctionExpression(first)) return null;
+  const paramName = getFirstIdentifierParamName(fn);
+  if (!paramName) return null;
 
-  const param = first.parameters[0]?.name;
-  if (!param || !ts.isIdentifier(param)) return null;
-  const paramName = param.text;
+  const path = extractColumnPath(fn.body, paramName);
+  if (!path) return null;
 
-  const body = first.body;
-  if (!ts.isPropertyAccessExpression(body) && !ts.isIdentifier(body)) return null;
+  const direction = parseDirectionArg(call.arguments);
+  if (direction === null) return null;
 
-  const path = ts.isPropertyAccessExpression(body)
-    ? memberPath(body, paramName)
-    : null;
-
-  if (!path || path.length === 0) return null;
-
-  // Only transform when direction is absent or a known string literal; otherwise
-  // leave the call for runtime parsing to preserve the original semantics.
-  if (args.length >= 2) {
-    if (!ts.isStringLiteral(args[1])) return null;
-    const d = args[1].text;
-    if (d !== "asc" && d !== "desc") return null;
-  }
-  let direction: "asc" | "desc" = "asc";
-  if (args.length >= 2 && ts.isStringLiteral(args[1])) {
-    if (args[1].text === "desc") direction = "desc";
-  }
-
-  const ir = irOrderByToTsLiteral({ param: paramName, path, direction });
   return ts.factory.updateCallExpression(
     call, call.expression, call.typeArguments,
-    [ir]
+    [irOrderByToTsLiteral({ param: paramName, path, direction })]
   );
+}
+
+/** Return the first parameter's name if it's a plain identifier; null otherwise. */
+function getFirstIdentifierParamName(
+  fn: ts.ArrowFunction | ts.FunctionExpression
+): string | null {
+  const param = fn.parameters[0]?.name;
+  if (!param || !ts.isIdentifier(param)) return null;
+  return param.text;
+}
+
+/**
+ * Extract the `p.a.b` column path from an arrow body. The body must be a
+ * direct property access on the lambda parameter.
+ */
+function extractColumnPath(
+  body: ts.ConciseBody,
+  paramName: string
+): string[] | null {
+  if (!ts.isPropertyAccessExpression(body)) return null;
+  const path = memberPath(body, paramName);
+  return path && path.length > 0 ? path : null;
+}
+
+/**
+ * The direction argument is optional; when present it MUST be a known string
+ * literal ("asc" | "desc"). Anything else returns null to leave the call for
+ * runtime parsing (preserving original semantics).
+ */
+function parseDirectionArg(args: ts.NodeArray<ts.Expression>): Direction | null {
+  if (args.length < 2) return "asc";
+  const dirArg = args[1];
+  if (!ts.isStringLiteral(dirArg)) return null;
+  if (dirArg.text !== "asc" && dirArg.text !== "desc") return null;
+  return dirArg.text;
 }
