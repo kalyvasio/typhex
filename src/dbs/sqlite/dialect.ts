@@ -4,7 +4,15 @@
 
 import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
 import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
-import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts, ResolvedOpts } from "../types.js";
+import type {
+  CompileOptions,
+  CompileResult,
+  ColumnDef,
+  DialectImpl,
+  CompileSelectOpts,
+  ResolvedOpts,
+  OnConflictClause,
+} from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
@@ -28,6 +36,24 @@ function sqliteCompileAggregate(
     return compileConcatAggregate("GROUP_CONCAT", agg, undefined, opts, compileNodeFn, params);
   }
   return compileAggregate(agg, opts, compileNodeFn, params);
+}
+
+function appendOnConflict(
+  baseSql: string,
+  onConflict: OnConflictClause,
+  insertColumns: string[],
+  esc: (name: string) => string
+): string {
+  const conflictCols = onConflict.conflictColumns.map(esc).join(", ");
+  if (onConflict.action === "nothing") {
+    return `${baseSql} ON CONFLICT (${conflictCols}) DO NOTHING`;
+  }
+  const updateCols =
+    onConflict.updateColumns?.length ?
+      onConflict.updateColumns
+    : insertColumns.filter((c) => !onConflict.conflictColumns.includes(c));
+  const setClauses = updateCols.map((c) => `${esc(c)} = excluded.${esc(c)}`).join(", ");
+  return `${baseSql} ON CONFLICT (${conflictCols}) DO UPDATE SET ${setClauses}`;
 }
 
 export const sqliteDialect: DialectImpl = {
@@ -75,18 +101,42 @@ export const sqliteDialect: DialectImpl = {
     return getColumnDef(def, "sqlite");
   },
 
+  compileInsert(
+    table: string,
+    columns: string[],
+    values: unknown[],
+    _pk?: string,
+    onConflict?: OnConflictClause
+  ): CompileResult {
+    const esc = quoteId;
+    if (columns.length === 0) {
+      if (onConflict) {
+        throw new Error("insert: ON CONFLICT requires explicit columns (empty INSERT not supported with onConflict)");
+      }
+      return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES`, params: [] };
+    }
+    const ph = columns.map(() => "?").join(", ");
+    let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})`;
+    if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
+    return { sql, params: values, returningRow: false };
+  },
+
+
   compileInsertMany(
     table: string,
     columns: string[],
     rows: unknown[][],
-    _pk?: string
+    pk?: string,
+    onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
     if (rows.length === 0) return { sql: "", params: [], returningRow: false };
     const rowPh = `(${columns.map(() => "?").join(", ")})`;
     const allPh = rows.map(() => rowPh).join(", ");
-    const sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${allPh}`;
-    return { sql, params: rows.flat().map(v => v === SQL_DEFAULT ? null : v), returningRow: false };
+    let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${allPh}`;
+    if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
+    if (pk) sql += " RETURNING *";
+    return { sql, params: rows.flat().map(v => v === SQL_DEFAULT ? null : v), returningRow: !!pk };
   },
 
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult {

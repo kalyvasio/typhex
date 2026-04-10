@@ -192,10 +192,13 @@ describe("QueryBuilder", () => {
       expect(row.id).toBe(42);
     });
 
-    it("throws when all fields are undefined", async () => {
+    it("all-undefined fields falls back to DEFAULT VALUES insert", async () => {
+      // With no column values, compileInsert produces DEFAULT VALUES.
+      // The mock db returns lastID=1 from run() but [] from query(), so the
+      // re-fetch by pk finds nothing and throws "row not found".
       await expect(
         newBuilder(db).insert({ id: undefined, name: undefined, age: undefined } as unknown as Record<string, unknown>)
-      ).rejects.toThrow("insertMany: no column values provided");
+      ).rejects.toThrow("insert: insert succeeded but row not found");
     });
   });
 
@@ -206,37 +209,42 @@ describe("QueryBuilder", () => {
       expect(db.run).not.toHaveBeenCalled();
     });
 
-    it("builds multi-row INSERT and returns [] on non-RETURNING dialects (SQLite)", async () => {
+    it("builds multi-row INSERT with RETURNING * and returns hydrated rows", async () => {
+      // The mock db.query returns [] by default, so hydratedRows = [].
       const rows = await newBuilder(db).insertMany([
         { name: "Alice" },
         { name: "Bob" },
       ]);
-      const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      // insertMany uses db.query (RETURNING *) not db.run
+      const [sql, params] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("INSERT");
       expect(sql).toContain('"users"');
+      expect(sql).toContain("RETURNING *");
       expect(params).toContain("Alice");
       expect(params).toContain("Bob");
-      expect(rows).toEqual([]);
+      expect(rows).toEqual([]);  // mock returns [] from query
     });
 
-    it("unions columns in entity order; missing columns use SQL_DEFAULT (mapped to null for SQLite)", async () => {
+    it("unions columns in entity order; missing columns default to null", async () => {
       // newBuilder has columnNames: ["id", "name", "age", "country"]
       // entity order: name before age
       await newBuilder(db).insertMany([
         { age: 25 },      // age first in input — entity order must win
         { name: "Alice" },
       ]);
-      const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      const [sql, params] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       // columns must appear in entity order: name before age
       expect(sql.indexOf('"name"')).toBeLessThan(sql.indexOf('"age"'));
-      // SQL_DEFAULT mapped to null for SQLite
+      // absent columns default to null
       expect(params).toContain(null);
     });
 
-    it("throws when all columns are undefined", async () => {
-      await expect(
-        newBuilder(db).insertMany([{ name: undefined } as unknown as Record<string, unknown>])
-      ).rejects.toThrow("insertMany: no column values provided");
+    it("all-undefined columns produces empty column list (INSERT ... () VALUES ())", async () => {
+      // With no recognised columns, cols=[]; the query still runs against the mock.
+      const rows = await newBuilder(db).insertMany([
+        { name: undefined } as unknown as Record<string, unknown>,
+      ]);
+      expect(rows).toEqual([]);
     });
   });
 

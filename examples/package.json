@@ -23,6 +23,7 @@
     "relations:many-to-one": "tsx non-circular-many-to-one/relation-queries.ts",
     "build:transformer": "cd .. && npm run build && cd examples && npx ts-patch install --silent && npx tsc -p tsconfig.transformer.json",
     "start:transformer": "node out/transformer/with-transformer.js",
+    "insert-many": "tsx insert-many/insert-many.ts",
     "transformer": "npm run build:transformer && npm run start:transformer"
   }
 }

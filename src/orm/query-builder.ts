@@ -5,12 +5,12 @@
  * (except insert, which is synchronous to support save()).
  */
 
-import { type IrNode, type IrExists, type IrOrderBy, type IrSelect, type OrderDirection, type JoinHint, type JoinType } from "../ir/types.js";
+import { type IrNode, type IrOrderBy, type IrSelect, type OrderDirection, type JoinHint, type JoinType } from "../ir/types.js";
 import type { QueryExecutor } from "./db.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
 import { resolveWhereIr, resolveOrderBy, resolveSelectIr, resolveGroupByPaths, resolveJoinKeys } from "../parser/resolve.js";
-import { resolveParamSentinels, SQL_DEFAULT, type ExpandPlaceholdersResult, type DialectImpl } from "../dbs/types.js";
+import { resolveParamSentinels, type OnConflictClause, type ExpandPlaceholdersResult, type DialectImpl } from "../dbs/types.js";
 import { buildRelationContext, resolveSelectForSql } from "./relation-context-builder.js";
 import { resolveRelations } from "./relation-resolver.js";
 import { whereColumnEq } from "./query-helpers.js";
@@ -56,12 +56,12 @@ export class QueryBuilder<
   C extends AnyEntityClass = AnyEntityClass,
   T = EntityInstance<C>,
 > implements QueryBuilderInterface<C, T> {
-  private static readonly isDebugSqlEnabled = ((): boolean => {
+  protected static readonly isDebugSqlEnabled = ((): boolean => {
     const debugFlag = process?.env?.TYPHEX_DEBUG;
     return debugFlag === "1" || debugFlag === "true" || debugFlag === "yes";
   })();
 
-  constructor(private state: QueryState<T>) {}
+  constructor(protected state: QueryState<T>) {}
 
   /** Return a shallow copy of this builder with mutable state (params, orderBy) deep-copied,
    *  so chained calls do not mutate the original. */
@@ -75,7 +75,7 @@ export class QueryBuilder<
   }
 
   /** Print the SQL and parameters to stdout when TYPHEX_DEBUG is enabled. */
-  private logSql(sql: string, params: unknown[]): void {
+  protected logSql(sql: string, params: unknown[]): void {
     console.log("[typhex]", sql);
     if (params.length > 0) console.log("[typhex] params:", params);
   }
@@ -196,61 +196,14 @@ export class QueryBuilder<
     return (await fresh.first()) ?? null;
   }
 
-  /** Compile and execute an INSERT, hydrating any RETURNING rows.
-   *  Returns hydrated rows (non-empty when dialect supports RETURNING) and lastID (for non-RETURNING fallback). */
-  private async _executeInsert(
-    cols: string[],
-    paramRows: unknown[][]
-  ): Promise<{ hydratedRows: EntityInstance<C>[]; lastID: number | undefined }> {
-    const { tableName, pkColumn, hydrate } = this.state;
-    const qe = this.state.qe!;
-    const dialect = getDialectOrThrow(this.state);
-    const pk = pkColumn ?? "id";
-
-    const compiled = dialect.compileInsertMany(tableName, cols, paramRows, pk);
-    if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
-
-    if (compiled.returningRow) {
-      const returned = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
-      const hydratedRows: EntityInstance<C>[] = [];
-      for (const raw of returned)
-        hydratedRows.push(hydrate ? (await hydrate(raw)) as EntityInstance<C> : raw as EntityInstance<C>);
-      return { hydratedRows, lastID: undefined };
-    }
-
-    const result = await qe.run(compiled.sql, compiled.params);
-    return { hydratedRows: [], lastID: result.lastID };
+  /** Insert a single row. Awaitable directly, or chain `.onConflict(cols).doUpdate()` / `.doNothing()`. */
+  insert(row: Record<string, unknown>): InsertBuilder<C, EntityInstance<C>> {
+    return new InsertBuilder<C, EntityInstance<C>>(this.state as QueryState<EntityInstance<C>>, row);
   }
 
-  /** Insert a single row and return the hydrated instance. */
-  async insert(row: Record<string, unknown>): Promise<EntityInstance<C>> {
-    const { columnNames, pkColumn } = this.state;
-    const pk = pkColumn ?? "id";
-
-    const cols = columnNames.filter(c => row[c] !== undefined);
-    if (cols.length === 0) throw new Error("insertMany: no column values provided");
-    const paramRow = cols.map(c => row[c] === undefined ? SQL_DEFAULT : row[c]);
-
-    const { hydratedRows, lastID } = await this._executeInsert(cols, [paramRow]);
-    if (hydratedRows.length > 0) return hydratedRows[0];
-
-    const inst = await this.clone().where(whereColumnEq(pk, lastID ?? 0)).first();
-    if (!inst) throw new Error("insert: row not found after insert");
-    return inst;
-  }
-
-  /** Insert multiple rows in one statement. Returns hydrated rows for dialects with RETURNING
-   *  (Postgres); returns [] for SQLite where safe row hydration is not possible after a batch insert. */
-  async insertMany(rows: Record<string, unknown>[]): Promise<EntityInstance<C>[]> {
-    if (rows.length === 0) return [];
-    const { columnNames } = this.state;
-
-    const cols = columnNames.filter(c => rows.some(r => r[c] !== undefined));
-    if (cols.length === 0) throw new Error("insertMany: no column values provided");
-    const paramRows = rows.map(r => cols.map(c => r[c] === undefined ? SQL_DEFAULT : r[c]));
-
-    const { hydratedRows } = await this._executeInsert(cols, paramRows);
-    return hydratedRows;
+  /** Insert multiple rows in one statement. Awaitable directly, or chain `.onConflict(cols).doUpdate()` / `.doNothing()`. */
+  insertMany(rows: Record<string, unknown>[]): InsertBuilder<C, EntityInstance<C>[]> {
+    return new InsertBuilder<C, EntityInstance<C>[]>(this.state as QueryState<EntityInstance<C>>, rows);
   }
 
   /** Select single row by primary key. Replaces Entity.findById(). */
@@ -368,7 +321,7 @@ export class QueryBuilder<
     return qe.query(sql, params) as Promise<Record<string, unknown>[]>;
   }
 
-  private expandWithSentinels(
+  protected expandWithSentinels(
     dialect: DialectImpl,
     sql: string,
     params: unknown[],
@@ -376,5 +329,111 @@ export class QueryBuilder<
     startIdx?: number,
   ): ExpandPlaceholdersResult {
     return dialect.expandPlaceholders(sql, resolveParamSentinels(params, paramValues), startIdx);
+  }
+}
+
+/**
+ * Deferred insert returned by `insert()` / `insertMany()`.
+ * Extends `QueryBuilder` so it owns its execution logic and has direct access to state.
+ * Awaitable directly (no conflict handling) or chain `.onConflict(cols).doUpdate()` / `.doNothing()`.
+ *
+ * @example
+ * await qb.insert(row);
+ * await qb.insert(row).onConflict(["sku"]).doUpdate();
+ * await qb.insertMany(rows).onConflict(["sku"]).doNothing();
+ */
+export class InsertBuilder<C extends AnyEntityClass, R>
+  extends QueryBuilder<C>
+  implements PromiseLike<R>
+{
+  private _conflictCols?: string[];
+
+  constructor(
+    state: QueryState<EntityInstance<C>>,
+    private readonly _payload: Record<string, unknown> | Record<string, unknown>[],
+  ) {
+    super(state as QueryState<EntityInstance<C>>);
+  }
+
+  /** Store the conflict target columns; returns `this` for chaining. */
+  onConflict(columns: string[]): this {
+    this._conflictCols = columns;
+    return this;
+  }
+
+  /** `ON CONFLICT (...) DO UPDATE SET ...` — executes the insert. */
+  doUpdate(updateColumns?: string[]): Promise<R> {
+    return this._execute({ conflictColumns: this._conflictCols!, action: "update", updateColumns });
+  }
+
+  /** `ON CONFLICT (...) DO NOTHING` — executes the insert. */
+  doNothing(): Promise<R> {
+    return this._execute({ conflictColumns: this._conflictCols!, action: "nothing" });
+  }
+
+  /** PromiseLike: allows `await insert(row)` without a conflict clause. */
+  then<T1 = R, T2 = never>(
+    res?: ((v: R) => T1 | PromiseLike<T1>) | null,
+    rej?: ((e: unknown) => T2 | PromiseLike<T2>) | null,
+  ): PromiseLike<T1 | T2> {
+    return this._execute().then(res, rej);
+  }
+
+  private _execute(onConflict?: OnConflictClause): Promise<R> {
+    return (
+      Array.isArray(this._payload)
+        ? this._doInsertMany(this._payload, onConflict)
+        : this._doInsert(this._payload, onConflict)
+    ) as Promise<R>;
+  }
+
+  private async _doInsert(row: Record<string, unknown>, onConflict?: OnConflictClause): Promise<EntityInstance<C>> {
+    const { tableName, columnNames, qe, pkColumn, hydrate } = this.state;
+    const dialect = getDialectOrThrow(this.state);
+    const cols = columnNames.filter((c) => row[c] !== undefined);
+    const params = cols.map((c) => row[c]);
+    const pk = pkColumn ?? "id";
+
+    const compiled = dialect.compileInsert(tableName, cols, params, pk, onConflict);
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
+
+    if (compiled.returningRow) {
+      const rows = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
+      const raw = rows[0];
+      if (raw == null) throw new Error("insert: RETURNING returned no row");
+      if (hydrate) return (await hydrate(raw)) as EntityInstance<C>;
+      return raw as EntityInstance<C>;
+    }
+
+    const result = await qe.run(compiled.sql, compiled.params);
+    const lastId = result.lastID ?? 0;
+    const inst = await this.clone().where(whereColumnEq(pk, lastId)).first();
+    if (!inst) throw new Error("insert: insert succeeded but row not found");
+    return inst;
+  }
+
+  private async _doInsertMany(rows: Record<string, unknown>[], onConflict?: OnConflictClause): Promise<EntityInstance<C>[]> {
+    if (rows.length === 0) return [];
+    const { tableName, columnNames, qe, pkColumn, hydrate } = this.state;
+    const dialect = getDialectOrThrow(this.state);
+    const pk = pkColumn ?? "id";
+
+    // Collect columns in entity-defined order, keeping any column present in at least one row.
+    const cols = columnNames.filter((c) => rows.some((r) => r[c] !== undefined));
+    const paramRows = rows.map((r) => cols.map((c) => r[c] ?? null));
+
+    const compiled = dialect.compileInsertMany(tableName, cols, paramRows, pk, onConflict);
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
+
+    if (compiled.returningRow) {
+      const returned = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
+      const hydratedRows: EntityInstance<C>[] = [];
+      for (const raw of returned)
+        hydratedRows.push(hydrate ? (await hydrate(raw)) as EntityInstance<C> : raw as EntityInstance<C>);
+      return hydratedRows;
+    }
+
+    await qe.run(compiled.sql, compiled.params);
+    return [];
   }
 }

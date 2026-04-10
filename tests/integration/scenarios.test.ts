@@ -138,13 +138,12 @@ describe("insertMany", () => {
   });
   afterEach(async () => { await db.close(); });
 
-  it("inserts multiple rows and rows are persisted (SQLite returns [])", async () => {
-    const rows = await Product.query().insertMany([
+  it("inserts multiple rows and rows are persisted", async () => {
+    await Product.query().insertMany([
       { name: "Pen",    price: 1 },
       { name: "Pencil", price: 2 },
       { name: "Ruler",  price: 3 },
     ]);
-    expect(rows).toEqual([]);
     expect(await Product.query().count()).toBe(3);
   });
 

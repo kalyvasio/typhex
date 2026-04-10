@@ -87,6 +87,76 @@ describe("dbs/postgres", () => {
       expect(params).toEqual(["Alice", 25]);
     });
 
+    it("compileInsert produces single-row INSERT with RETURNING *", () => {
+      const { sql, params, returningRow } = postgresDialect.compileInsert(
+        "users", ["name", "age"], ["Alice", 30], "id"
+      );
+      expect(sql).toBe('INSERT INTO "users" ("name", "age") VALUES ($1, $2) RETURNING *');
+      expect(params).toEqual(["Alice", 30]);
+      expect(returningRow).toBe(true);
+    });
+
+    it("compileInsert with no columns emits DEFAULT VALUES with RETURNING *", () => {
+      const { sql, returningRow } = postgresDialect.compileInsert("users", [], [], "id");
+      expect(sql).toBe('INSERT INTO "users" DEFAULT VALUES RETURNING *');
+      expect(returningRow).toBe(true);
+    });
+
+    it("compileInsert with no pk omits RETURNING", () => {
+      const { sql, returningRow } = postgresDialect.compileInsert(
+        "users", ["name"], ["Alice"]
+      );
+      expect(sql).not.toContain("RETURNING");
+      expect(returningRow).toBe(false);
+    });
+
+    it("compileInsert doNothing emits ON CONFLICT ... DO NOTHING before RETURNING", () => {
+      const { sql } = postgresDialect.compileInsert(
+        "users", ["name", "slug"], ["Alice", "alice"], "id",
+        { conflictColumns: ["slug"], action: "nothing" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
+      expect(sql).toContain("RETURNING *");
+      expect(sql.indexOf("DO NOTHING")).toBeLessThan(sql.indexOf("RETURNING"));
+    });
+
+    it("compileInsert doUpdate uses EXCLUDED (uppercase for Postgres)", () => {
+      const { sql } = postgresDialect.compileInsert(
+        "users", ["name", "slug"], ["Alice", "alice"], "id",
+        { conflictColumns: ["slug"], action: "update" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "name" = EXCLUDED."name"');
+      expect(sql).not.toContain('excluded."name"');  // SQLite uses lowercase; Postgres uses EXCLUDED
+      expect(sql).toContain("RETURNING *");
+    });
+
+    it("compileInsert doUpdate with explicit updateColumns", () => {
+      const { sql } = postgresDialect.compileInsert(
+        "products", ["sku", "name", "price"], ["X1", "Widget", 10], "id",
+        { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] }
+      );
+      expect(sql).toContain('ON CONFLICT ("sku") DO UPDATE SET "price" = EXCLUDED."price"');
+      expect(sql).not.toContain('"name" = EXCLUDED."name"');
+    });
+
+    it("compileInsertMany doNothing emits ON CONFLICT ... DO NOTHING with RETURNING", () => {
+      const { sql, returningRow } = postgresDialect.compileInsertMany(
+        "tags", ["slug", "label"], [["ts", "TypeScript"]], "id",
+        { conflictColumns: ["slug"], action: "nothing" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
+      expect(sql).toContain("RETURNING *");
+      expect(returningRow).toBe(true);
+    });
+
+    it("compileInsertMany doUpdate uses EXCLUDED (uppercase)", () => {
+      const { sql } = postgresDialect.compileInsertMany(
+        "tags", ["slug", "label"], [["ts", "TypeScript"]], "id",
+        { conflictColumns: ["slug"], action: "update" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
+    });
+
     it("compileCount produces SELECT COUNT", () => {
       const { sql, params } = postgresDialect.compileCount("users", '"t0"."age" = $1', [18]);
       expect(sql).toContain('SELECT COUNT(*) AS c');

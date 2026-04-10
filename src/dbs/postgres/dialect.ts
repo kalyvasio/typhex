@@ -4,7 +4,15 @@
 
 import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
 import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
-import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts, ResolvedOpts } from "../types.js";
+import type {
+  CompileOptions,
+  CompileResult,
+  ColumnDef,
+  DialectImpl,
+  CompileSelectOpts,
+  ResolvedOpts,
+  OnConflictClause,
+} from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
@@ -33,6 +41,24 @@ function postgresCompileAggregate(
     return compileStandardAggregate(agg.func, agg, opts, compileNodeFn, params);
   }
   return compileAggregate(agg, opts, compileNodeFn, params);
+}
+
+function appendOnConflict(
+  baseSql: string,
+  onConflict: OnConflictClause,
+  insertColumns: string[],
+  esc: (name: string) => string
+): string {
+  const conflictCols = onConflict.conflictColumns.map(esc).join(", ");
+  if (onConflict.action === "nothing") {
+    return `${baseSql} ON CONFLICT (${conflictCols}) DO NOTHING`;
+  }
+  const updateCols =
+    onConflict.updateColumns?.length ?
+      onConflict.updateColumns
+    : insertColumns.filter((c) => !onConflict.conflictColumns.includes(c));
+  const setClauses = updateCols.map((c) => `${esc(c)} = EXCLUDED.${esc(c)}`).join(", ");
+  return `${baseSql} ON CONFLICT (${conflictCols}) DO UPDATE SET ${setClauses}`;
 }
 
 export const postgresDialect: DialectImpl = {
@@ -81,11 +107,34 @@ export const postgresDialect: DialectImpl = {
     return getColumnDef(def, "postgres");
   },
 
+  compileInsert(
+    table: string,
+    columns: string[],
+    values: unknown[],
+    pk?: string,
+    onConflict?: OnConflictClause
+  ): CompileResult {
+    const esc = quoteId;
+    if (columns.length === 0) {
+      if (onConflict) {
+        throw new Error("insert: ON CONFLICT requires explicit columns (empty INSERT not supported with onConflict)");
+      }
+      return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES${pk ? " RETURNING *" : ""}`, params: [], returningRow: !!pk };
+    }
+    const ph = columns.map((_, i) => `$${i + 1}`).join(", ");
+    let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})`;
+    if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
+    if (pk) sql += " RETURNING *";
+    return { sql, params: values, returningRow: !!pk };
+  },
+
+
   compileInsertMany(
     table: string,
     columns: string[],
     rows: unknown[][],
-    pk?: string
+    pk?: string,
+    onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
     if (rows.length === 0) return { sql: "", params: [], returningRow: false };
@@ -100,6 +149,7 @@ export const postgresDialect: DialectImpl = {
       return `(${phs.join(", ")})`;
     });
     let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${rowPlaceholders.join(", ")}`;
+    if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
     if (pk) sql += " RETURNING *";
     return { sql, params, returningRow: !!pk };
   },

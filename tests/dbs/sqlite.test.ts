@@ -134,7 +134,7 @@ describe("dbs/sqlite", () => {
       expect(result).toContain("company_name");
     });
 
-    it("compileInsertMany produces multi-row INSERT without RETURNING", () => {
+    it("compileInsertMany produces multi-row INSERT with RETURNING * when pk provided", () => {
       const { sql, params, returningRow } = sqliteDialect.compileInsertMany(
         "users",
         ["name", "age"],
@@ -145,8 +145,18 @@ describe("dbs/sqlite", () => {
       expect(sql).toContain('"name"');
       expect(sql).toContain('"age"');
       expect(sql).toContain("VALUES");
-      expect(sql).not.toContain("RETURNING");
+      expect(sql).toContain("RETURNING *");
       expect(params).toEqual(["Alice", 30, "Bob", 25]);
+      expect(returningRow).toBe(true);
+    });
+
+    it("compileInsertMany without pk omits RETURNING", () => {
+      const { sql, returningRow } = sqliteDialect.compileInsertMany(
+        "users",
+        ["name", "age"],
+        [["Alice", 30]]
+      );
+      expect(sql).not.toContain("RETURNING");
       expect(returningRow).toBe(false);
     });
 
@@ -165,6 +175,67 @@ describe("dbs/sqlite", () => {
       expect(sql).toContain("VALUES");
       expect(sql).not.toContain("DEFAULT");
       expect(params).toEqual(["Alice", null, null, 25]);
+    });
+
+    it("compileInsert produces single-row INSERT without RETURNING (SQLite ignores pk)", () => {
+      const { sql, params, returningRow } = sqliteDialect.compileInsert(
+        "users", ["name", "age"], ["Alice", 30], "id"
+      );
+      expect(sql).toBe('INSERT INTO "users" ("name", "age") VALUES (?, ?)');
+      expect(params).toEqual(["Alice", 30]);
+      expect(returningRow).toBe(false);
+    });
+
+    it("compileInsert with no columns emits DEFAULT VALUES", () => {
+      const { sql, params } = sqliteDialect.compileInsert("users", [], []);
+      expect(sql).toBe('INSERT INTO "users" DEFAULT VALUES');
+      expect(params).toEqual([]);
+    });
+
+    it("compileInsert doNothing emits ON CONFLICT ... DO NOTHING", () => {
+      const { sql } = sqliteDialect.compileInsert(
+        "users", ["name", "slug"], ["Alice", "alice"], undefined,
+        { conflictColumns: ["slug"], action: "nothing" }
+      );
+      expect(sql).toBe(
+        'INSERT INTO "users" ("name", "slug") VALUES (?, ?) ON CONFLICT ("slug") DO NOTHING'
+      );
+    });
+
+    it("compileInsert doUpdate infers update columns (excludes conflict columns)", () => {
+      const { sql } = sqliteDialect.compileInsert(
+        "users", ["name", "slug"], ["Alice", "alice"], undefined,
+        { conflictColumns: ["slug"], action: "update" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET');
+      expect(sql).toContain('"name" = excluded."name"');
+      expect(sql).not.toContain('"slug" = excluded."slug"');
+    });
+
+    it("compileInsert doUpdate with explicit updateColumns", () => {
+      const { sql } = sqliteDialect.compileInsert(
+        "products", ["sku", "name", "price"], ["X1", "Widget", 10], undefined,
+        { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] }
+      );
+      expect(sql).toContain('ON CONFLICT ("sku") DO UPDATE SET "price" = excluded."price"');
+      expect(sql).not.toContain('"name" = excluded."name"');
+    });
+
+    it("compileInsertMany doNothing emits ON CONFLICT ... DO NOTHING", () => {
+      const { sql } = sqliteDialect.compileInsertMany(
+        "tags", ["slug", "label"], [["ts", "TypeScript"], ["js", "JavaScript"]], undefined,
+        { conflictColumns: ["slug"], action: "nothing" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
+      expect(sql).not.toContain("RETURNING");
+    });
+
+    it("compileInsertMany doUpdate emits ON CONFLICT ... DO UPDATE SET", () => {
+      const { sql } = sqliteDialect.compileInsertMany(
+        "tags", ["slug", "label"], [["ts", "TypeScript"]], undefined,
+        { conflictColumns: ["slug"], action: "update" }
+      );
+      expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = excluded."label"');
     });
 
     it("expandPlaceholders expands IN arrays to multiple ?", () => {

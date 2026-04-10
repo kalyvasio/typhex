@@ -2,7 +2,7 @@
  * Typhex ORM: Entity-based API with arrow-function query predicates.
  */
 
-export { Db, Trx, QueryBuilder, SingleRowQueryBuilder } from "./orm/index.js";
+export { Db, Trx, QueryBuilder, SingleRowQueryBuilder, InsertBuilder } from "./orm/index.js";
 export { count, sum, avg, min, max, distinct } from "./orm/aggregates.js";
 export type { DbOptions, QueryState, QueryExecutor } from "./orm/index.js";
 export type { Driver, Connection, ExecuteResult, TransactionOptions } from "./driver/types.js";
@@ -14,7 +14,7 @@ export type { IrNode, IrOrderBy, IrSelect, IrSelectRelation } from "./ir/types.j
 export { isIrNode, isIrSelect } from "./ir/types.js";
 export { parseArrowToIr, parseArrowToIrSelect } from "./parser/index.js";
 export type { ParseOptions } from "./parser/index.js";
-export type { CompileResult, CompileOptions } from "./dbs/index.js";
+export type { CompileResult, CompileOptions, OnConflictClause } from "./dbs/index.js";
 export type { TableDefinition, ColumnDef } from "./schema/index.js";
 export { Entity, rel } from "./entity/index.js";
 export type {
