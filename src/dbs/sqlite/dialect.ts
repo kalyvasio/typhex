@@ -6,7 +6,7 @@ import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
 import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
 import type { CompileOptions, CompileResult, ColumnDef, DialectImpl, CompileSelectOpts, ResolvedOpts } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/relation-joins.js";
-import { getColumnDef } from "../types.js";
+import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
   quoteId,
   resolveOpts,
@@ -75,11 +75,18 @@ export const sqliteDialect: DialectImpl = {
     return getColumnDef(def, "sqlite");
   },
 
-  compileInsert(table: string, columns: string[], values: unknown[], _pk?: string): CompileResult {
+  compileInsertMany(
+    table: string,
+    columns: string[],
+    rows: unknown[][],
+    _pk?: string
+  ): CompileResult {
     const esc = quoteId;
-    if (columns.length === 0) return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES`, params: [] };
-    const ph = columns.map(() => "?").join(", ");
-    return { sql: `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})`, params: values };
+    if (rows.length === 0) return { sql: "", params: [], returningRow: false };
+    const rowPh = `(${columns.map(() => "?").join(", ")})`;
+    const allPh = rows.map(() => rowPh).join(", ");
+    const sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${allPh}`;
+    return { sql, params: rows.flat().map(v => v === SQL_DEFAULT ? null : v), returningRow: false };
   },
 
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult {

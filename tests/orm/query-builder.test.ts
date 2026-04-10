@@ -192,18 +192,51 @@ describe("QueryBuilder", () => {
       expect(row.id).toBe(42);
     });
 
-    it("uses DEFAULT VALUES when all fields are undefined", async () => {
-      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
-        { id: 1, name: null, age: null, country: null },
+    it("throws when all fields are undefined", async () => {
+      await expect(
+        newBuilder(db).insert({ id: undefined, name: undefined, age: undefined } as unknown as Record<string, unknown>)
+      ).rejects.toThrow("insertMany: no column values provided");
+    });
+  });
+
+  describe("insertMany", () => {
+    it("returns empty array without hitting db when given no rows", async () => {
+      const result = await newBuilder(db).insertMany([]);
+      expect(result).toEqual([]);
+      expect(db.run).not.toHaveBeenCalled();
+    });
+
+    it("builds multi-row INSERT and returns [] on non-RETURNING dialects (SQLite)", async () => {
+      const rows = await newBuilder(db).insertMany([
+        { name: "Alice" },
+        { name: "Bob" },
       ]);
-      await newBuilder(db).insert({
-        id: undefined,
-        name: undefined,
-        age: undefined,
-      } as unknown as Record<string, unknown>);
       const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(sql).toContain("DEFAULT VALUES");
-      expect(params).toEqual([]);
+      expect(sql).toContain("INSERT");
+      expect(sql).toContain('"users"');
+      expect(params).toContain("Alice");
+      expect(params).toContain("Bob");
+      expect(rows).toEqual([]);
+    });
+
+    it("unions columns in entity order; missing columns use SQL_DEFAULT (mapped to null for SQLite)", async () => {
+      // newBuilder has columnNames: ["id", "name", "age", "country"]
+      // entity order: name before age
+      await newBuilder(db).insertMany([
+        { age: 25 },      // age first in input — entity order must win
+        { name: "Alice" },
+      ]);
+      const [sql, params] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      // columns must appear in entity order: name before age
+      expect(sql.indexOf('"name"')).toBeLessThan(sql.indexOf('"age"'));
+      // SQL_DEFAULT mapped to null for SQLite
+      expect(params).toContain(null);
+    });
+
+    it("throws when all columns are undefined", async () => {
+      await expect(
+        newBuilder(db).insertMany([{ name: undefined } as unknown as Record<string, unknown>])
+      ).rejects.toThrow("insertMany: no column values provided");
     });
   });
 

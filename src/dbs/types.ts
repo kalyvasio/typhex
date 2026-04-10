@@ -62,6 +62,10 @@ export interface CompileSelectOpts {
   havingParams?: unknown[];
 }
 
+/** Sentinel that tells a dialect to emit the column's DB default rather than a value. */
+export const SQL_DEFAULT: unique symbol = Symbol("SQL_DEFAULT");
+export type SqlDefault = typeof SQL_DEFAULT;
+
 /** Resolve __param sentinels to actual values. Shared by all dialects. */
 export function resolveParamSentinels(
   params: unknown[],
@@ -96,8 +100,6 @@ export interface DialectImpl {
   readonly name: Dialect;
   escapeIdentifier(name: string): string;
   placeholder(index: number): string;
-  /** Replace placeholders in SQL with resolved values; expand IN arrays.
-   *  startIdx: first placeholder number to emit (Postgres only; SQLite ignores it). */
   expandPlaceholders(sql: string, resolvedParams: unknown[], startIdx?: number): ExpandPlaceholdersResult;
   compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string;
   compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string;
@@ -111,7 +113,7 @@ export interface DialectImpl {
   compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): string;
   compileSelectList(select: IrSelect | null, columns: string[], opts: CompileOptions): string;
   toColumnDef(def: ColumnDef): string;
-  compileInsert(table: string, columns: string[], values: unknown[], pk?: string): CompileResult;
+  compileInsertMany(table: string, columns: string[], rows: unknown[][], pk?: string): CompileResult;
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult;
   compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult;
   compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult;
