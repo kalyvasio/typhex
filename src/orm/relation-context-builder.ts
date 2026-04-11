@@ -3,7 +3,7 @@
  * and computes the full RelationContext consumed by RelationRunner and QueryBuilder.
  */
 
-import type { RelationsMap, RelationDef, RelationOptions, JunctionOptions } from "../entity/relations.js";
+import type { RelationsMap, RelationDef, RelationOptions, JunctionOptions, RelationType } from "../entity/relations.js";
 import { getPkColumnsFromSchema, type AnyEntityClass } from "../entity/entity.js";
 import type { IrSelect, IrNode, IrSelectRelation } from "../ir/types.js";
 import type { QueryExecutor } from "./db.js";
@@ -11,19 +11,19 @@ import {QueryBuilderInterface} from "./query-builder.js";
 import { getReusableJoinKeys } from "./relation-joins.js";
 
 export interface RelationFetchMetadata {
+  relationType: RelationType;
   relation: IrSelectRelation;
   /** FK column(s) — on the parent row for to-one, on the child row for to-many. */
   fkColumns: string[];
   /** PK column(s) of the related (target) entity. */
   targetPkColumns: string[];
   targetEntity: { query(d?: QueryExecutor): QueryBuilderInterface<AnyEntityClass, unknown> };
-  isArray: boolean;
   /** Parent row PK columns for correlating to-many / M2M (default ["id"]). */
   parentPkColumns?: string[];
   junction?: {
     table: string;
-    foreignKey: string | string[];
-    referenceKey: string | string[];
+    foreignKey: string[];
+    referenceKey: string[];
   };
 }
 
@@ -126,7 +126,7 @@ function resolveSelectColumnsAndRelations(
   columnAliases.push(...keyAliases);
 
   for (const f of relationFetches) {
-    if (f.isArray || f.junction) f.parentPkColumns = effectivePkColumns;
+    if (f.relationType === "one-to-many" || f.relationType === "many-to-many") f.parentPkColumns = effectivePkColumns;
   }
 
   return { columnPaths, columnAliases, relationFetches };
@@ -268,7 +268,8 @@ function missingJoinKeyColumns(
   const added = new Set(existingPaths.map((p) => p[0]));
 
   for (const meta of fetches) {
-    const cols = meta.isArray ? pkColumns : meta.fkColumns;
+    const isMany = meta.relationType === "one-to-many" || meta.relationType === "many-to-many";
+    const cols = isMany ? pkColumns : meta.fkColumns;
     for (const col of cols) {
       if (!added.has(col)) {
         paths.push([col]);
@@ -317,35 +318,35 @@ function buildRelationFetchMeta(
     case "one-to-one": {
       const opts = relDef._options as RelationOptions;
       return {
+        relationType: relDef._relType,
         relation: ir,
         fkColumns: toArr(opts.foreignKey),
         targetPkColumns: opts.references != null ? toArr(opts.references) : targetPkColumnsFromSchema,
         targetEntity,
-        isArray: false,
       };
     }
     case "one-to-many": {
       const opts = relDef._options as { foreignKey: string | string[] };
       return {
+        relationType: "one-to-many",
         relation: ir,
         fkColumns: toArr(opts.foreignKey),
         targetPkColumns: targetPkColumnsFromSchema,
         targetEntity,
-        isArray: true,
       };
     }
     case "many-to-many": {
       const j = relDef._options as JunctionOptions;
       return {
+        relationType: "many-to-many",
         relation: ir,
         fkColumns: toArr(j.referenceKey),
         targetPkColumns: targetPkColumnsFromSchema,
         targetEntity,
-        isArray: true,
         junction: {
           table: j.junction,
-          foreignKey: j.foreignKey,
-          referenceKey: j.referenceKey,
+          foreignKey: toArr(j.foreignKey),
+          referenceKey: toArr(j.referenceKey),
         },
       };
     }

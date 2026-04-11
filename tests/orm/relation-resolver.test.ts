@@ -41,22 +41,23 @@ const companyJoinWhereIr = {
 
 function makeToOneFetch(overrides: Partial<RelationFetchMetadata> = {}): RelationFetchMetadata {
   return {
+    relationType: "many-to-one",
     relation: { name: "company", outputKey: "company" },
     fkColumns: ["companyId"],
     targetPkColumns: ["id"],
     targetEntity: null as any,
-    isArray: false,
     ...overrides,
   };
 }
 
 function makeToManyFetch(overrides: Partial<RelationFetchMetadata> = {}): RelationFetchMetadata {
   return {
+    relationType: "one-to-many",
     relation: { name: "posts", outputKey: "posts" },
     fkColumns: ["userId"],
     targetPkColumns: ["id"],
     targetEntity: null as any,
-    isArray: true,
+    parentPkColumns: ["id"],
     ...overrides,
   };
 }
@@ -267,7 +268,7 @@ describe("relation-resolver", () => {
       expect(ctx.columnPaths).not.toContainEqual(["company"]);
       expect(ctx.relationFetches).toHaveLength(1);
       expect(ctx.relationFetches[0].relation.name).toBe("company");
-      expect(ctx.relationFetches[0].isArray).toBe(false);
+      expect(ctx.relationFetches[0].relationType).toBe("many-to-one");
     });
 
     it("creates fetch for relation field path when not joined", () => {

@@ -20,11 +20,11 @@ function makeMeta(
 ): { meta: RelationFetchMetadata; chain: ReturnType<typeof makeChain> } {
   const chain = makeChain(rows);
   const meta: RelationFetchMetadata = {
+    relationType: "many-to-one",
     relation: { name: "company", outputKey: "company" },
     fkColumns: ["companyId"],
     targetPkColumns: ["id"],
     targetEntity: { query: () => chain } as any,
-    isArray: false,
     ...overrides,
   };
   return { meta, chain };
@@ -39,9 +39,9 @@ describe("fetchRelations", () => {
   });
 
   it("returns empty map for to-many when no rows have an id", async () => {
-    const rows = [{ noId: true }]; // row has no "id" key → collectUniqueValues returns []
+    const rows = [{ noId: true }];
     const { meta } = makeMeta([]);
-    meta.isArray = true;
+    (meta as any).relationType = "one-to-many";
     (meta.relation as any).name = "posts";
     const result = await fetchRelations(null as any, rows, [meta], new Set());
     const postsMap = result.get("posts");
@@ -50,7 +50,7 @@ describe("fetchRelations", () => {
   });
 
   it("returns empty map for to-one when no rows have the fk column", async () => {
-    const rows = [{ id: 1 }]; // no "companyId" → collectUniqueValues returns []
+    const rows = [{ id: 1 }]; // no "companyId" → buildFetchByIdIr returns null
     const { meta } = makeMeta([]);
     const result = await fetchRelations(null as any, rows, [meta], new Set());
     const companyMap = result.get("company");
@@ -73,9 +73,9 @@ describe("fetchRelations", () => {
     const rows = [{ id: 5 }, { id: 6 }];
     const relatedRows = [{ id: 1, userId: 5 }, { id: 2, userId: 5 }, { id: 3, userId: 6 }];
     const { meta } = makeMeta(relatedRows, {
+      relationType: "one-to-many",
       relation: { name: "posts", outputKey: "posts" },
       fkColumns: ["userId"],
-      isArray: true,
     } as any);
 
     const result = await fetchRelations(null as any, rows, [meta], new Set());
@@ -149,7 +149,7 @@ describe("fetchRelations", () => {
   it("handles empty sub-array in subPaths (uses fallback via ??)", async () => {
     const rows = [{ id: 1, companyId: 10 }];
     const { meta, chain } = makeMeta([{ id: 10, name: "Acme" }]);
-    (meta.relation as any).subPaths = [[], ["name"]]; // [] entry → p[0] ?? p → [] (flattened away)
+    (meta.relation as any).subPaths = [[], ["name"]]; // [] entry → flatMap collapses it
 
     await fetchRelations(null as any, rows, [meta], new Set());
 
@@ -167,5 +167,40 @@ describe("fetchRelations", () => {
 
     // where should have been called with a combined (AND) whereIr
     expect(chain.where).toHaveBeenCalled();
+  });
+
+  it("many-to-many: queries junction then groups targets by parent PK", async () => {
+    const parentRows = [{ id: 1 }, { id: 2 }];
+    const junctionRows = [
+      { userId: 1, tagId: 10 },
+      { userId: 1, tagId: 20 },
+      { userId: 2, tagId: 20 },
+    ];
+    const tagRows = [{ id: 10, name: "ts" }, { id: 20, name: "js" }];
+    const chain = makeChain(tagRows);
+    const qe = {
+      dialect: "sqlite" as const,
+      query: vi.fn().mockResolvedValue(junctionRows),
+      run: vi.fn(),
+    };
+
+    const meta: RelationFetchMetadata = {
+      relationType: "many-to-many",
+      relation: { name: "tags", outputKey: "tags" } as any,
+      fkColumns: ["tagId"],
+      targetPkColumns: ["id"],
+      targetEntity: { query: () => chain } as any,
+      parentPkColumns: ["id"],
+      junction: { table: "user_tags", foreignKey: ["userId"], referenceKey: ["tagId"] },
+    };
+
+    const result = await fetchRelations(qe as any, parentRows, [meta], new Set());
+    const map = result.get("tags") as Map<string, unknown[]>;
+
+    // parent 1 → 2 tags; parent 2 → 1 tag
+    expect(map.get(JSON.stringify(1))).toHaveLength(2);
+    expect(map.get(JSON.stringify(2))).toHaveLength(1);
+    // junction query used dialect escaping
+    expect(qe.query).toHaveBeenCalledTimes(1);
   });
 });

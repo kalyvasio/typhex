@@ -5,8 +5,9 @@
 
 import type { QueryExecutor } from "./db.js";
 import type { RelationFetchMetadata } from "./relation-context-builder.js";
-import type { IrNode } from "../ir/types.js";
+import type { IrSelectRelation } from "../ir/types.js";
 import { whereAnd, makeCompositeKey, buildFetchByIdIr } from "./query-helpers.js";
+import { QueryBuilder } from "./query-builder.js";
 
 /** Run one WHERE IN query per pending relation fetch and collect results into keyed maps.
  *  Skips relations in `skip` (already loaded via JOIN).
@@ -21,41 +22,107 @@ export async function fetchRelations(
   const result = new Map<string, Map<string, unknown> | Map<string, unknown[]>>();
   for (const meta of fetches) {
     if (skip.has(meta.relation.name)) continue;
-    if (meta.isArray) {
-      const parentPkCols = meta.parentPkColumns ?? ["id"];
-      const baseWhere = buildFetchByIdIr(rows, parentPkCols, meta.fkColumns);
-      if (!baseWhere) { result.set(meta.relation.name, new Map()); continue; }
-      const related = await buildRelatedQuery(meta, qe, baseWhere, meta.fkColumns);
-      result.set(meta.relation.name, groupByCompositeKey(related, meta.fkColumns));
-    } else {
-      const baseWhere = buildFetchByIdIr(rows, meta.fkColumns, meta.targetPkColumns);
-      if (!baseWhere) { result.set(meta.relation.name, new Map()); continue; }
-      const related = await buildRelatedQuery(meta, qe, baseWhere, meta.targetPkColumns);
-      result.set(meta.relation.name, indexByCompositeKey(related, meta.targetPkColumns));
+    switch (meta.relationType) {
+      case "many-to-many":
+        result.set(meta.relation.name, await fetchManyToMany(qe, meta, rows));
+        break;
+      case "one-to-many":
+        result.set(meta.relation.name, await fetchOneToMany(qe, meta, rows));
+        break;
+      default:
+        result.set(meta.relation.name, await fetchOneToOne(qe, meta, rows));
     }
   }
   return result;
 }
 
-/** Construct and execute the WHERE query for a single relation,
- *  applying any sub-select projection, ordering, limit, and offset
- *  from the relation IR. All anchor columns are included in the SELECT
- *  list so rows can be correlated back to their parents by composite key. */
-async function buildRelatedQuery(
-  meta: RelationFetchMetadata,
+/** Fetch a to-many relation: WHERE IN on FK columns, grouped by FK composite key. */
+async function fetchOneToMany(
   qe: QueryExecutor,
-  baseWhere: IrNode,
-  anchorColumns: string[]
-): Promise<unknown[]> {
-  const whereIr = meta.relation.whereIr ? whereAnd(baseWhere, meta.relation.whereIr) : baseWhere;
+  meta: RelationFetchMetadata,
+  rows: Record<string, unknown>[]
+): Promise<Map<string, unknown[]>> {
+  const parentPkCols = meta.parentPkColumns ?? ["id"];
+  const related = await fetchRows(qe, rows, parentPkCols, meta.fkColumns, meta.targetEntity, meta.relation);
+  return groupByCompositeKey(related, meta.fkColumns);
+}
 
-  let chain = meta.targetEntity.query(qe).where(whereIr, meta.relation.whereParams ?? {});
-  for (const o of meta.relation.orderBy ?? []) chain = chain.orderBy(o.path[0] ?? "", o.direction);
-  if (meta.relation.limitNum != null) chain = chain.limit(meta.relation.limitNum);
-  if (meta.relation.offsetNum != null) chain = chain.offset(meta.relation.offsetNum);
-  if (meta.relation.subPaths && meta.relation.subPaths.length > 0) {
-    const cols = meta.relation.subPaths.map((p) => p[0] ?? p).flat();
-    for (const col of anchorColumns) {
+/** Fetch a to-one relation: WHERE IN on FK→target-PK, indexed by target PK composite key. */
+async function fetchOneToOne(
+  qe: QueryExecutor,
+  meta: RelationFetchMetadata,
+  rows: Record<string, unknown>[]
+): Promise<Map<string, unknown>> {
+  const related = await fetchRows(qe, rows, meta.fkColumns, meta.targetPkColumns, meta.targetEntity, meta.relation);
+  return indexByCompositeKey(related, meta.targetPkColumns);
+}
+
+/** Many-to-many: two fetchRows calls through the junction, grouped by parent composite key. */
+async function fetchManyToMany(
+  qe: QueryExecutor,
+  meta: RelationFetchMetadata,
+  rows: Record<string, unknown>[]
+): Promise<Map<string, unknown[]>> {
+  const j = meta.junction!;
+  const parentPkCols = meta.parentPkColumns ?? ["id"];
+
+  const out = new Map<string, unknown[]>();
+  for (const row of rows) out.set(makeCompositeKey(row, parentPkCols), []);
+
+  // Step 1: parent rows → junction rows (no user relation options)
+  const junctionRows = await fetchRows(
+    qe, rows, parentPkCols, j.foreignKey,
+    makeJunctionQueryable(j.table, [...j.foreignKey, ...j.referenceKey])
+  ) as Record<string, unknown>[];
+  if (junctionRows.length === 0) return out;
+
+  // Step 2: junction rows → target entities (with user relation options)
+  const related = await fetchRows(qe, junctionRows, j.referenceKey, meta.targetPkColumns, meta.targetEntity, meta.relation);
+  // Build targetKey → [parentKeys] from junction rows so we can iterate
+  // `related` in fetch order (preserving any orderBy applied to the relation).
+  const targetToParents = new Map<string, string[]>();
+  for (const jr of junctionRows) {
+    const parentKey = makeCompositeKey(remapCols(jr, j.foreignKey, parentPkCols), parentPkCols);
+    const targetKey = makeCompositeKey(remapCols(jr, j.referenceKey, meta.targetPkColumns), meta.targetPkColumns);
+    const arr = targetToParents.get(targetKey) ?? [];
+    arr.push(parentKey);
+    targetToParents.set(targetKey, arr);
+  }
+
+  // Append each target to its parent array(s) in the order they were fetched.
+  for (const target of related) {
+    const targetKey = makeCompositeKey(target as Record<string, unknown>, meta.targetPkColumns);
+    for (const parentKey of targetToParents.get(targetKey) ?? []) {
+      const arr = out.get(parentKey) ?? [];
+      arr.push(target);
+      out.set(parentKey, arr);
+    }
+  }
+  return out;
+}
+
+/** Batch-fetch rows from `entity` by mapping `srcCols` values from `srcRows` onto `tgtCols`
+ *  via AND-of-INs. Applies user relation options (ordering, limit, subPath projection) when
+ *  `rel` is provided. Returns flat rows — callers group/index as needed. */
+async function fetchRows(
+  qe: QueryExecutor,
+  srcRows: Record<string, unknown>[],
+  srcCols: string[],
+  tgtCols: string[],
+  entity: { query(qe?: QueryExecutor): { where: Function; orderBy: Function; limit: Function; offset: Function; select: Function; toArray(): Promise<unknown[]> } },
+  rel?: IrSelectRelation
+): Promise<unknown[]> {
+  const baseWhere = buildFetchByIdIr(srcRows, srcCols, tgtCols);
+  if (!baseWhere) return [];
+
+  const whereIr = rel?.whereIr ? whereAnd(baseWhere, rel.whereIr) : baseWhere;
+  let chain = entity.query(qe).where(whereIr, rel?.whereParams ?? {});
+  for (const o of rel?.orderBy ?? []) chain = chain.orderBy(o.path[0] ?? "", o.direction);
+  if (rel?.limitNum != null) chain = chain.limit(rel.limitNum);
+  if (rel?.offsetNum != null) chain = chain.offset(rel.offsetNum);
+  if (rel?.subPaths && rel.subPaths.length > 0) {
+    const cols = rel.subPaths.flatMap((p) => p[0] ?? p) as string[];
+    for (const col of tgtCols) {
       if (!cols.includes(col)) cols.push(col);
     }
     chain = chain.select(cols);
@@ -64,12 +131,36 @@ async function buildRelatedQuery(
   return chain.toArray();
 }
 
+/** Build a queryable entity backed by a raw SQL table — uses QueryBuilder directly
+ *  so no dialect calls need to be duplicated here. */
+function makeJunctionQueryable(table: string, cols: string[]) {
+  return {
+    query: (qe?: QueryExecutor) => new QueryBuilder({
+      tableName: table,
+      columnNames: cols,
+      qe: qe!,
+      whereIr: null,
+      whereParams: {},
+      orderBy: [],
+      limitNum: null,
+      offsetNum: null,
+      selectIr: null,
+    }),
+  };
+}
+
+/** Remap column values from a junction row onto a new column namespace for makeCompositeKey. */
+function remapCols(row: Record<string, unknown>, from: string[], to: string[]): Record<string, unknown> {
+  const r: Record<string, unknown> = {};
+  for (let i = 0; i < to.length; i++) r[to[i]] = row[from[i] ?? from[0]];
+  return r;
+}
+
 /** Index rows by composite key for O(1) to-one lookups (keyed by target PK columns). */
 function indexByCompositeKey(rows: unknown[], keys: string[]): Map<string, unknown> {
   const map = new Map<string, unknown>();
   for (const r of rows) {
-    const k = makeCompositeKey(r as Record<string, unknown>, keys);
-    map.set(k, r);
+    map.set(makeCompositeKey(r as Record<string, unknown>, keys), r);
   }
   return map;
 }
