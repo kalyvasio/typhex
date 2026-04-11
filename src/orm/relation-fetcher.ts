@@ -5,7 +5,8 @@
 
 import type { QueryExecutor } from "./db.js";
 import type { RelationFetchMetadata } from "./relation-context-builder.js";
-import { whereColumnIn, whereAnd } from "./query-helpers.js";
+import type { IrNode } from "../ir/types.js";
+import { whereAnd, makeCompositeKey, buildFetchByIdIr } from "./query-helpers.js";
 
 /** Run one WHERE IN query per pending relation fetch and collect results into keyed maps.
  *  Skips relations in `skip` (already loaded via JOIN).
@@ -16,43 +17,36 @@ export async function fetchRelations(
   rows: Record<string, unknown>[],
   fetches: RelationFetchMetadata[],
   skip: Set<string>
-): Promise<Map<string, Map<unknown, unknown> | Map<unknown, unknown[]>>> {
-  const result = new Map<string, Map<unknown, unknown> | Map<unknown, unknown[]>>();
+): Promise<Map<string, Map<string, unknown> | Map<string, unknown[]>>> {
+  const result = new Map<string, Map<string, unknown> | Map<string, unknown[]>>();
   for (const meta of fetches) {
     if (skip.has(meta.relation.name)) continue;
     if (meta.isArray) {
-      const ids = collectUniqueValues(rows, "id");
-      if (ids.length === 0) { result.set(meta.relation.name, new Map()); continue; }
-      const related = await buildRelatedQuery(meta, qe, meta.fkColumn, ids, meta.fkColumn);
-      result.set(meta.relation.name, groupByKey(related, meta.fkColumn));
+      const parentPkCols = meta.parentPkColumns ?? ["id"];
+      const baseWhere = buildFetchByIdIr(rows, parentPkCols, meta.fkColumns);
+      if (!baseWhere) { result.set(meta.relation.name, new Map()); continue; }
+      const related = await buildRelatedQuery(meta, qe, baseWhere, meta.fkColumns);
+      result.set(meta.relation.name, groupByCompositeKey(related, meta.fkColumns));
     } else {
-      const ids = collectUniqueValues(rows, meta.fkColumn);
-      if (ids.length === 0) { result.set(meta.relation.name, new Map()); continue; }
-      const related = await buildRelatedQuery(meta, qe, meta.targetPk, ids, meta.targetPk);
-      result.set(meta.relation.name, indexByKey(related, meta.targetPk));
+      const baseWhere = buildFetchByIdIr(rows, meta.fkColumns, meta.targetPkColumns);
+      if (!baseWhere) { result.set(meta.relation.name, new Map()); continue; }
+      const related = await buildRelatedQuery(meta, qe, baseWhere, meta.targetPkColumns);
+      result.set(meta.relation.name, indexByCompositeKey(related, meta.targetPkColumns));
     }
   }
   return result;
 }
 
-/** Extract distinct non-null values of `column` from the result rows
- *  to build the IN list for the follow-up query. */
-function collectUniqueValues(rows: Record<string, unknown>[], column: string): unknown[] {
-  return [...new Set(rows.map((r) => r[column]).filter((v) => v != null))];
-}
-
-/** Construct and execute the WHERE IN query for a single relation,
+/** Construct and execute the WHERE query for a single relation,
  *  applying any sub-select projection, ordering, limit, and offset
- *  from the relation IR. The anchor column is always included in the
- *  SELECT list so rows can be correlated back to their parents. */
+ *  from the relation IR. All anchor columns are included in the SELECT
+ *  list so rows can be correlated back to their parents by composite key. */
 async function buildRelatedQuery(
   meta: RelationFetchMetadata,
   qe: QueryExecutor,
-  whereInColumn: string,
-  ids: unknown[],
-  anchorColumn: string
+  baseWhere: IrNode,
+  anchorColumns: string[]
 ): Promise<unknown[]> {
-  const baseWhere = whereColumnIn(whereInColumn, ids as number[]);
   const whereIr = meta.relation.whereIr ? whereAnd(baseWhere, meta.relation.whereIr) : baseWhere;
 
   let chain = meta.targetEntity.query(qe).where(whereIr, meta.relation.whereParams ?? {});
@@ -61,33 +55,33 @@ async function buildRelatedQuery(
   if (meta.relation.offsetNum != null) chain = chain.offset(meta.relation.offsetNum);
   if (meta.relation.subPaths && meta.relation.subPaths.length > 0) {
     const cols = meta.relation.subPaths.map((p) => p[0] ?? p).flat();
-    if (!cols.includes(anchorColumn)) cols.push(anchorColumn);
+    for (const col of anchorColumns) {
+      if (!cols.includes(col)) cols.push(col);
+    }
     chain = chain.select(cols);
   }
 
   return chain.toArray();
 }
 
-/** Index rows by `key` into a Map for O(1) to-one lookups (keyed by the relation's target PK). */
-function indexByKey(rows: unknown[], key: string): Map<unknown, unknown> {
-  const map = new Map<unknown, unknown>();
+/** Index rows by composite key for O(1) to-one lookups (keyed by target PK columns). */
+function indexByCompositeKey(rows: unknown[], keys: string[]): Map<string, unknown> {
+  const map = new Map<string, unknown>();
   for (const r of rows) {
-    const k = (r as Record<string, unknown>)[key];
-    if (k !== undefined) map.set(k, r);
+    const k = makeCompositeKey(r as Record<string, unknown>, keys);
+    map.set(k, r);
   }
   return map;
 }
 
-/** Group rows by `key` into a Map of arrays for O(1) to-many lookups (keyed by the FK column). */
-function groupByKey(rows: unknown[], key: string): Map<unknown, unknown[]> {
-  const map = new Map<unknown, unknown[]>();
+/** Group rows by composite key for O(1) to-many lookups (keyed by FK columns). */
+function groupByCompositeKey(rows: unknown[], keys: string[]): Map<string, unknown[]> {
+  const map = new Map<string, unknown[]>();
   for (const r of rows) {
-    const k = (r as Record<string, unknown>)[key];
-    if (k !== undefined) {
-      const arr = map.get(k) ?? [];
-      arr.push(r);
-      map.set(k, arr);
-    }
+    const k = makeCompositeKey(r as Record<string, unknown>, keys);
+    const arr = map.get(k) ?? [];
+    arr.push(r);
+    map.set(k, arr);
   }
   return map;
 }

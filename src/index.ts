@@ -16,7 +16,7 @@ export { parseArrowToIr, parseArrowToIrSelect } from "./parser/index.js";
 export type { ParseOptions } from "./parser/index.js";
 export type { CompileResult, CompileOptions, OnConflictClause } from "./dbs/index.js";
 export type { TableDefinition, ColumnDef } from "./schema/index.js";
-export { Entity, rel } from "./entity/index.js";
+export { Entity, rel, getPkColumnsFromSchema } from "./entity/index.js";
 export type {
   EntityClass,
   Row,
@@ -58,8 +58,6 @@ export type {
   ManyToOne,
   OneToOne,
   ManyToMany,
-  UntypedOneToMany,
-  UntypedManyToOne,
 } from "./entity/index.js";
 export type { DiffAction, Dialect, MigrationFile, MigrationRecord } from "./migration/index.js";
 export { diffSchema, generateMigrationFiles, runMigrations, migrationStatus } from "./migration/index.js";

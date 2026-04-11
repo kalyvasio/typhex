@@ -19,7 +19,7 @@ async function ensureTrackingTable(driver: Driver): Promise<void> {
 
 async function getApplied(driver: Driver): Promise<Set<string>> {
   await ensureTrackingTable(driver);
-  const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
+  const esc = (n: string) => `"${n.replaceAll('"', '""')}"`;
   const table = esc("_typhex_migrations");
   const rows = (await driver.execute(
     `SELECT ${esc("name")} FROM ${table} ORDER BY ${esc("id")}`
@@ -82,7 +82,7 @@ export async function migrationStatus(
   dir: string
 ): Promise<{ applied: MigrationRecord[]; pending: string[] }> {
   await ensureTrackingTable(driver);
-  const esc = (n: string) => `"${n.replace(/"/g, '""')}"`;
+  const esc = (n: string) => `"${n.replaceAll('"', '""')}"`;
   const table = esc("_typhex_migrations");
   const appliedRows = (await driver.execute(
     `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${table} ORDER BY ${esc("id")}`

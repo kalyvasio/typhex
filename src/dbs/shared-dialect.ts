@@ -8,7 +8,7 @@
  * provided by the dialect object passed to makeCompileNode().
  */
 
-import type { IrNode, IrBinary, IrMember, IrConst, IrExists, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrMember, IrConst, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
 import type { CompileOptions, DialectImpl, ResolvedOpts } from "./types.js";
 
 export const DEFAULT_OPTS: CompileOptions = {
@@ -17,7 +17,7 @@ export const DEFAULT_OPTS: CompileOptions = {
 };
 
 export function quoteId(name: string): string {
-  return `"${name.replace(/"/g, '""')}"`;
+  return `"${name.replaceAll('"', '""')}"`;
 }
 
 export function resolveOpts(options: CompileOptions): ResolvedOpts {
@@ -91,7 +91,7 @@ export function compileConcatAggregate(
   const distinctPrefix = agg.distinct ? "DISTINCT " : "";
   const sepLiteral =
     agg.separator !== undefined
-      ? `'${agg.separator.replace(/'/g, "''")}'`
+      ? `'${agg.separator.replaceAll("'", "''")}'`
       : defaultSep;
   const inner =
     sepLiteral !== undefined
@@ -178,7 +178,7 @@ function compileExistsNode(
   const innerOpts = { ...opts, paramToAlias: { ...opts.paramToAlias, [node.innerParam]: info.alias } };
   const innerSql = compileNode(node.innerWhere, innerOpts, params);
   const wrappedSql = node.negated ? `(NOT (${innerSql}))` : innerSql;
-  const existsSql = dialect.compileExists(info.targetTable, info.alias, info.fkColumn, opts.tableAlias, info.mainPk, wrappedSql);
+  const existsSql = dialect.compileExists(info.targetTable, info.alias, info.fkColumns, opts.tableAlias, info.mainPk, wrappedSql);
   return node.negated ? `(NOT ${existsSql})` : existsSql;
 }
 

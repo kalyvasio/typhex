@@ -2,12 +2,12 @@
  * Shared migration utilities used by both SQLite and Postgres dialects.
  */
 
-import type { Driver, DbMigrations, DiffAction, DbColumnInfo, DialectImpl } from "./types.js";
+import type { DiffAction, DbColumnInfo, DialectImpl } from "./types.js";
 import { getColumnDef } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 
 export function extractBaseType(def: string): string {
-  const trimmed = def.trim().toLowerCase().replace(/\s+/g, " ");
+  const trimmed = def.trim().toLowerCase().replaceAll(/\s+/g, " ");
   const withoutModifiers = trimmed.replace(/^(?:unsigned|signed)\s+/, "");
   const multiWord = withoutModifiers.match(
     /^(?:double\s+precision|character\s+varying|timestamp\s+with\s+time\s+zone|timestamp\s+without\s+time\s+zone)(?:\([^)]*\))?/

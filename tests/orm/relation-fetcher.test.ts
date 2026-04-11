@@ -21,8 +21,8 @@ function makeMeta(
   const chain = makeChain(rows);
   const meta: RelationFetchMetadata = {
     relation: { name: "company", outputKey: "company" },
-    fkColumn: "companyId",
-    targetPk: "id",
+    fkColumns: ["companyId"],
+    targetPkColumns: ["id"],
     targetEntity: { query: () => chain } as any,
     isArray: false,
     ...overrides,
@@ -64,9 +64,9 @@ describe("fetchRelations", () => {
     const { meta } = makeMeta(relatedRows);
 
     const result = await fetchRelations(null as any, rows, [meta], new Set());
-    const map = result.get("company") as Map<unknown, unknown>;
-    expect(map.get(10)).toEqual({ id: 10, name: "Acme" });
-    expect(map.get(20)).toEqual({ id: 20, name: "Globex" });
+    const map = result.get("company") as Map<string, unknown>;
+    expect(map.get("10")).toEqual({ id: 10, name: "Acme" });
+    expect(map.get("20")).toEqual({ id: 20, name: "Globex" });
   });
 
   it("fetches to-many relations and groups by fkColumn", async () => {
@@ -74,14 +74,14 @@ describe("fetchRelations", () => {
     const relatedRows = [{ id: 1, userId: 5 }, { id: 2, userId: 5 }, { id: 3, userId: 6 }];
     const { meta } = makeMeta(relatedRows, {
       relation: { name: "posts", outputKey: "posts" },
-      fkColumn: "userId",
+      fkColumns: ["userId"],
       isArray: true,
     } as any);
 
     const result = await fetchRelations(null as any, rows, [meta], new Set());
-    const map = result.get("posts") as Map<unknown, unknown[]>;
-    expect(map.get(5)).toHaveLength(2);
-    expect(map.get(6)).toHaveLength(1);
+    const map = result.get("posts") as Map<string, unknown[]>;
+    expect(map.get("5")).toHaveLength(2);
+    expect(map.get("6")).toHaveLength(1);
   });
 
   it("applies orderBy to the query chain", async () => {

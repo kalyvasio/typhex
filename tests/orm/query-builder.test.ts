@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { QueryBuilder } from "../../src/orm/query-builder.js";
+import { QueryBuilder } from "../../src";
 import { whereColumnEq } from "../../src/orm/query-helpers.js";
-import type { IrNode, IrSelect } from "../../src/ir/types.js";
-import { isIrSelect } from "../../src/ir/types.js";
+import type { IrNode, IrSelect } from "../../src";
+import { isIrSelect } from "../../src";
 import { Entity } from "../../src";
 import { type MockDb, createMockDb } from "../helpers.js";
 
@@ -22,7 +22,7 @@ function newBuilder(db: MockDb, columnNames = ["id", "name", "age"]) {
     tableName: "users",
     columnNames: [...columnNames, "country"],
     qe: db,
-    pkColumn: "id",
+    pkColumns: ["id"],
     whereIr: null,
     whereParams: {},
     orderBy: [],
@@ -334,7 +334,7 @@ describe("QueryBuilder", () => {
         tableName: "users",
         columnNames: ["id", "name", "age"],
         qe: db,
-        pkColumn: "id",
+        pkColumns: ["id"],
         whereIr: null,
         whereParams: {},
         orderBy: [],
@@ -365,7 +365,7 @@ describe("QueryBuilder", () => {
         tableName: "users",
         columnNames: ["id", "name", "age"],
         qe: db,
-        pkColumn: "id",
+        pkColumns: ["id"],
         whereIr: null,
         whereParams: {},
         orderBy: [],
@@ -401,7 +401,7 @@ describe("QueryBuilder", () => {
         tableName: "users",
         columnNames: ["id", "name", "age"],
         qe: db,
-        pkColumn: "id",
+        pkColumns: ["id"],
         whereIr: null,
         whereParams: {},
         orderBy: [],

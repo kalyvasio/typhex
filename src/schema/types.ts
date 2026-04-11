@@ -13,7 +13,7 @@ export interface ColumnDef {
 export type TableDefinition = Record<string, string | ColumnDef>;
 
 function stripForConstraintCheck(def: string): string {
-  return def.replace(/'[^']*'/g, "").replace(/--[^\n]*/g, "");
+  return def.replaceAll(/'[^']*'/g, "").replaceAll(/--[^\n]*/g, "");
 }
 
 /** Normalize to ColumnDef */
@@ -42,6 +42,6 @@ export function sqlType(def: TableDefinition, col: string): string {
   if (c.primaryKey && !lower.includes("primary key")) out += " PRIMARY KEY";
   if (c.autoIncrement && !lower.includes("autoincrement")) out += " AUTOINCREMENT";
   if (c.nullable === false && !lower.includes("not null")) out += " NOT NULL";
-  if (c.default !== undefined) out += " DEFAULT " + (typeof c.default === "number" ? c.default : `'${String(c.default).replace(/'/g, "''")}'`);
+  if (c.default !== undefined) out += " DEFAULT " + (typeof c.default === "number" ? c.default : `'${String(c.default).replaceAll("'", "''")}'`);
   return out;
 }

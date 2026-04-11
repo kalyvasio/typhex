@@ -29,7 +29,7 @@ function newBuilder(db: MockDb) {
     tableName: "mock_contacts",
     columnNames: ["id", "name", "companyId"],
     qe: db,
-    pkColumn: "id",
+    pkColumns: ["id"],
     whereIr: null,
     whereParams: {},
     orderBy: [],
@@ -39,7 +39,7 @@ function newBuilder(db: MockDb) {
     relations: MockContactE.table._relations,
     resolveRelationTarget: (rel: RelationDef) => {
       const target = rel._target() as { table?: { _table: string } } | null;
-      return target?.table ? { table: target.table._table, pk: "id" } : null;
+      return target?.table ? { table: target.table._table, pk: ["id"] } : null;
     },
   });
 }
@@ -264,7 +264,7 @@ describe("orderBy relation columns — integration", () => {
       tableName: "contacts_ob",
       columnNames: ["id", "name", "companyId"],
       qe: mockDb,
-      pkColumn: "id",
+      pkColumns: ["id"],
       whereIr: null,
       whereParams: {},
       orderBy: [] as IrOrderBy[],
@@ -274,7 +274,7 @@ describe("orderBy relation columns — integration", () => {
       relations: ContactE.table._relations,
       resolveRelationTarget: (rel: RelationDef) => {
         const target = rel._target() as { table?: { _table: string } } | null;
-        return target?.table ? { table: target.table._table, pk: "id" } : null;
+        return target?.table ? { table: target.table._table, pk: ["id"] } : null;
       },
     };
     const qb = new QueryBuilder(state);

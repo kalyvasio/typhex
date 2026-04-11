@@ -5,7 +5,7 @@
 
 import type { QueryState } from "./query-builder.js";
 import { QueryBuilder } from "./query-builder.js";
-import { whereColumnEq } from "./query-helpers.js";
+import { buildFindByIdIr } from "./query-helpers.js";
 
 
 export class SingleRowQueryBuilder<T = unknown> {
@@ -13,17 +13,17 @@ export class SingleRowQueryBuilder<T = unknown> {
     private readonly instance: Record<string, unknown>,
     private readonly state: QueryState<unknown>,
     private readonly runHook: (instance: unknown, name: string) => Promise<void>,
-    private readonly pkColumn: string,
+    private readonly pkColumns: string[],
     private readonly columnNames: string[],
   ) {}
 
-  /** Insert if instance has no pk, else update all column values. No _dirty; uses current instance state. */
+  /** Insert if instance has no complete pk, else update all column values. No _dirty; uses current instance state. */
   async save(): Promise<void> {
     const self = this.instance as T & { _isNew?: boolean };
     await this.runHook(self, "beforeSave");
-    const pkVal = this.instance[this.pkColumn];
+    const hasAllPk = this.pkColumns.every((c) => this.instance[c] !== undefined);
 
-    if (pkVal === undefined || pkVal === null) {
+    if (!hasAllPk) {
       await this.runHook(self, "beforeCreate");
       const row: Record<string, unknown> = {};
       for (const c of this.columnNames) {
@@ -39,12 +39,12 @@ export class SingleRowQueryBuilder<T = unknown> {
       await this.runHook(self, "beforeUpdate");
       const set: Record<string, unknown> = {};
       for (const c of this.columnNames) {
-        if (c !== this.pkColumn && this.instance[c] !== undefined) set[c] = this.instance[c];
+        if (!this.pkColumns.includes(c) && this.instance[c] !== undefined) set[c] = this.instance[c];
       }
       if (Object.keys(set).length > 0) {
         await new QueryBuilder({
           ...this.state,
-          whereIr: whereColumnEq(this.pkColumn, pkVal),
+          whereIr: buildFindByIdIr(this.pkColumns, this.instance),
           whereParams: {},
         }).update(set);
       }
@@ -57,15 +57,14 @@ export class SingleRowQueryBuilder<T = unknown> {
   async delete(): Promise<void> {
     const self = this.instance;
     await this.runHook(self, "beforeDelete");
-    const pkVal = this.instance[this.pkColumn];
-    if (pkVal === undefined || pkVal === null) {
+    const hasAllPk = this.pkColumns.every((c) => this.instance[c] !== undefined);
+    if (!hasAllPk) {
       await this.runHook(self, "afterDelete");
       return;
     }
-    const state = this.state;
     await new QueryBuilder({
-      ...state,
-      whereIr: whereColumnEq(this.pkColumn, pkVal),
+      ...this.state,
+      whereIr: buildFindByIdIr(this.pkColumns, this.instance),
       whereParams: {},
     }).delete();
     await this.runHook(self, "afterDelete");
@@ -73,11 +72,11 @@ export class SingleRowQueryBuilder<T = unknown> {
 
   /** Update the row by pk with the given set, then assign set onto the instance. */
   async patch(set: Record<string, unknown>): Promise<void> {
-    const pkVal = this.instance[this.pkColumn];
-    if (pkVal === undefined || pkVal === null) return;
+    const hasAllPk = this.pkColumns.every((c) => this.instance[c] !== undefined);
+    if (!hasAllPk) return;
     await new QueryBuilder({
       ...this.state,
-      whereIr: whereColumnEq(this.pkColumn, pkVal),
+      whereIr: buildFindByIdIr(this.pkColumns, this.instance),
       whereParams: {},
     }).update(set);
     for (const k of Object.keys(set)) this.instance[k] = set[k];

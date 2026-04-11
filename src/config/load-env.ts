@@ -20,7 +20,7 @@ function parseEnv(content: string): Record<string, string> {
     if (!key.startsWith(ENV_PREFIX)) continue;
     let value = raw;
     if ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'"))) {
-      value = raw.slice(1, -1).replace(/\\(.)/g, "$1");
+      value = raw.slice(1, -1).replaceAll(/\\(.)/g, "$1");
     }
     out[key] = value;
   }

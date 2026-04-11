@@ -65,7 +65,7 @@ export const postgresDialect: DialectImpl = {
   name: "postgres",
 
   escapeIdentifier(name: string): string {
-    return '"' + String(name).replace(/"/g, '""') + '"';
+    return '"' + String(name).replaceAll('"', '""') + '"';
   },
 
   placeholder(index: number): string {
@@ -76,7 +76,7 @@ export const postgresDialect: DialectImpl = {
     let idx = 0;
     const newParams: unknown[] = [];
     let paramIndex = startIdx;
-    const newSql = sql.replace(/\$(\d+)/g, () => {
+    const newSql = sql.replaceAll(/\$(\d+)/g, () => {
       const v = resolvedParams[idx++];
       if (Array.isArray(v)) {
         v.forEach((x) => newParams.push(x));
@@ -111,21 +111,22 @@ export const postgresDialect: DialectImpl = {
     table: string,
     columns: string[],
     values: unknown[],
-    pk?: string,
+    pk?: string[],
     onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
+    const hasPk = !!pk?.length;
     if (columns.length === 0) {
       if (onConflict) {
         throw new Error("insert: ON CONFLICT requires explicit columns (empty INSERT not supported with onConflict)");
       }
-      return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES${pk ? " RETURNING *" : ""}`, params: [], returningRow: !!pk };
+      return { sql: `INSERT INTO ${esc(table)} DEFAULT VALUES${hasPk ? " RETURNING *" : ""}`, params: [], returningRow: hasPk };
     }
     const ph = columns.map((_, i) => `$${i + 1}`).join(", ");
     let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES (${ph})`;
     if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
-    if (pk) sql += " RETURNING *";
-    return { sql, params: values, returningRow: !!pk };
+    if (hasPk) sql += " RETURNING *";
+    return { sql, params: values, returningRow: hasPk };
   },
 
 
@@ -133,7 +134,7 @@ export const postgresDialect: DialectImpl = {
     table: string,
     columns: string[],
     rows: unknown[][],
-    pk?: string,
+    pk?: string[],
     onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
@@ -150,8 +151,9 @@ export const postgresDialect: DialectImpl = {
     });
     let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${rowPlaceholders.join(", ")}`;
     if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
-    if (pk) sql += " RETURNING *";
-    return { sql, params, returningRow: !!pk };
+    const hasPk = !!pk?.length;
+    if (hasPk) sql += " RETURNING *";
+    return { sql, params, returningRow: hasPk };
   },
 
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult {
@@ -163,14 +165,14 @@ export const postgresDialect: DialectImpl = {
     if (cols.length === 0) return { sql: "", params: [] };
     const esc = quoteId;
     const assignments = cols.map((c, i) => `${esc(c)} = $${i + 1}`).join(", ");
-    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
-    const renumberedWhere = fixedWhere.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n, 10) + cols.length}`);
+    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
+    const renumberedWhere = fixedWhere.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + cols.length}`);
     return { sql: `UPDATE ${esc(table)} SET ${assignments} WHERE ${renumberedWhere}`, params: [...cols.map((c) => set[c]), ...whereParams] };
   },
 
   compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult {
     const esc = quoteId;
-    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
     return { sql: `DELETE FROM ${esc(table)} WHERE ${fixedWhere}`, params: whereParams };
   },
 
@@ -196,8 +198,9 @@ export const postgresDialect: DialectImpl = {
     return { sql, params };
   },
 
-  compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string {
-    return `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${quoteId(alias)}.${quoteId(fkColumn)} = ${quoteId(mainAlias)}.${quoteId(mainPk)} AND (${innerSql})))`;
+  compileExists(targetTable: string, alias: string, fkColumns: string[], mainAlias: string, mainPk: string[], innerSql: string): string {
+    const pkConds = fkColumns.map((fk, i) => `${quoteId(alias)}.${quoteId(fk)} = ${quoteId(mainAlias)}.${quoteId(mainPk[i] ?? mainPk[0])}`).join(" AND ");
+    return `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${pkConds} AND (${innerSql})))`;
   },
 
   compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string {
@@ -211,7 +214,10 @@ export const postgresDialect: DialectImpl = {
   buildJoinClause(join: RelationJoinInfo): string {
     // Postgres does not allow CROSS JOIN with an ON clause; map to INNER JOIN instead.
     const kw = join.joinType === "cross" ? "INNER JOIN" : (JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
-    return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${quoteId("t0")}.${quoteId(join.foreignKey)} = ${quoteId(join.alias)}.${quoteId(join.targetPk)}`;
+    const on = join.foreignKeys
+      .map((fk, i) => `${quoteId("t0")}.${quoteId(fk)} = ${quoteId(join.alias)}.${quoteId(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`)
+      .join(" AND ");
+    return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${on}`;
   },
 };
 

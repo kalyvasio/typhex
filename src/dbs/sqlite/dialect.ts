@@ -60,7 +60,7 @@ export const sqliteDialect: DialectImpl = {
   name: "sqlite",
 
   escapeIdentifier(name: string): string {
-    return '"' + String(name).replace(/"/g, '""') + '"';
+    return '"' + String(name).replaceAll('"', '""') + '"';
   },
 
   placeholder(_index: number): string {
@@ -70,7 +70,7 @@ export const sqliteDialect: DialectImpl = {
   expandPlaceholders(sql: string, resolvedParams: unknown[], _startIdx?: number): { sql: string; params: unknown[] } {
     let idx = 0;
     const newParams: unknown[] = [];
-    const newSql = sql.replace(/\?/g, () => {
+    const newSql = sql.replaceAll("?", () => {
       const v = resolvedParams[idx++];
       if (Array.isArray(v)) {
         v.forEach((x) => newParams.push(x));
@@ -105,7 +105,7 @@ export const sqliteDialect: DialectImpl = {
     table: string,
     columns: string[],
     values: unknown[],
-    _pk?: string,
+    _pk?: string[],
     onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
@@ -126,7 +126,7 @@ export const sqliteDialect: DialectImpl = {
     table: string,
     columns: string[],
     rows: unknown[][],
-    pk?: string,
+    pk?: string[],
     onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
@@ -135,8 +135,9 @@ export const sqliteDialect: DialectImpl = {
     const allPh = rows.map(() => rowPh).join(", ");
     let sql = `INSERT INTO ${esc(table)} (${columns.map(esc).join(", ")}) VALUES ${allPh}`;
     if (onConflict) sql = appendOnConflict(sql, onConflict, columns, esc);
-    if (pk) sql += " RETURNING *";
-    return { sql, params: rows.flat().map(v => v === SQL_DEFAULT ? null : v), returningRow: !!pk };
+    const hasPk = !!pk?.length;
+    if (hasPk) sql += " RETURNING *";
+    return { sql, params: rows.flat().map(v => v === SQL_DEFAULT ? null : v), returningRow: hasPk };
   },
 
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult {
@@ -148,13 +149,13 @@ export const sqliteDialect: DialectImpl = {
     if (cols.length === 0) return { sql: "", params: [] };
     const esc = quoteId;
     const assignments = cols.map((c) => `${esc(c)} = ?`).join(", ");
-    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
     return { sql: `UPDATE ${esc(table)} SET ${assignments} WHERE ${fixedWhere}`, params: [...cols.map((c) => set[c]), ...whereParams] };
   },
 
   compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult {
     const esc = quoteId;
-    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
     return { sql: `DELETE FROM ${esc(table)} WHERE ${fixedWhere}`, params: whereParams };
   },
 
@@ -177,8 +178,9 @@ export const sqliteDialect: DialectImpl = {
     return { sql: `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`, params };
   },
 
-  compileExists(targetTable: string, alias: string, fkColumn: string, mainAlias: string, mainPk: string, innerSql: string): string {
-    return `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${quoteId(alias)}.${quoteId(fkColumn)} = ${quoteId(mainAlias)}.${quoteId(mainPk)} AND (${innerSql})))`;
+  compileExists(targetTable: string, alias: string, fkColumns: string[], mainAlias: string, mainPk: string[], innerSql: string): string {
+    const pkConds = fkColumns.map((fk, i) => `${quoteId(alias)}.${quoteId(fk)} = ${quoteId(mainAlias)}.${quoteId(mainPk[i] ?? mainPk[0])}`).join(" AND ");
+    return `(EXISTS (SELECT 1 FROM ${quoteId(targetTable)} AS ${quoteId(alias)} WHERE ${pkConds} AND (${innerSql})))`;
   },
 
   compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string {
@@ -190,7 +192,10 @@ export const sqliteDialect: DialectImpl = {
 
   buildJoinClause(join: RelationJoinInfo): string {
     const kw = JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
-    return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${quoteId("t0")}.${quoteId(join.foreignKey)} = ${quoteId(join.alias)}.${quoteId(join.targetPk)}`;
+    const on = join.foreignKeys
+      .map((fk, i) => `${quoteId("t0")}.${quoteId(fk)} = ${quoteId(join.alias)}.${quoteId(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`)
+      .join(" AND ");
+    return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${on}`;
   },
 };
 

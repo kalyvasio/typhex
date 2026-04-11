@@ -3,19 +3,28 @@
  * and computes the full RelationContext consumed by RelationRunner and QueryBuilder.
  */
 
-import type { RelationsMap, RelationDef, RelationOptions } from "../entity/relations.js";
+import type { RelationsMap, RelationDef, RelationOptions, JunctionOptions } from "../entity/relations.js";
+import { getPkColumnsFromSchema, type AnyEntityClass } from "../entity/entity.js";
 import type { IrSelect, IrNode, IrSelectRelation } from "../ir/types.js";
 import type { QueryExecutor } from "./db.js";
-import type { AnyEntityClass } from "../entity/entity.js";
 import {QueryBuilderInterface} from "./query-builder.js";
 import { getReusableJoinKeys } from "./relation-joins.js";
 
 export interface RelationFetchMetadata {
   relation: IrSelectRelation;
-  fkColumn: string;
-  targetPk: string;
+  /** FK column(s) — on the parent row for to-one, on the child row for to-many. */
+  fkColumns: string[];
+  /** PK column(s) of the related (target) entity. */
+  targetPkColumns: string[];
   targetEntity: { query(d?: QueryExecutor): QueryBuilderInterface<AnyEntityClass, unknown> };
   isArray: boolean;
+  /** Parent row PK columns for correlating to-many / M2M (default ["id"]). */
+  parentPkColumns?: string[];
+  junction?: {
+    table: string;
+    foreignKey: string | string[];
+    referenceKey: string | string[];
+  };
 }
 
 // ─── relation context ─────────────────────────────────────────────────────────
@@ -35,7 +44,7 @@ export function buildRelationContext(
     selectIr: IrSelect | null,
     relations: RelationsMap | undefined,
     whereIr: IrNode | null,
-    pkColumn: string | null | undefined,
+    pkColumns: string[] | null | undefined,
     rootParam: string
 ): RelationContext {
   const reusableJoinKeys = (relations && selectIr)
@@ -50,7 +59,7 @@ export function buildRelationContext(
 
   if (hasRelations) {
     const { columnPaths: paths, columnAliases: aliases, relationFetches: fetches } = resolveSelectColumnsAndRelations(
-        selectIr, relations, pkColumn,
+        selectIr, relations, pkColumns,
         reusableJoinKeys.size > 0 ? reusableJoinKeys : undefined
     );
     relationFetches = fetches;
@@ -96,7 +105,7 @@ export function resolveSelectForSql(
 function resolveSelectColumnsAndRelations(
   select: IrSelect | null,
   relations: RelationsMap,
-  pkColumn?: string | null,
+  pkColumns?: string[] | null,
   /** Relation keys already joined in the main query — include their paths in columnPaths, exclude from relationFetches. */
   joinedRelationKeys?: Set<string>
 ): { columnPaths: string[][]; columnAliases: string[]; relationFetches: RelationFetchMetadata[] } {
@@ -111,9 +120,14 @@ function resolveSelectColumnsAndRelations(
   const columnAliases = [...fromPaths.columnAliases, ...fromRelations.columnAliases];
   const relationFetches = [...fromPaths.relationFetches, ...fromRelations.relationFetches];
 
-  const { paths: keyPaths, aliases: keyAliases } = missingJoinKeyColumns(relationFetches, columnPaths, pkColumn);
+  const effectivePkColumns = pkColumns?.length ? pkColumns : ["id"];
+  const { paths: keyPaths, aliases: keyAliases } = missingJoinKeyColumns(relationFetches, columnPaths, effectivePkColumns);
   columnPaths.push(...keyPaths);
   columnAliases.push(...keyAliases);
+
+  for (const f of relationFetches) {
+    if (f.isArray || f.junction) f.parentPkColumns = effectivePkColumns;
+  }
 
   return { columnPaths, columnAliases, relationFetches };
 }
@@ -240,36 +254,27 @@ function classifyRelationEntries(
 
 // ─── required join-key helpers ────────────────────────────────────────────────
 
-/** Returns the FK column name if it is not already in the selected paths, otherwise null.
- *  Needed for to-one relations so the main row can look up its related entity. */
-function missingToOneFkColumn(fkColumn: string, existingPaths: string[][]): string | null {
-  return existingPaths.some((p) => p[0] === fkColumn) ? null : fkColumn;
-}
-
-/** Returns the PK column name if it is not already in the selected paths, otherwise null.
- *  Needed for to-many relations so child rows can be grouped back onto the correct parent. */
-function missingToManyPkColumn(pkColumn: string | null | undefined, existingPaths: string[][]): string | null {
-  if (!pkColumn) return null;
-  return existingPaths.some((p) => p[0] === pkColumn) ? null : pkColumn;
-}
-
 /** Finds any FK or PK columns required to correlate fetched relations back to their parent rows
- *  that are not already present in the SQL SELECT list, and returns them to be appended. */
+ *  that are not already present in the SQL SELECT list, and returns them to be appended.
+ *  Deduplicates across multiple relations sharing the same columns. */
 function missingJoinKeyColumns(
   fetches: RelationFetchMetadata[],
   existingPaths: string[][],
-  pkColumn?: string | null
+  pkColumns: string[]
 ): { paths: string[][]; aliases: string[] } {
   const paths: string[][] = [];
   const aliases: string[] = [];
+  // Track already-covered columns to avoid duplicates.
+  const added = new Set(existingPaths.map((p) => p[0]));
 
   for (const meta of fetches) {
-    const missing = meta.isArray
-      ? missingToManyPkColumn(pkColumn, existingPaths)
-      : missingToOneFkColumn(meta.fkColumn, existingPaths);
-    if (missing) {
-      paths.push([missing]);
-      aliases.push(missing);
+    const cols = meta.isArray ? pkColumns : meta.fkColumns;
+    for (const col of cols) {
+      if (!added.has(col)) {
+        paths.push([col]);
+        aliases.push(col);
+        added.add(col);
+      }
     }
   }
 
@@ -303,14 +308,47 @@ function buildRelationFetchMeta(
   const targetEntity = target && typeof (target as any).query === "function" ? (target as any) : null;
   if (!targetEntity) return null;
 
-  const fkColumn = (relDef._options as RelationOptions).foreignKey;
+  const targetSchema = (targetEntity as { table?: { _schema: Record<string, string> } }).table?._schema;
+  const targetPkColumnsFromSchema = targetSchema ? getPkColumnsFromSchema(targetSchema) : ["id"];
+  const toArr = (v: string | string[]): string[] => Array.isArray(v) ? v : [v];
 
   switch (relDef._relType) {
     case "many-to-one":
-    case "one-to-one":
-      return { relation: ir, fkColumn, targetPk: (relDef._options as RelationOptions).references ?? "id", targetEntity, isArray: false };
-    case "one-to-many":
-      return { relation: ir, fkColumn, targetPk: "id", targetEntity, isArray: true };
+    case "one-to-one": {
+      const opts = relDef._options as RelationOptions;
+      return {
+        relation: ir,
+        fkColumns: toArr(opts.foreignKey),
+        targetPkColumns: opts.references != null ? toArr(opts.references) : targetPkColumnsFromSchema,
+        targetEntity,
+        isArray: false,
+      };
+    }
+    case "one-to-many": {
+      const opts = relDef._options as { foreignKey: string | string[] };
+      return {
+        relation: ir,
+        fkColumns: toArr(opts.foreignKey),
+        targetPkColumns: targetPkColumnsFromSchema,
+        targetEntity,
+        isArray: true,
+      };
+    }
+    case "many-to-many": {
+      const j = relDef._options as JunctionOptions;
+      return {
+        relation: ir,
+        fkColumns: toArr(j.referenceKey),
+        targetPkColumns: targetPkColumnsFromSchema,
+        targetEntity,
+        isArray: true,
+        junction: {
+          table: j.junction,
+          foreignKey: j.foreignKey,
+          referenceKey: j.referenceKey,
+        },
+      };
+    }
     default:
       return null;
   }

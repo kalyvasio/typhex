@@ -146,7 +146,7 @@ describe("join type SQL keywords (mock executor)", () => {
       tableName: "posts",
       columnNames: ["id", "title", "authorId"],
       qe,
-      pkColumn: "id",
+      pkColumns: ["id"],
       whereIr: null,
       whereParams: {},
       orderBy: [],
@@ -156,7 +156,7 @@ describe("join type SQL keywords (mock executor)", () => {
       relations: Post.table._relations,
       resolveRelationTarget: (rel: RelationDef) => {
         const target = rel._target() as { table?: { _table: string } } | null;
-        return target?.table ? { table: target.table._table, pk: "id" } : null;
+        return target?.table ? { table: target.table._table, pk: ["id"] } : null;
       },
     });
   }
