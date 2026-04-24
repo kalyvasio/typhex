@@ -33,7 +33,7 @@ export interface QueryState<T = unknown> {
   selectIr: IrSelect | null;
   relations?: RelationsMap;
   hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
-  resolveRelationTarget?: (rel: RelationDef) => { table: string; pk: string[] } | null;
+  resolveRelationTarget?: (rel: RelationDef) => { table: string; pk: string[]; schema: Record<string, string> } | null;
   joinHints?: JoinHint[];
   havingIr?: IrNode | null;
   havingParams?: Record<string, unknown>;

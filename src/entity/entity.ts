@@ -11,9 +11,8 @@ import { QueryBuilder, QueryState } from "../orm/query-builder.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
 import type { InferTable, InferInsert, Flatten, Materialized, MaterializeShape } from "./schema-inference.js";
 import type { JunctionOptions, RelationDef, RelationsMap, RelationQueryable, RelationQueryBuilder, ManyRelation } from "./relations.js";
-import { toArray } from "../utils.js";
 import type { TableDef, EntityBase } from "./types.js";
-import { getDefaultDb, getEntityByTableName, registerEntity } from "./global-driver.js";
+import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
 import { getActiveTrx } from "../orm/db.js";
 
 /** Loaded value for a relation (data only when E is a concrete entity class; when E is unknown or any, use queryable type so subclass declare can narrow). */
@@ -157,7 +156,7 @@ export function Entity<
     return resolved;
   }
 
-  function resolveRelationTarget(rel: RelationDef): { table: string; pk: string[] } | null {
+  function resolveRelationTarget(rel: RelationDef): { table: string; pk: string[]; schema: Record<string, string> } | null {
     try {
       const target = rel._target();
       const entityClass =
@@ -167,7 +166,7 @@ export function Entity<
       const tbl = entityClass?.table;
       if (tbl) {
         const schema = tbl._schema;
-        return { table: tbl._table, pk: getPkColumns(schema) };
+        return { table: tbl._table, pk: getPkColumns(schema), schema };
       }
       return null;
     } catch (e) {
@@ -214,12 +213,14 @@ export function Entity<
       for (const rd of Object.values(rels)) {
         if (rd._relType !== "many-to-many") continue;
         const opts = rd._options as JunctionOptions;
-        if (getEntityByTableName(opts.junction)) continue;
-        const fkCols = toArray(opts.foreignKey);
-        const refCols = toArray(opts.referenceKey);
-        const junctionSchema: Record<string, string> = {};
-        for (const c of [...fkCols, ...refCols]) junctionSchema[c] = "integer not null";
-        Entity(opts.junction, junctionSchema);
+        enqueuePendingJunction({
+          sourceTable: tableName,
+          sourceSchema: schema,
+          sourcePkCols: pkCols,
+          options: opts,
+          resolveTarget: () => resolveRelationTarget(rd),
+          materialize: (junctionSchema) => { Entity(opts.junction, junctionSchema); },
+        });
       }
     }
 
