@@ -5,6 +5,7 @@
 import { createRequire } from "node:module";
 import type { Driver, Connection, ExecuteResult, TransactionOptions } from "../../driver/types.js";
 import { SqliteTrx } from "./trx.js";
+import { isRecord } from "../../utils.js";
 
 const require = createRequire(import.meta.url);
 
@@ -19,8 +20,7 @@ function toBindable(value: unknown): unknown {
     Buffer.isBuffer(value)
   )
     return value;
-  if (typeof value === "object" && value !== null && !Array.isArray(value))
-    return JSON.stringify(value);
+  if (isRecord(value)) return JSON.stringify(value);
   return value;
 }
 

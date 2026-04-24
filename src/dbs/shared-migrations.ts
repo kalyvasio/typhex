@@ -5,17 +5,7 @@
 import type { DiffAction, DbColumnInfo, DialectImpl } from "./types.js";
 import { getColumnDef } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
-
-export function extractBaseType(def: string): string {
-  const trimmed = def.trim().toLowerCase().replaceAll(/\s+/g, " ");
-  const withoutModifiers = trimmed.replace(/^(?:unsigned|signed)\s+/, "");
-  const multiWord = withoutModifiers.match(
-    /^(?:double\s+precision|character\s+varying|timestamp\s+with\s+time\s+zone|timestamp\s+without\s+time\s+zone)(?:\([^)]*\))?/
-  );
-  if (multiWord) return multiWord[0];
-  const withParams = withoutModifiers.match(/^(\w+(?:\([^)]*\))?)/);
-  return withParams ? withParams[1] : withoutModifiers.split(/\s/)[0] ?? trimmed;
-}
+import { extractBaseType } from "../utils.js";
 
 export async function diffSchemaBase(
   dialect: "sqlite" | "postgres",

@@ -2,8 +2,8 @@
  * Relation resolver: top-level orchestrator for relation loading.
  */
 
-import type { IrSelect } from "../ir/types.js";
-import type { QueryExecutor } from "./db.js";
+import type { IrSelect } from "../../../ir/types.js";
+import type { QueryExecutor } from "../../db.js";
 import type { RelationContext } from "./relation-context-builder.js";
 import { fetchRelations } from "./relation-fetcher.js";
 import { assembleJoined, assembleFetched } from "./relation-assembler.js";

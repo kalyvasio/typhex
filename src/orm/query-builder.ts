@@ -11,26 +11,13 @@ import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
 import { resolveWhereIr, resolveOrderBy, resolveSelectIr, resolveGroupByPaths, resolveJoinKeys } from "../parser/resolve.js";
 import { resolveParamSentinels, type OnConflictClause, type ExpandPlaceholdersResult, type DialectImpl } from "../dbs/types.js";
-import { buildRelationContext, resolveSelectForSql } from "./relation-context-builder.js";
-import { resolveRelations } from "./relation-resolver.js";
+import { buildRelationContext, resolveSelectForSql } from "./helpers/relations/relation-context-builder.js";
+import { resolveRelations } from "./helpers/relations/relation-resolver.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
 import {
   DEFAULT_ROW_PARAM, getDialectOrThrow, getRootParam, getCompileOpts, buildJoinsSql,
 } from "./compile-context.js";
-
-export interface QueryBuilderInterface<C extends AnyEntityClass, T> {
-  where(ir: IrNode, params?: Record<string, unknown>): QueryBuilderInterface<C, T>;
-  select<U>(fn: (row: SelectRow<C>) => U): QueryBuilderInterface<C, U>;
-  select(cols: string[] | IrSelect): QueryBuilderInterface<C, T>;
-  orderBy(ir: IrOrderBy): QueryBuilderInterface<C, T>;
-  orderBy(col: string | ((row: T) => unknown), dir?: OrderDirection): QueryBuilderInterface<C, T>;
-  limit(n: number): QueryBuilderInterface<C, T>;
-  offset(n: number): QueryBuilderInterface<C, T>;
-  count(): Promise<number>;
-  groupBy(columnOrFn: string | string[] | number | number[] | ((row: EntityInstance<C>) => unknown), ...rest: (string | number)[]): QueryBuilderInterface<C, T>;
-  having(predicate: IrNode | ((row: EntityInstance<C>) => boolean), params?: Record<string, unknown>): QueryBuilderInterface<C, T>;
-  toArray(): Promise<T[]>;
-}
+import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 
 export interface QueryState<T = unknown> {
   tableName: string;
@@ -46,17 +33,18 @@ export interface QueryState<T = unknown> {
   selectIr: IrSelect | null;
   relations?: RelationsMap;
   hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
-  resolveRelationTarget?: (rel: RelationDef) => { table: string; pk: string[] } | null;
+  resolveRelationTarget?: (rel: RelationDef) => { table: string; pk: string[]; schema: Record<string, string> } | null;
   joinHints?: JoinHint[];
   havingIr?: IrNode | null;
   havingParams?: Record<string, unknown>;
+  entity?: AnyEntityClass;
 }
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
 export class QueryBuilder<
   C extends AnyEntityClass = AnyEntityClass,
   T = EntityInstance<C>,
-> implements QueryBuilderInterface<C, T> {
+> {
   protected static readonly isDebugSqlEnabled = ((): boolean => {
     const debugFlag = process?.env?.TYPHEX_DEBUG;
     return debugFlag === "1" || debugFlag === "true" || debugFlag === "yes";
@@ -218,6 +206,17 @@ export class QueryBuilder<
     );
   }
 
+  async insertGraph(graph: Record<string, unknown>): Promise<EntityInstance<C>>;
+  async insertGraph(graphs: Record<string, unknown>[]): Promise<EntityInstance<C>[]>;
+  async insertGraph(
+    input: Record<string, unknown> | Record<string, unknown>[],
+  ): Promise<EntityInstance<C> | EntityInstance<C>[]> {
+    return new InsertGraphPlanner(
+      this.state as QueryState<EntityInstance<C>>,
+      input,
+    ).execute();
+  }
+
   /** Select single row by primary key (scalar or composite object). */
   async findById(id: unknown): Promise<EntityInstance<C> | null> {
     const pkCols = this.state.pkColumns ?? ["id"];
@@ -323,7 +322,7 @@ export class QueryBuilder<
     selectForSql: IrSelect | null,
   ): Promise<Record<string, unknown>[]> {
     const { tableName, columnNames } = this.state;
-    const qe = this.state.qe!;
+    const qe = this.state.qe;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
     const whereResult = dialect.compileWhere(this.state.whereIr, opts);

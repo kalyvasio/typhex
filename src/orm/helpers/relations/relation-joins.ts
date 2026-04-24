@@ -4,8 +4,9 @@
  * instead of failing on non-existent column.
  */
 
-import type { IrNode, IrSelect, IrOrderBy, JoinHint, JoinType } from "../ir/types.js";
-import type { RelationsMap, RelationDef, JunctionOptions } from "../entity/relations.js";
+import type { IrNode, IrSelect, IrOrderBy, JoinHint, JoinType } from "../../../ir/types.js";
+import type { RelationsMap, RelationDef, JunctionOptions } from "../../../entity/relations.js";
+import { toArray } from "../../../utils.js";
 
 export interface RelationJoinInfo {
   relationKey: string;
@@ -47,9 +48,8 @@ export function buildOneToManyExists(
     if ("junction" in opts) continue;
     const target = resolveTarget(rel);
     if (!target) continue;
-    const fkRaw = "foreignKey" in opts ? opts.foreignKey : "";
-    if (!fkRaw || (Array.isArray(fkRaw) && fkRaw.length === 0)) continue;
-    const fkColumns = Array.isArray(fkRaw) ? fkRaw : [fkRaw];
+    const fkColumns = toArray("foreignKey" in opts ? opts.foreignKey : undefined);
+    if (fkColumns.length === 0) continue;
     result[`${rootParam}.${relKey}`] = {
       targetTable: target.table,
       fkColumns,

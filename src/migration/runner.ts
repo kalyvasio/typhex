@@ -12,8 +12,7 @@ import type { MigrationRecord } from "./types.js";
 import { getDbMigrations } from "../dbs/index.js";
 
 async function ensureTrackingTable(driver: Driver): Promise<void> {
-  const dialect = driver.dialect ?? "sqlite";
-  const migrations = getDbMigrations(dialect);
+  const migrations = getDbMigrations(driver.dialect);
   await driver.execute(migrations.getTrackingTableDdl());
 }
 
@@ -63,7 +62,7 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
       for (const stmt of splitStatements(sql)) {
         await conn.execute(stmt, []);
       }
-      await conn.execute(getDbMigrations(driver.dialect ?? "sqlite").getRecordMigrationSql(), [name]);
+      await conn.execute(getDbMigrations(driver.dialect).getRecordMigrationSql(), [name]);
       result.applied.push(name);
     }
     await conn.execute("COMMIT", []);

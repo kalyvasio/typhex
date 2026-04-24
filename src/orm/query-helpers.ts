@@ -4,6 +4,7 @@
  */
 
 import type { IrNode } from "../ir/types.js";
+import { isRecord } from "../utils.js";
 
 const DEFAULT_ROW_PARAM = "u";
 
@@ -89,7 +90,5 @@ export function buildFindByIdIr(
 /** Normalise a user-supplied PK value to a Record.
  *  Scalar values (e.g. `5`) are wrapped as `{ [col]: value }` for single-column PKs. */
 export function pkToRecord(pkColumns: string[], id: unknown): Record<string, unknown> {
-  return id !== null && typeof id === "object" && !Array.isArray(id)
-    ? (id as Record<string, unknown>)
-    : { [pkColumns[0]]: id };
+  return isRecord(id) ? id : { [pkColumns[0]]: id };
 }

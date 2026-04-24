@@ -3,11 +3,13 @@
  * Does NOT mutate rows — returns fetched data as maps.
  */
 
-import type { QueryExecutor } from "./db.js";
+import type { QueryExecutor } from "../../db.js";
 import type { RelationFetchMetadata } from "./relation-context-builder.js";
-import type { IrSelectRelation } from "../ir/types.js";
-import { whereAnd, makeCompositeKey, buildFetchByIdIr } from "./query-helpers.js";
-import { QueryBuilder } from "./query-builder.js";
+import type { IrSelectRelation } from "../../../ir/types.js";
+import { whereAnd, makeCompositeKey, buildFetchByIdIr } from "../../query-helpers.js";
+import { getEntityByTableName } from "../../../entity/global-driver.js";
+import { AnyEntityClass } from "../../../entity/index.js";
+import { groupBy } from "../../../utils.js";
 
 /** Run one WHERE IN query per pending relation fetch and collect results into keyed maps.
  *  Skips relations in `skip` (already loaded via JOIN).
@@ -70,9 +72,11 @@ async function fetchManyToMany(
   for (const row of rows) out.set(makeCompositeKey(row, parentPkCols), []);
 
   // Step 1: parent rows → junction rows (no user relation options)
+  const junctionEntity = getEntityByTableName(j.table) as AnyEntityClass;
+
   const junctionRows = await fetchRows(
     qe, rows, parentPkCols, j.foreignKey,
-    makeJunctionQueryable(j.table, [...j.foreignKey, ...j.referenceKey])
+    junctionEntity,
   ) as Record<string, unknown>[];
   if (junctionRows.length === 0) return out;
 
@@ -109,7 +113,7 @@ async function fetchRows(
   srcRows: Record<string, unknown>[],
   srcCols: string[],
   tgtCols: string[],
-  entity: { query(qe?: QueryExecutor): { where: Function; orderBy: Function; limit: Function; offset: Function; select: Function; toArray(): Promise<unknown[]> } },
+  entity: AnyEntityClass,
   rel?: IrSelectRelation
 ): Promise<unknown[]> {
   const baseWhere = buildFetchByIdIr(srcRows, srcCols, tgtCols);
@@ -131,24 +135,6 @@ async function fetchRows(
   return chain.toArray();
 }
 
-/** Build a queryable entity backed by a raw SQL table — uses QueryBuilder directly
- *  so no dialect calls need to be duplicated here. */
-function makeJunctionQueryable(table: string, cols: string[]) {
-  return {
-    query: (qe?: QueryExecutor) => new QueryBuilder({
-      tableName: table,
-      columnNames: cols,
-      qe: qe!,
-      whereIr: null,
-      whereParams: {},
-      orderBy: [],
-      limitNum: null,
-      offsetNum: null,
-      selectIr: null,
-    }),
-  };
-}
-
 /** Remap column values from a junction row onto a new column namespace for makeCompositeKey. */
 function remapCols(row: Record<string, unknown>, from: string[], to: string[]): Record<string, unknown> {
   const r: Record<string, unknown> = {};
@@ -167,12 +153,5 @@ function indexByCompositeKey(rows: unknown[], keys: string[]): Map<string, unkno
 
 /** Group rows by composite key for O(1) to-many lookups (keyed by FK columns). */
 function groupByCompositeKey(rows: unknown[], keys: string[]): Map<string, unknown[]> {
-  const map = new Map<string, unknown[]>();
-  for (const r of rows) {
-    const k = makeCompositeKey(r as Record<string, unknown>, keys);
-    const arr = map.get(k) ?? [];
-    arr.push(r);
-    map.set(k, arr);
-  }
-  return map;
+  return groupBy(rows, (r) => makeCompositeKey(r as Record<string, unknown>, keys));
 }

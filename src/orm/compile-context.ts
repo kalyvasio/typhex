@@ -11,15 +11,14 @@ import {
   buildRelationPathToAlias,
   buildOneToManyExists,
   type RelationJoinInfo,
-} from "./relation-joins.js";
+} from "./helpers/relations/relation-joins.js";
 import type { QueryState } from "./query-builder.js";
 
 export const DEFAULT_ROW_PARAM = "u";
 export const TABLE_ALIAS = "t0";
 
-/** Resolve the dialect implementation for the current driver, defaulting to SQLite. */
-export function getDialectOrThrow(state: QueryState<unknown>) {
-  return getDialect(state.qe?.dialect ?? "sqlite");
+export function getDialectOrThrow(state: QueryState<unknown>): DialectImpl {
+  return getDialect(state.qe.dialect);
 }
 
 /** Derive the row parameter name used in IR expressions (e.g. "u", "c")

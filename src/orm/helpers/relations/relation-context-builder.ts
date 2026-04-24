@@ -3,11 +3,10 @@
  * and computes the full RelationContext consumed by RelationRunner and QueryBuilder.
  */
 
-import type { RelationsMap, RelationDef, RelationOptions, JunctionOptions, RelationType } from "../entity/relations.js";
-import { getPkColumnsFromSchema, type AnyEntityClass } from "../entity/entity.js";
-import type { IrSelect, IrNode, IrSelectRelation } from "../ir/types.js";
-import type { QueryExecutor } from "./db.js";
-import {QueryBuilderInterface} from "./query-builder.js";
+import type { RelationsMap, RelationDef, RelationOptions, JunctionOptions, RelationType } from "../../../entity/relations.js";
+import { toArray } from "../../../utils.js";
+import { getPkColumnsFromSchema, type AnyEntityClass } from "../../../entity/entity.js";
+import type { IrSelect, IrNode, IrSelectRelation } from "../../../ir/types.js";
 import { getReusableJoinKeys } from "./relation-joins.js";
 
 export interface RelationFetchMetadata {
@@ -17,7 +16,7 @@ export interface RelationFetchMetadata {
   fkColumns: string[];
   /** PK column(s) of the related (target) entity. */
   targetPkColumns: string[];
-  targetEntity: { query(d?: QueryExecutor): QueryBuilderInterface<AnyEntityClass, unknown> };
+  targetEntity: AnyEntityClass;
   /** Parent row PK columns for correlating to-many / M2M (default ["id"]). */
   parentPkColumns?: string[];
   junction?: {
@@ -306,12 +305,15 @@ function buildRelationFetchMeta(
   relDef: RelationDef
 ): RelationFetchMetadata | null {
   const target = relDef._target();
-  const targetEntity = target && typeof (target as any).query === "function" ? (target as any) : null;
+  const targetEntity =
+    target &&
+    typeof (target as Partial<AnyEntityClass>).query === "function"
+      ? (target as AnyEntityClass)
+      : null;
   if (!targetEntity) return null;
 
   const targetSchema = (targetEntity as { table?: { _schema: Record<string, string> } }).table?._schema;
   const targetPkColumnsFromSchema = targetSchema ? getPkColumnsFromSchema(targetSchema) : ["id"];
-  const toArr = (v: string | string[]): string[] => Array.isArray(v) ? v : [v];
 
   switch (relDef._relType) {
     case "many-to-one":
@@ -320,8 +322,8 @@ function buildRelationFetchMeta(
       return {
         relationType: relDef._relType,
         relation: ir,
-        fkColumns: toArr(opts.foreignKey),
-        targetPkColumns: opts.references != null ? toArr(opts.references) : targetPkColumnsFromSchema,
+        fkColumns: toArray(opts.foreignKey),
+        targetPkColumns: opts.references != null ? toArray(opts.references) : targetPkColumnsFromSchema,
         targetEntity,
       };
     }
@@ -330,7 +332,7 @@ function buildRelationFetchMeta(
       return {
         relationType: "one-to-many",
         relation: ir,
-        fkColumns: toArr(opts.foreignKey),
+        fkColumns: toArray(opts.foreignKey),
         targetPkColumns: targetPkColumnsFromSchema,
         targetEntity,
       };
@@ -340,13 +342,13 @@ function buildRelationFetchMeta(
       return {
         relationType: "many-to-many",
         relation: ir,
-        fkColumns: toArr(j.referenceKey),
+        fkColumns: toArray(j.referenceKey),
         targetPkColumns: targetPkColumnsFromSchema,
         targetEntity,
         junction: {
           table: j.junction,
-          foreignKey: toArr(j.foreignKey),
-          referenceKey: toArr(j.referenceKey),
+          foreignKey: toArray(j.foreignKey),
+          referenceKey: toArray(j.referenceKey),
         },
       };
     }

@@ -18,8 +18,8 @@ export interface RelationOptions {
 
 export interface JunctionOptions {
   junction: string;
-  foreignKey: string;
-  referenceKey: string;
+  foreignKey: string | string[];
+  referenceKey: string | string[];
 }
 
 /** E is the target entity class (for display as RelatedEntityInstance<E>) or legacy instance type. */

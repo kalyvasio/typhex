@@ -124,7 +124,7 @@ export class Db implements QueryExecutor {
 
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
   async migrate(): Promise<void> {
-    const dialect = getDialect(this._driver.dialect ?? "sqlite");
+    const dialect = getDialect(this._driver.dialect);
     const esc = dialect.escapeIdentifier.bind(dialect);
     const entities = getRegisteredEntities();
     const deps = parseFkDependencies(entities);
@@ -145,7 +145,7 @@ export class Db implements QueryExecutor {
 
   /** Validate all registered entities against the database. Throws on mismatch. */
   async validate(): Promise<void> {
-    const dialect = getDialect(this._driver.dialect ?? "sqlite");
+    const dialect = getDialect(this._driver.dialect);
     const esc = dialect.escapeIdentifier.bind(dialect);
     for (const entity of getRegisteredEntities()) {
       const { _table: name, _schema: schema } = entity.table;

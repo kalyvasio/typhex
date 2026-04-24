@@ -3,9 +3,9 @@
  * Handles both flat JOIN columns (assembleJoined) and pre-fetched maps (assembleFetched).
  */
 
-import type { IrSelect } from "../ir/types.js";
+import type { IrSelect } from "../../../ir/types.js";
 import type { RelationFetchMetadata } from "./relation-context-builder.js";
-import { makeCompositeKey } from "./query-helpers.js";
+import { makeCompositeKey } from "../../query-helpers.js";
 
 /**
  * Reconstruct nested objects from flat JOIN columns

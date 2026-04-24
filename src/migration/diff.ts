@@ -12,7 +12,5 @@ export async function diffSchema(
   driver: Driver,
   entities: readonly RegisteredEntity[]
 ): Promise<DiffAction[]> {
-  const dialect = driver.dialect ?? "sqlite";
-  const migrations = getDbMigrations(dialect);
-  return migrations.diffSchema(driver, entities);
+  return getDbMigrations(driver.dialect).diffSchema(driver, entities);
 }

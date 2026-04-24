@@ -33,6 +33,12 @@ describe("dbs/postgres", () => {
       expect(postgresDialect.placeholder(2)).toBe("$2");
     });
 
+    it("rejects sequence allocation compilation until configured", () => {
+      expect(() =>
+        postgresDialect.compileNextSequenceValues("users", "id", 2),
+      ).toThrow("Postgres sequence allocation is not configured for this dialect yet");
+    });
+
     it("escapes identifiers", () => {
       expect(postgresDialect.escapeIdentifier("users")).toBe('"users"');
     });

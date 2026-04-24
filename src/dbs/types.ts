@@ -5,7 +5,7 @@
 import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
 import type { Connection, ExecuteResult, Driver } from "../driver/types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
-import type { RelationJoinInfo } from "../orm/relation-joins.js";
+import type { RelationJoinInfo } from "../orm/helpers/relations/relation-joins.js";
 
 export type Dialect = "sqlite" | "postgres";
 
@@ -94,6 +94,11 @@ export interface ExpandPlaceholdersResult {
   params: unknown[];
 }
 
+export interface DialectInsertCapabilities {
+  supportsReturning: boolean;
+  supportsSequences: boolean;
+}
+
 /** Resolved (non-optional) compile options, produced by resolveOpts(). */
 export type ResolvedOpts = {
   tableAlias: string;
@@ -105,6 +110,8 @@ export type ResolvedOpts = {
 /** Dialect: SQL compilation and schema translation. */
 export interface DialectImpl {
   readonly name: Dialect;
+  readonly insertCapabilities: DialectInsertCapabilities;
+  compileNextSequenceValues(tableName: string, pkColumn: string, count: number): CompileResult;
   escapeIdentifier(name: string): string;
   placeholder(index: number): string;
   expandPlaceholders(sql: string, resolvedParams: unknown[], startIdx?: number): ExpandPlaceholdersResult;
