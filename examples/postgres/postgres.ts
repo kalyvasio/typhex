@@ -39,7 +39,6 @@ console.log("From US:", fromUS);
 const first = await User.query()
   .where((u) => u.age >= 25)
   .orderBy("name", "asc")
-  .limit(1)
   .first();
 console.log("First (age>=25, by name):", first);
 

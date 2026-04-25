@@ -27,7 +27,7 @@ const country = "US";
 const fromUS = await User.query().where((u) => u.country === country, { country }).toArray();
 console.log("From US:", fromUS);
 
-const first = await User.query().where((u) => u.age >= 25).orderBy("name", "asc").limit(1).first();
+const first = await User.query().where((u) => u.age >= 25).orderBy("name", "asc").first();
 console.log("First (age>=25, by name):", first);
 
 const n = await User.query().where((u) => u.country === "US").count();
