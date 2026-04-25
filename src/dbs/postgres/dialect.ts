@@ -145,7 +145,12 @@ export const postgresDialect: DialectImpl = {
     onConflict?: OnConflictClause
   ): CompileResult {
     const esc = quoteId;
-    if (rows.length === 0) return { sql: "", params: [], returningRow: false };
+    if (rows.length === 0) {
+      return { sql: "", params: [], returningRow: false };
+    }
+    if (columns.length === 0) {
+      return { sql: "", params: [], returningRow: false };
+    }
     let paramIdx = 1;
     const params: unknown[] = [];
     const rowPlaceholders = rows.map(row => {
@@ -167,20 +172,35 @@ export const postgresDialect: DialectImpl = {
     return { sql: `SELECT COUNT(*) AS c FROM ${quoteId(table)} AS t0${joinsSql ?? ""} WHERE ${whereSql}`, params: whereParams };
   },
 
-  compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult {
+  compileUpdate(
+    table: string,
+    set: Record<string, unknown>,
+    columns: string[],
+    whereSql: string,
+    whereParams: unknown[],
+    options?: { returning?: boolean }
+  ): CompileResult {
     const cols = Object.keys(set).filter((k) => columns.includes(k));
     if (cols.length === 0) return { sql: "", params: [] };
     const esc = quoteId;
     const assignments = cols.map((c, i) => `${esc(c)} = $${i + 1}`).join(", ");
-    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
-    const renumberedWhere = fixedWhere.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + cols.length}`);
-    return { sql: `UPDATE ${esc(table)} SET ${assignments} WHERE ${renumberedWhere}`, params: [...cols.map((c) => set[c]), ...whereParams] };
+    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    const renumberedWhere = fixedWhere.replace(/\$(\d+)/g, (_, n) => `$${parseInt(n, 10) + cols.length}`);
+    let sql = `UPDATE ${esc(table)} SET ${assignments} WHERE ${renumberedWhere}`;
+    if (options?.returning) sql += " RETURNING *";
+    return {
+      sql,
+      params: [...cols.map((c) => set[c]), ...whereParams],
+      returningRow: !!options?.returning,
+    };
   },
 
-  compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult {
+  compileDelete(table: string, whereSql: string, whereParams: unknown[], options?: { returning?: boolean }): CompileResult {
     const esc = quoteId;
-    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
-    return { sql: `DELETE FROM ${esc(table)} WHERE ${fixedWhere}`, params: whereParams };
+    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    let sql = `DELETE FROM ${esc(table)} WHERE ${fixedWhere}`;
+    if (options?.returning) sql += " RETURNING *";
+    return { sql, params: whereParams, returningRow: !!options?.returning };
   },
 
   compileSelect(opts: CompileSelectOpts): CompileResult {

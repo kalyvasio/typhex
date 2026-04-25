@@ -142,8 +142,15 @@ export interface DialectImpl {
     onConflict?: OnConflictClause
   ): CompileResult;
   compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult;
-  compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult;
-  compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult;
+  compileUpdate(
+    table: string,
+    set: Record<string, unknown>,
+    columns: string[],
+    whereSql: string,
+    whereParams: unknown[],
+    options?: { returning?: boolean }
+  ): CompileResult;
+  compileDelete(table: string, whereSql: string, whereParams: unknown[], options?: { returning?: boolean }): CompileResult;
   compileSelect(opts: CompileSelectOpts): CompileResult;
   buildJoinClause(join: RelationJoinInfo): string;
 }

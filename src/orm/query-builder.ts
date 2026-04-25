@@ -298,6 +298,22 @@ export class QueryBuilder<
     return result.changes;
   }
 
+  /** UPDATE ... RETURNING * (when supported); returns hydrated rows. */
+  async updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]> {
+    const { tableName, columnNames, qe, hydrate } = this.state;
+    const dialect = getDialectOrThrow(this.state);
+    const opts = getCompileOpts(this.state);
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
+    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    const { sql, params } = dialect.compileUpdate(tableName, set, columnNames, whereSql, whereParams, { returning: true });
+    if (!sql) return [];
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
+    const rows = (await qe.query(sql, params)) as Record<string, unknown>[];
+    if (!hydrate) return rows as EntityInstance<C>[];
+    return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
+  }
+
   /** Execute a DELETE for the current WHERE clause and return the number of affected rows. */
   async delete(): Promise<number> {
     const { tableName, qe } = this.state;
@@ -314,6 +330,21 @@ export class QueryBuilder<
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
     const result = await qe.run(sql, runParams);
     return result.changes;
+  }
+
+  /** DELETE ... RETURNING * (when supported). */
+  async deleteReturning(): Promise<EntityInstance<C>[]> {
+    const { tableName, qe, hydrate } = this.state;
+    const dialect = getDialectOrThrow(this.state);
+    const opts = getCompileOpts(this.state);
+    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
+    const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
+    const { sql: whereSql, params } = dialect.expandPlaceholders(whereResult.sql, resolved);
+    const { sql, params: runParams } = dialect.compileDelete(tableName, whereSql, params, { returning: true });
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
+    const rows = (await qe.query(sql, runParams)) as Record<string, unknown>[];
+    if (!hydrate) return rows as EntityInstance<C>[];
+    return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
   }
 
   /** Compile and run the main SELECT query, incorporating WHERE, JOINs, ORDER BY,

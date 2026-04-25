@@ -151,19 +151,34 @@ export const sqliteDialect: DialectImpl = {
     return { sql: `SELECT COUNT(*) AS c FROM ${quoteId(table)} AS t0${joinsSql ?? ""} WHERE ${whereSql}`, params: whereParams };
   },
 
-  compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult {
+  compileUpdate(
+    table: string,
+    set: Record<string, unknown>,
+    columns: string[],
+    whereSql: string,
+    whereParams: unknown[],
+    options?: { returning?: boolean }
+  ): CompileResult {
     const cols = Object.keys(set).filter((k) => columns.includes(k));
     if (cols.length === 0) return { sql: "", params: [] };
     const esc = quoteId;
     const assignments = cols.map((c) => `${esc(c)} = ?`).join(", ");
-    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
-    return { sql: `UPDATE ${esc(table)} SET ${assignments} WHERE ${fixedWhere}`, params: [...cols.map((c) => set[c]), ...whereParams] };
+    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    let sql = `UPDATE ${esc(table)} SET ${assignments} WHERE ${fixedWhere}`;
+    if (options?.returning) sql += " RETURNING *";
+    return {
+      sql,
+      params: [...cols.map((c) => set[c]), ...whereParams],
+      returningRow: !!options?.returning,
+    };
   },
 
-  compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult {
+  compileDelete(table: string, whereSql: string, whereParams: unknown[], options?: { returning?: boolean }): CompileResult {
     const esc = quoteId;
-    const fixedWhere = whereSql.replaceAll('"t0".', `${esc(table)}.`);
-    return { sql: `DELETE FROM ${esc(table)} WHERE ${fixedWhere}`, params: whereParams };
+    const fixedWhere = whereSql.replace(/"t0"\./g, `${esc(table)}.`);
+    let sql = `DELETE FROM ${esc(table)} WHERE ${fixedWhere}`;
+    if (options?.returning) sql += " RETURNING *";
+    return { sql, params: whereParams, returningRow: !!options?.returning };
   },
 
   compileSelect(opts: CompileSelectOpts): CompileResult {
