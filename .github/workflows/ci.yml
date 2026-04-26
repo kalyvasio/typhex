@@ -9,12 +9,42 @@ on:
       - main
 
 jobs:
-  test:
+  sqlite:
+    name: SQLite / Node ${{ matrix.node }}
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+      - run: npm run sqlite:version
+      - run: npm run build
+      - run: npm run test:sqlite
+      - run: npm run test:transformer
+
+  postgres:
+    name: PostgreSQL ${{ matrix.postgres }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
+        postgres: [15, 16, 17]
 
     services:
       postgres:
-        image: postgres:16
+        image: postgres:${{ matrix.postgres }}
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -35,10 +65,9 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
       - run: npm run build
-      - run: npm test
       - run: npm run test:postgres
