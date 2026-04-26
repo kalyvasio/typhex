@@ -40,7 +40,10 @@ export interface CreateDriverConfigCompat {
 export function createDriver(options: CreateDriverOptions | CreateDriverConfigCompat): Driver {
   switch (options.dialect) {
     case "sqlite": {
-      const path = (options as { path?: string }).path ?? (options as { database?: string }).database ?? ":memory:";
+      const path =
+        (options as { path?: string }).path ??
+        (options as { database?: string }).database ??
+        ":memory:";
       return createSqliteDriver({ path });
     }
     case "postgres": {

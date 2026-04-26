@@ -15,6 +15,7 @@ const orderSchema = {
   status: "text",
 } as const;
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 class OrderEntity extends Entity("orders", orderSchema) {}
 
 function createMockQe(dialect: "sqlite" | "postgres" = "sqlite"): QueryExecutor {
@@ -25,7 +26,10 @@ function createMockQe(dialect: "sqlite" | "postgres" = "sqlite"): QueryExecutor 
   };
 }
 
-function newBuilder(qe: QueryExecutor, columnNames = ["id", "category", "price", "status"]): QueryBuilder<typeof OrderEntity> {
+function newBuilder(
+  qe: QueryExecutor,
+  columnNames = ["id", "category", "price", "status"],
+): QueryBuilder<typeof OrderEntity> {
   return new QueryBuilder<typeof OrderEntity, InstanceType<typeof OrderEntity>>({
     tableName: "orders",
     columnNames,
@@ -64,7 +68,14 @@ describe("Aggregations", () => {
         param: "u",
         paths: [["category"]],
         aliases: ["category"],
-        aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "u", path: ["price"] }, alias: "totalPrice" }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "SUM",
+            arg: { kind: "member", param: "u", path: ["price"] },
+            alias: "totalPrice",
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category", "price"], {});
       expect(sql).toContain("SUM(");
@@ -79,7 +90,14 @@ describe("Aggregations", () => {
         const selectIr: IrSelect = {
           param: "u",
           paths: [],
-          aggregates: [{ kind: "aggregate", func, arg: { kind: "member", param: "u", path: ["price"] }, alias: "result" }],
+          aggregates: [
+            {
+              kind: "aggregate",
+              func,
+              arg: { kind: "member", param: "u", path: ["price"] },
+              alias: "result",
+            },
+          ],
         };
         const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {});
         expect(sql).toContain(`${func}(`);
@@ -91,7 +109,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "u", path: ["category"] }, alias: "uniqueCategories", distinct: true }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "COUNT",
+            arg: { kind: "member", param: "u", path: ["category"] },
+            alias: "uniqueCategories",
+            distinct: true,
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category"], {});
       expect(sql).toContain("COUNT(DISTINCT ");
@@ -125,7 +151,9 @@ describe("Aggregations", () => {
     });
 
     it("groupBy(lambda) single member extracts path", async () => {
-      await newBuilder(qe).groupBy((o: InstanceType<typeof OrderEntity>) => o.category).toArray();
+      await newBuilder(qe)
+        .groupBy((o: InstanceType<typeof OrderEntity>) => o.category)
+        .toArray();
       const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("GROUP BY");
       expect(sql).toContain('"category"');
@@ -188,7 +216,12 @@ describe("Aggregations", () => {
         paths: [["category"]],
         aliases: ["category"],
         aggregates: [
-          { kind: "aggregate", func: "SUM", arg: { kind: "member", param: "u", path: ["price"] }, alias: "totalPrice" },
+          {
+            kind: "aggregate",
+            func: "SUM",
+            arg: { kind: "member", param: "u", path: ["price"] },
+            alias: "totalPrice",
+          },
         ],
         groupBy: [["category"]],
       };
@@ -200,11 +233,7 @@ describe("Aggregations", () => {
         right: { kind: "const" as const, value: 5 },
       };
 
-      await newBuilder(qe)
-        .select(selectIr)
-        .having(havingIr)
-        .orderBy("category")
-        .toArray();
+      await newBuilder(qe).select(selectIr).having(havingIr).orderBy("category").toArray();
 
       const [sql, params] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("SELECT");
@@ -325,7 +354,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "u", path: ["category"] }, alias: "unique", distinct: true }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "COUNT",
+            arg: { kind: "member", param: "u", path: ["category"] },
+            alias: "unique",
+            distinct: true,
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category"], {});
       expect(sql).toContain("COUNT(DISTINCT ");
@@ -337,7 +374,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "u", path: ["price"] }, alias: "total", distinct: true }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "SUM",
+            arg: { kind: "member", param: "u", path: ["price"] },
+            alias: "total",
+            distinct: true,
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {});
       expect(sql).toContain("SUM(DISTINCT ");
@@ -348,7 +393,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "AVG", arg: { kind: "member", param: "u", path: ["price"] }, alias: "avg", distinct: true }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "AVG",
+            arg: { kind: "member", param: "u", path: ["price"] },
+            alias: "avg",
+            distinct: true,
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {});
       expect(sql).toContain("AVG(DISTINCT ");
@@ -357,7 +410,9 @@ describe("Aggregations", () => {
     it("runtime parser: count(distinct(p.category)) produces distinct aggregate", async () => {
       const { parseArrowToIrSelect } = await import("../../src/parser/parse-arrow.js");
       // Override toString() so acorn sees literal source text (bypasses module transform)
-      const fn = Object.assign(() => {}, { toString: () => "(p) => ({ unique: count(distinct(p.category)) })" });
+      const fn = Object.assign(() => {}, {
+        toString: () => "(p) => ({ unique: count(distinct(p.category)) })",
+      });
       const ir = parseArrowToIrSelect(fn as any);
       expect(ir?.aggregates?.[0]?.distinct).toBe(true);
       expect(ir?.aggregates?.[0]?.func).toBe("COUNT");
@@ -369,7 +424,14 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "u", path: ["name"] }, alias: "names" }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "GROUP_CONCAT",
+            arg: { kind: "member", param: "u", path: ["name"] },
+            alias: "names",
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "name"], {});
       expect(sql).toContain("GROUP_CONCAT(");
@@ -381,7 +443,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "u", path: ["name"] }, alias: "names", separator: ", " }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "GROUP_CONCAT",
+            arg: { kind: "member", param: "u", path: ["name"] },
+            alias: "names",
+            separator: ", ",
+          },
+        ],
       };
       const sql = sqliteDialect.compileSelectList(selectIr, ["id", "name"], {});
       expect(sql).toContain("GROUP_CONCAT(");
@@ -392,7 +462,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "u", path: ["name"] }, alias: "names", separator: ", " }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "GROUP_CONCAT",
+            arg: { kind: "member", param: "u", path: ["name"] },
+            alias: "names",
+            separator: ", ",
+          },
+        ],
       };
       const sql = postgresDialect.compileSelectList(selectIr, ["id", "name"], {});
       expect(sql).toContain("STRING_AGG(");
@@ -401,7 +479,9 @@ describe("Aggregations", () => {
 
     it("runtime parser: groupConcat(p.name, ', ') produces GROUP_CONCAT with separator", async () => {
       const { parseArrowToIrSelect } = await import("../../src/parser/parse-arrow.js");
-      const fn = Object.assign(() => {}, { toString: () => `(p) => ({ names: groupConcat(p.name, ", ") })` });
+      const fn = Object.assign(() => {}, {
+        toString: () => `(p) => ({ names: groupConcat(p.name, ", ") })`,
+      });
       const ir = parseArrowToIrSelect(fn as any);
       expect(ir?.aggregates?.[0]?.func).toBe("GROUP_CONCAT");
       expect(ir?.aggregates?.[0]?.separator).toBe(", ");
@@ -413,7 +493,15 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "STRING_AGG", arg: { kind: "member", param: "u", path: ["name"] }, alias: "names", separator: ", " }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "STRING_AGG",
+            arg: { kind: "member", param: "u", path: ["name"] },
+            alias: "names",
+            separator: ", ",
+          },
+        ],
       };
       const sql = postgresDialect.compileSelectList(selectIr, ["id", "name"], {});
       expect(sql).toContain("STRING_AGG(");
@@ -425,7 +513,14 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "ARRAY_AGG", arg: { kind: "member", param: "u", path: ["id"] }, alias: "ids" }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "ARRAY_AGG",
+            arg: { kind: "member", param: "u", path: ["id"] },
+            alias: "ids",
+          },
+        ],
       };
       const sql = postgresDialect.compileSelectList(selectIr, ["id"], {});
       expect(sql).toContain("ARRAY_AGG(");
@@ -437,7 +532,14 @@ describe("Aggregations", () => {
       const selectIr: IrSelect = {
         param: "u",
         paths: [],
-        aggregates: [{ kind: "aggregate", func: "JSON_AGG", arg: { kind: "member", param: "u", path: ["category"] }, alias: "cats" }],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "JSON_AGG",
+            arg: { kind: "member", param: "u", path: ["category"] },
+            alias: "cats",
+          },
+        ],
       };
       const sql = postgresDialect.compileSelectList(selectIr, ["category"], {});
       expect(sql).toContain("JSON_AGG(");
@@ -446,7 +548,9 @@ describe("Aggregations", () => {
 
     it("runtime parser: stringAgg(p.name, ', ') produces STRING_AGG with separator", async () => {
       const { parseArrowToIrSelect } = await import("../../src/parser/parse-arrow.js");
-      const fn = Object.assign(() => {}, { toString: () => `(p) => ({ names: stringAgg(p.name, ", ") })` });
+      const fn = Object.assign(() => {}, {
+        toString: () => `(p) => ({ names: stringAgg(p.name, ", ") })`,
+      });
       const ir = parseArrowToIrSelect(fn as any);
       expect(ir?.aggregates?.[0]?.func).toBe("STRING_AGG");
       expect(ir?.aggregates?.[0]?.separator).toBe(", ");
@@ -461,7 +565,9 @@ describe("Aggregations", () => {
 
     it("runtime parser: jsonAgg(p.category) produces JSON_AGG", async () => {
       const { parseArrowToIrSelect } = await import("../../src/parser/parse-arrow.js");
-      const fn = Object.assign(() => {}, { toString: () => `(p) => ({ cats: jsonAgg(p.category) })` });
+      const fn = Object.assign(() => {}, {
+        toString: () => `(p) => ({ cats: jsonAgg(p.category) })`,
+      });
       const ir = parseArrowToIrSelect(fn as any);
       expect(ir?.aggregates?.[0]?.func).toBe("JSON_AGG");
     });
@@ -477,7 +583,9 @@ describe("Aggregations", () => {
 
   describe("groupBy multi-column arrow form", () => {
     it("groupBy(o => [o.category, o.status]) produces GROUP BY both columns", async () => {
-      await newBuilder(qe).groupBy((o: InstanceType<typeof OrderEntity>) => [o.category, o.status]).toArray();
+      await newBuilder(qe)
+        .groupBy((o: InstanceType<typeof OrderEntity>) => [o.category, o.status])
+        .toArray();
       const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("GROUP BY");
       expect(sql).toContain('"category"');
@@ -523,9 +631,19 @@ describe("Bug fix: compileAggregate uses opts for alias resolution (comment 1)",
     const selectIr: IrSelect = {
       param: "u",
       paths: [],
-      aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "u", path: ["name"] }, alias: "names" }],
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "GROUP_CONCAT",
+          arg: { kind: "member", param: "u", path: ["name"] },
+          alias: "names",
+        },
+      ],
     };
-    const sql = sqliteDialect.compileSelectList(selectIr, ["name"], { tableAlias: "t2", paramToAlias: { u: "t2" } });
+    const sql = sqliteDialect.compileSelectList(selectIr, ["name"], {
+      tableAlias: "t2",
+      paramToAlias: { u: "t2" },
+    });
     expect(sql).toContain('"t2"."name"');
     expect(sql).not.toContain('"t0"');
   });
@@ -534,9 +652,20 @@ describe("Bug fix: compileAggregate uses opts for alias resolution (comment 1)",
     const selectIr: IrSelect = {
       param: "u",
       paths: [],
-      aggregates: [{ kind: "aggregate", func: "STRING_AGG", arg: { kind: "member", param: "u", path: ["name"] }, alias: "names", separator: ", " }],
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "STRING_AGG",
+          arg: { kind: "member", param: "u", path: ["name"] },
+          alias: "names",
+          separator: ", ",
+        },
+      ],
     };
-    const sql = postgresDialect.compileSelectList(selectIr, ["name"], { tableAlias: "t2", paramToAlias: { u: "t2" } });
+    const sql = postgresDialect.compileSelectList(selectIr, ["name"], {
+      tableAlias: "t2",
+      paramToAlias: { u: "t2" },
+    });
     expect(sql).toContain('"t2"."name"');
     expect(sql).not.toContain('"t0"');
   });
@@ -585,7 +714,15 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag (comment 5)", () => {
     const selectIr: IrSelect = {
       param: "u",
       paths: [],
-      aggregates: [{ kind: "aggregate", func: "JSON_AGG", arg: { kind: "member", param: "u", path: ["category"] }, alias: "cats", distinct: true }],
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "JSON_AGG",
+          arg: { kind: "member", param: "u", path: ["category"] },
+          alias: "cats",
+          distinct: true,
+        },
+      ],
     };
     const sql = postgresDialect.compileSelectList(selectIr, ["category"], {});
     expect(sql).toContain("JSON_AGG(DISTINCT ");
@@ -595,7 +732,14 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag (comment 5)", () => {
     const selectIr: IrSelect = {
       param: "u",
       paths: [],
-      aggregates: [{ kind: "aggregate", func: "JSON_AGG", arg: { kind: "member", param: "u", path: ["category"] }, alias: "cats" }],
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "JSON_AGG",
+          arg: { kind: "member", param: "u", path: ["category"] },
+          alias: "cats",
+        },
+      ],
     };
     const sql = postgresDialect.compileSelectList(selectIr, ["category"], {});
     expect(sql).not.toContain("DISTINCT");
@@ -664,7 +808,7 @@ describe("Bug fix: GROUP BY multi-segment paths throw instead of producing inval
         groupBy: [["rel", "col"]],
         compileOpts: { tableAlias: "t0", paramToAlias: { u: "t0" } },
         // no relationPathToAlias → unresolved relation path falls back to t0.col
-      })
+      }),
     ).not.toThrow();
     // Without a join alias, the multi-segment path resolves to t0."col" (last segment)
     const result = sqliteDialect.compileSelect({
@@ -676,7 +820,11 @@ describe("Bug fix: GROUP BY multi-segment paths throw instead of producing inval
       limitNum: null,
       offsetNum: null,
       groupBy: [["rel", "col"]],
-      compileOpts: { tableAlias: "t0", paramToAlias: { u: "t0" }, relationPathToAlias: { "u.rel": "t1" } },
+      compileOpts: {
+        tableAlias: "t0",
+        paramToAlias: { u: "t0" },
+        relationPathToAlias: { "u.rel": "t1" },
+      },
     });
     expect(result.sql).toContain('"t1"."col"');
   });
@@ -692,7 +840,7 @@ describe("Bug fix: GROUP BY multi-segment paths throw instead of producing inval
         limitNum: null,
         offsetNum: null,
         groupBy: [[]],
-      })
+      }),
     ).toThrow(/GROUP BY path cannot be empty/);
   });
 
@@ -721,7 +869,11 @@ describe("Bug fix: GROUP BY multi-segment paths throw instead of producing inval
       limitNum: null,
       offsetNum: null,
       groupBy: [["rel", "col"]],
-      compileOpts: { tableAlias: "t0", paramToAlias: { u: "t0" }, relationPathToAlias: { "u.rel": "t1" } },
+      compileOpts: {
+        tableAlias: "t0",
+        paramToAlias: { u: "t0" },
+        relationPathToAlias: { "u.rel": "t1" },
+      },
     });
     expect(result.sql).toContain('"t1"."col"');
   });
@@ -863,7 +1015,11 @@ describe("GROUP BY: positional references (GROUP BY 1, 2)", () => {
 describe("GROUP BY: relation path resolution", () => {
   it("compileGroupBy resolves two-segment path to join alias", async () => {
     const { compileGroupBy } = await import("../../src/dbs/shared-dialect.js");
-    const opts = { tableAlias: "t0", paramToAlias: { u: "t0" }, relationPathToAlias: { "u.author": "t1" } };
+    const opts = {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+      relationPathToAlias: { "u.author": "t1" },
+    };
     expect(compileGroupBy([["author", "name"]], opts)).toBe('"t1"."name"');
   });
 
@@ -876,7 +1032,11 @@ describe("GROUP BY: relation path resolution", () => {
 
   it("compileGroupBy mixes relation path and positional", async () => {
     const { compileGroupBy } = await import("../../src/dbs/shared-dialect.js");
-    const opts = { tableAlias: "t0", paramToAlias: { u: "t0" }, relationPathToAlias: { "u.author": "t1" } };
+    const opts = {
+      tableAlias: "t0",
+      paramToAlias: { u: "t0" },
+      relationPathToAlias: { "u.author": "t1" },
+    };
     expect(compileGroupBy([["author", "name"], 2], opts)).toBe('"t1"."name", 2');
   });
 });
@@ -900,10 +1060,10 @@ describe("Postgres placeholder numbering: WHERE + GROUP BY + HAVING + LIMIT/OFFS
 
     const [sql, params] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
     // WHERE param first, HAVING param second, then LIMIT, OFFSET
-    expect(params[0]).toBe("active");  // WHERE $1
-    expect(params[1]).toBe(5);         // HAVING $2
-    expect(params[2]).toBe(10);        // LIMIT $3
-    expect(params[3]).toBe(20);        // OFFSET $4
+    expect(params[0]).toBe("active"); // WHERE $1
+    expect(params[1]).toBe(5); // HAVING $2
+    expect(params[2]).toBe(10); // LIMIT $3
+    expect(params[3]).toBe(20); // OFFSET $4
     // No duplicate placeholder numbers in the SQL
     expect((sql.match(/\$1/g) ?? []).length).toBe(1);
     expect((sql.match(/\$2/g) ?? []).length).toBe(1);
@@ -927,8 +1087,8 @@ describe("Postgres placeholder numbering: WHERE + GROUP BY + HAVING + LIMIT/OFFS
     await newBuilder(qe).groupBy("category").having(havingIr).limit(5).toArray();
 
     const [sql, params] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
-    expect(params[0]).toBe(3);   // HAVING $1
-    expect(params[1]).toBe(5);   // LIMIT $2
+    expect(params[0]).toBe(3); // HAVING $1
+    expect(params[1]).toBe(5); // LIMIT $2
     expect((sql.match(/\$1/g) ?? []).length).toBe(1);
     expect((sql.match(/\$2/g) ?? []).length).toBe(1);
   });
@@ -988,13 +1148,17 @@ describe("Bug fix: distinct flag only set when inner arg resolves in transformer
   it("runtime parser: count(distinct(nonMember)) throws rather than producing COUNT(DISTINCT *)", async () => {
     const { parseArrowToIr } = await import("../../src/parser/parse-arrow.js");
     // distinct wraps a call expression, not a member — should throw
-    const fn = Object.assign(() => true, { toString: () => "(o) => count(distinct(someFunc())) > 0" });
+    const fn = Object.assign(() => true, {
+      toString: () => "(o) => count(distinct(someFunc())) > 0",
+    });
     expect(() => parseArrowToIr(fn as any, {})).toThrow(/DISTINCT/i);
   });
 
   it("runtime parser: count(distinct(p.col)) still produces distinct:true", async () => {
     const { parseArrowToIrSelect } = await import("../../src/parser/parse-arrow.js");
-    const fn = Object.assign(() => {}, { toString: () => "(p) => ({ n: count(distinct(p.category)) })" });
+    const fn = Object.assign(() => {}, {
+      toString: () => "(p) => ({ n: count(distinct(p.category)) })",
+    });
     const ir = parseArrowToIrSelect(fn as any);
     expect(ir?.aggregates?.[0]?.distinct).toBe(true);
     expect(ir?.aggregates?.[0]?.arg).not.toBeNull();

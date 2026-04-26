@@ -51,7 +51,9 @@ const ENV_MAP: Record<string, keyof import("./types.js").TyphexConfig> = {
   TYPHEX_ENTITIES: "entities",
 };
 
-export function envToConfig(env: Record<string, string>): Partial<import("./types.js").TyphexConfig> {
+export function envToConfig(
+  env: Record<string, string>,
+): Partial<import("./types.js").TyphexConfig> {
   const config: Record<string, string> = {};
   for (const [envKey, configKey] of Object.entries(ENV_MAP)) {
     const v = env[envKey] ?? process.env[envKey];

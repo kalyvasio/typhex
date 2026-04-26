@@ -4,7 +4,12 @@ import { parseFkDependencies, topoSort } from "../../src/migration/topo-sort.js"
 describe("parseFkDependencies", () => {
   it("extracts references from column definitions", () => {
     const entities = [
-      { table: { _table: "posts", _schema: { id: "integer primary key", user_id: "integer references users(id)" } } },
+      {
+        table: {
+          _table: "posts",
+          _schema: { id: "integer primary key", user_id: "integer references users(id)" },
+        },
+      },
       { table: { _table: "users", _schema: { id: "integer primary key", name: "text" } } },
     ];
     const deps = parseFkDependencies(entities);
@@ -14,7 +19,12 @@ describe("parseFkDependencies", () => {
 
   it("ignores self-references", () => {
     const entities = [
-      { table: { _table: "nodes", _schema: { id: "integer primary key", parent_id: "integer references nodes(id)" } } },
+      {
+        table: {
+          _table: "nodes",
+          _schema: { id: "integer primary key", parent_id: "integer references nodes(id)" },
+        },
+      },
     ];
     const deps = parseFkDependencies(entities);
     expect(deps.get("nodes")).toEqual([]);
@@ -22,7 +32,12 @@ describe("parseFkDependencies", () => {
 
   it("handles quoted table names", () => {
     const entities = [
-      { table: { _table: "comments", _schema: { id: "integer primary key", post_id: 'integer references "posts"(id)' } } },
+      {
+        table: {
+          _table: "comments",
+          _schema: { id: "integer primary key", post_id: 'integer references "posts"(id)' },
+        },
+      },
     ];
     const deps = parseFkDependencies(entities);
     expect(deps.get("comments")).toEqual(["posts"]);
@@ -39,12 +54,20 @@ describe("parseFkDependencies", () => {
 
 describe("topoSort", () => {
   it("orders independent tables in original order", () => {
-    const deps = new Map([["a", []], ["b", []], ["c", []]]);
+    const deps = new Map([
+      ["a", []],
+      ["b", []],
+      ["c", []],
+    ]);
     expect(topoSort(["a", "b", "c"], deps)).toEqual(["a", "b", "c"]);
   });
 
   it("puts dependencies before dependents", () => {
-    const deps = new Map([["posts", ["users"]], ["users", []], ["comments", ["posts"]]]);
+    const deps = new Map([
+      ["posts", ["users"]],
+      ["users", []],
+      ["comments", ["posts"]],
+    ]);
     const sorted = topoSort(["comments", "posts", "users"], deps);
     expect(sorted.indexOf("users")).toBeLessThan(sorted.indexOf("posts"));
     expect(sorted.indexOf("posts")).toBeLessThan(sorted.indexOf("comments"));
@@ -65,7 +88,10 @@ describe("topoSort", () => {
   });
 
   it("throws on circular dependency", () => {
-    const deps = new Map([["a", ["b"]], ["b", ["a"]]]);
+    const deps = new Map([
+      ["a", ["b"]],
+      ["b", ["a"]],
+    ]);
     expect(() => topoSort(["a", "b"], deps)).toThrow("Circular FK dependency");
   });
 

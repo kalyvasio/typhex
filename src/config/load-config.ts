@@ -30,7 +30,7 @@ async function loadConfigFile(filePath: string): Promise<Partial<TyphexConfig>> 
   let mod;
   if (filePath.endsWith(".json")) {
     const content = readFileSync(filePath, "utf-8");
-    mod =  JSON.parse(content) ;
+    mod = JSON.parse(content);
   } else {
     mod = await import(url);
   }

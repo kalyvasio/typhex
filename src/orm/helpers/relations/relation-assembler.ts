@@ -14,7 +14,7 @@ import { makeCompositeKey } from "../../query-helpers.js";
 export function assembleJoined(
   rows: Record<string, unknown>[],
   reusableJoinKeys: Set<string>,
-  selectIr: IrSelect
+  selectIr: IrSelect,
 ): void {
   for (const relKey of reusableJoinKeys) {
     const { outputKey, subPaths, aliases } = collectJoinedSubPaths(relKey, selectIr);
@@ -31,7 +31,7 @@ export function assembleFetched(
   rows: Record<string, unknown>[],
   fetches: RelationFetchMetadata[],
   fetched: Map<string, Map<string, unknown> | Map<string, unknown[]>>,
-  skip: Set<string>
+  skip: Set<string>,
 ): void {
   for (const meta of fetches) {
     if (skip.has(meta.relation.name)) continue;
@@ -50,7 +50,7 @@ export function assembleFetched(
  *  (explicit relation entries with subPaths). Also resolves the outputKey. */
 function collectJoinedSubPaths(
   relKey: string,
-  selectIr: IrSelect
+  selectIr: IrSelect,
 ): { outputKey: string; subPaths: string[]; aliases: string[] } {
   const subPaths: string[] = [];
   const aliases: string[] = [];
@@ -84,7 +84,7 @@ function collectJoinedSubPaths(
 function buildNestedObject(
   subPaths: string[],
   aliases: string[],
-  row: Record<string, unknown>
+  row: Record<string, unknown>,
 ): Record<string, unknown> {
   const obj: Record<string, unknown> = {};
   for (let i = 0; i < subPaths.length; i++) {
@@ -98,7 +98,7 @@ function buildNestedObject(
 function attachToManyRelation(
   rows: Record<string, unknown>[],
   meta: RelationFetchMetadata,
-  data: Map<string, unknown[]>
+  data: Map<string, unknown[]>,
 ): void {
   const pkCols = meta.parentPkColumns ?? ["id"];
   for (const row of rows) {
@@ -112,7 +112,7 @@ function attachToManyRelation(
 function attachToOneRelation(
   rows: Record<string, unknown>[],
   meta: RelationFetchMetadata,
-  data: Map<string, unknown>
+  data: Map<string, unknown>,
 ): void {
   for (const row of rows) {
     const key = makeCompositeKey(row, meta.fkColumns);

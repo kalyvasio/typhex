@@ -32,7 +32,10 @@ export interface CompileOptions {
   /** Map "param.relationKey" (e.g. "p.author") to joined table alias (e.g. "t1") */
   relationPathToAlias?: Record<string, string>;
   /** One-to-many relations in where: compile as EXISTS. Key "param.relationKey" -> EXISTS subquery info. */
-  oneToManyExists?: Record<string, { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }>;
+  oneToManyExists?: Record<
+    string,
+    { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }
+  >;
 }
 
 export interface DbColumnInfo {
@@ -76,7 +79,7 @@ export type SqlDefault = typeof SQL_DEFAULT;
 /** Resolve __param sentinels to actual values. Shared by all dialects. */
 export function resolveParamSentinels(
   params: unknown[],
-  paramValues: Record<string, unknown>
+  paramValues: Record<string, unknown>,
 ): unknown[] {
   const PARAM_SENTINEL = "__param" as const;
   const isSentinel = (p: unknown): p is { __param: string } =>
@@ -104,7 +107,10 @@ export type ResolvedOpts = {
   tableAlias: string;
   paramToAlias: Record<string, string>;
   relationPathToAlias?: Record<string, string>;
-  oneToManyExists?: Record<string, { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }>;
+  oneToManyExists?: Record<
+    string,
+    { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }
+  >;
 };
 
 /** Dialect: SQL compilation and schema translation. */
@@ -114,14 +120,25 @@ export interface DialectImpl {
   compileNextSequenceValues(tableName: string, pkColumn: string, count: number): CompileResult;
   escapeIdentifier(name: string): string;
   placeholder(index: number): string;
-  expandPlaceholders(sql: string, resolvedParams: unknown[], startIdx?: number): ExpandPlaceholdersResult;
-  compileExists(targetTable: string, alias: string, fkColumns: string[], mainAlias: string, mainPk: string[], innerSql: string): string;
+  expandPlaceholders(
+    sql: string,
+    resolvedParams: unknown[],
+    startIdx?: number,
+  ): ExpandPlaceholdersResult;
+  compileExists(
+    targetTable: string,
+    alias: string,
+    fkColumns: string[],
+    mainAlias: string,
+    mainPk: string[],
+    innerSql: string,
+  ): string;
   compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string;
   compileAggregate?(
     agg: IrAggregate,
     opts?: ResolvedOpts,
     compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
-    params?: unknown[]
+    params?: unknown[],
   ): string;
   compileWhere(node: IrNode | null, opts: CompileOptions): CompileResult;
   compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): string;
@@ -132,18 +149,35 @@ export interface DialectImpl {
     columns: string[],
     values: unknown[],
     pk?: string[],
-    onConflict?: OnConflictClause
+    onConflict?: OnConflictClause,
   ): CompileResult;
   compileInsertMany(
     table: string,
     columns: string[],
     rows: unknown[][],
     pk?: string[],
-    onConflict?: OnConflictClause
+    onConflict?: OnConflictClause,
   ): CompileResult;
-  compileCount(table: string, whereSql: string, whereParams: unknown[], joinsSql?: string): CompileResult;
-  compileUpdate(table: string, set: Record<string, unknown>, columns: string[], whereSql: string, whereParams: unknown[]): CompileResult;
-  compileDelete(table: string, whereSql: string, whereParams: unknown[]): CompileResult;
+  compileCount(
+    table: string,
+    whereSql: string,
+    whereParams: unknown[],
+    joinsSql?: string,
+  ): CompileResult;
+  compileUpdate(
+    table: string,
+    set: Record<string, unknown>,
+    columns: string[],
+    whereSql: string,
+    whereParams: unknown[],
+    options?: { returning?: boolean },
+  ): CompileResult;
+  compileDelete(
+    table: string,
+    whereSql: string,
+    whereParams: unknown[],
+    options?: { returning?: boolean },
+  ): CompileResult;
   compileSelect(opts: CompileSelectOpts): CompileResult;
   buildJoinClause(join: RelationJoinInfo): string;
 }

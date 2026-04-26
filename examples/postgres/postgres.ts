@@ -27,7 +27,9 @@ await User.query().insert({ name: "Alice", age: 30, country: "US" });
 await User.query().insert({ name: "Bob", age: 25, country: "UK" });
 await User.query().insert({ name: "Carol", age: 28, country: "US" });
 
-const adults = await User.query().where((u) => u.age > 18).toArray();
+const adults = await User.query()
+  .where((u) => u.age > 18)
+  .toArray();
 console.log("Adults:", adults);
 
 const country = "US";
@@ -39,11 +41,12 @@ console.log("From US:", fromUS);
 const first = await User.query()
   .where((u) => u.age >= 25)
   .orderBy("name", "asc")
-  .limit(1)
   .first();
 console.log("First (age>=25, by name):", first);
 
-const n = await User.query().where((u) => u.country === "US").count();
+const n = await User.query()
+  .where((u) => u.country === "US")
+  .count();
 console.log("Count US:", n);
 
 const names = await User.query()

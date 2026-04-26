@@ -24,7 +24,9 @@ describe("generateMigrationFiles", () => {
 
   it("returns empty array when schema is in sync", async () => {
     await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text)`);
-    const files = await generateMigrationFiles(driver, [entity("users", { id: "integer primary key", name: "text" })]);
+    const files = await generateMigrationFiles(driver, [
+      entity("users", { id: "integer primary key", name: "text" }),
+    ]);
     expect(files).toHaveLength(0);
   });
 

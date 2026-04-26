@@ -16,7 +16,7 @@ await Contact.query().insert({ name: "Jane Smith", email: "jane@acme.com", compa
 await Contact.query().insert({ name: "Bob Wilson", email: "bob@globex.com", companyId: globex.id });
 
 const contactsWithCompany = await Contact.query()
-  .select(c => ({ id: c.id, name: c.name, company: { id: c.company.id, name: c.company.name } }))
+  .select((c) => ({ id: c.id, name: c.name, company: { id: c.company.id, name: c.company.name } }))
   .orderBy("id", "asc")
   .toArray();
 

@@ -5,15 +5,15 @@
  */
 
 import type { Driver, TransactionOptions } from "../driver/types.js";
-import type {Dialect} from "../dialect.js";
-import {createDriver, CreateDriverOptions} from "../driver/factory.js";
-import {getDialect} from "../dbs/index.js";
-import {getRegisteredEntities, setDefaultDb,} from "../entity/global-driver.js";
-import {generateMigrationFiles, writeMigrationFiles} from "../migration/generator.js";
-import {migrationStatus as migStatus, runMigrations as runMig} from "../migration/runner.js";
-import {parseFkDependencies, topoSort} from "../migration/topo-sort.js";
-import type {MigrationFile} from "../migration/types.js";
-import {loadConfig} from "../config/load-config.js";
+import type { Dialect } from "../dialect.js";
+import { createDriver, CreateDriverOptions } from "../driver/factory.js";
+import { getDbMigrations, getDialect } from "../dbs/index.js";
+import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
+import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
+import { migrationStatus as migStatus, runMigrations as runMig } from "../migration/runner.js";
+import { parseFkDependencies, topoSort } from "../migration/topo-sort.js";
+import type { MigrationFile } from "../migration/types.js";
+import { loadConfig } from "../config/load-config.js";
 import { Trx, getActiveTrx, runInTrxStorage } from "./trx.js";
 export { Trx, getActiveTrx };
 
@@ -34,13 +34,7 @@ export type DbOptions =
     };
 
 function isDriver(v: unknown): v is Driver {
-  return (
-    v != null &&
-    typeof v === "object" &&
-    "execute" in v &&
-    "connect" in v &&
-    "close" in v
-  );
+  return v != null && typeof v === "object" && "execute" in v && "connect" in v && "close" in v;
 }
 
 /** Internal symbol: only used for the Db internal constructor overload. */
@@ -55,11 +49,12 @@ export class Db implements QueryExecutor {
   constructor(driver: Driver, _internal: typeof INTERNAL);
   constructor(arg: Driver | DbOptions, internal?: typeof INTERNAL) {
     this._driver = isDriver(arg)
-        ? (arg)
-        : isDriver((arg as { driver?: unknown }).driver)
-            ? (arg as { driver: Driver }).driver
-            : createDriver(arg as CreateDriverOptions);
-    this._migrationsFolder = (arg as { migrationsFolder?: string }).migrationsFolder ?? "./migrations";
+      ? arg
+      : isDriver((arg as { driver?: unknown }).driver)
+        ? (arg as { driver: Driver }).driver
+        : createDriver(arg as CreateDriverOptions);
+    this._migrationsFolder =
+      (arg as { migrationsFolder?: string }).migrationsFolder ?? "./migrations";
     if (internal !== INTERNAL) setDefaultDb(this);
   }
 
@@ -77,11 +72,13 @@ export class Db implements QueryExecutor {
   }
 
   query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    return this._driver.execute(sql, params).then(r => r.rows);
+    return this._driver.execute(sql, params).then((r) => r.rows);
   }
 
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }> {
-    return this._driver.execute(sql, params).then(r => ({ lastID: r.lastID, changes: r.changes }));
+    return this._driver
+      .execute(sql, params)
+      .then((r) => ({ lastID: r.lastID, changes: r.changes }));
   }
 
   async transaction<T>(fn: (trx: Trx) => Promise<T>, options?: TransactionOptions): Promise<T> {
@@ -145,18 +142,12 @@ export class Db implements QueryExecutor {
 
   /** Validate all registered entities against the database. Throws on mismatch. */
   async validate(): Promise<void> {
-    const dialect = getDialect(this._driver.dialect);
-    const esc = dialect.escapeIdentifier.bind(dialect);
+    const migrations = getDbMigrations(this._driver.dialect);
     for (const entity of getRegisteredEntities()) {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = (await this.query(`PRAGMA table_info(${esc(name)})`)) as Array<{
-        name: string;
-        type: string;
-        notnull: number;
-        pk: number;
-      }>;
+      const rows = await migrations.getDbColumns(this._driver, name);
 
       if (rows.length === 0) {
         throw new Error(`validate: table "${name}" does not exist in the database.`);
@@ -167,7 +158,7 @@ export class Db implements QueryExecutor {
       for (const col of expectedCols) {
         if (!dbCols.has(col)) {
           throw new Error(
-            `validate: column "${col}" is defined in Entity("${name}") but does not exist in the table.`
+            `validate: column "${col}" is defined in Entity("${name}") but does not exist in the table.`,
           );
         }
       }
@@ -200,4 +191,3 @@ export class Db implements QueryExecutor {
     await this._driver.close();
   }
 }
-

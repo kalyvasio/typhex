@@ -12,8 +12,13 @@ import { freshDriver } from "../helpers.js";
 describe("insertMany", () => {
   let db: Db;
 
-  beforeEach(() => { clearRegistry(); });
-  afterEach(async () => { await db?.close(); setDefaultDb(null); });
+  beforeEach(() => {
+    clearRegistry();
+  });
+  afterEach(async () => {
+    await db?.close();
+    setDefaultDb(null);
+  });
 
   it("inserts multiple rows in one statement", async () => {
     const Product = Entity("im_products", {
@@ -56,15 +61,12 @@ describe("insertMany", () => {
     db = new Db(freshDriver());
     await db.migrate();
 
-    await Item.query().insertMany([
-      { name: "Alpha", note: "has note" },
-      { name: "Beta" },
-    ]);
+    await Item.query().insertMany([{ name: "Alpha", note: "has note" }, { name: "Beta" }]);
 
     expect(await Item.query().count()).toBe(2);
-    const beta = await Item.query()
+    const beta = (await Item.query()
       .where((i: any) => i.name === "Beta")
-      .first() as any;
+      .first()) as any;
     expect(beta.note).toBeNull();
   });
 
@@ -82,7 +84,7 @@ describe("insertMany", () => {
       { slug: "rust" },
     ]);
 
-    const all = await Tag.query().orderBy("slug").toArray() as any[];
+    const all = (await Tag.query().orderBy("slug").toArray()) as any[];
     expect(all.map((t) => t.slug)).toEqual(["javascript", "rust", "typescript"]);
   });
 });
@@ -90,8 +92,13 @@ describe("insertMany", () => {
 describe("onConflict", () => {
   let db: Db;
 
-  beforeEach(() => { clearRegistry(); });
-  afterEach(async () => { await db?.close(); setDefaultDb(null); });
+  beforeEach(() => {
+    clearRegistry();
+  });
+  afterEach(async () => {
+    await db?.close();
+    setDefaultDb(null);
+  });
 
   it("doNothing() skips conflicting rows and leaves originals unchanged", async () => {
     const Tag = Entity("oc_tags_nothing", {
@@ -105,13 +112,10 @@ describe("onConflict", () => {
     await Tag.query().insert({ slug: "ts", label: "TypeScript" });
 
     // Insert same slug again — should be skipped
-    await Tag.query()
-      .insert({ slug: "ts", label: "UPDATED" })
-      .onConflict(["slug"])
-      .doNothing();
+    await Tag.query().insert({ slug: "ts", label: "UPDATED" }).onConflict(["slug"]).doNothing();
 
     expect(await Tag.query().count()).toBe(1);
-    const row = await Tag.query().first() as any;
+    const row = (await Tag.query().first()) as any;
     expect(row.label).toBe("TypeScript");
   });
 
@@ -126,13 +130,10 @@ describe("onConflict", () => {
 
     await Tag.query().insert({ slug: "js", label: "JavaScript" });
 
-    await Tag.query()
-      .insert({ slug: "js", label: "JS (updated)" })
-      .onConflict(["slug"])
-      .doUpdate();
+    await Tag.query().insert({ slug: "js", label: "JS (updated)" }).onConflict(["slug"]).doUpdate();
 
     expect(await Tag.query().count()).toBe(1);
-    const row = await Tag.query().first() as any;
+    const row = (await Tag.query().first()) as any;
     expect(row.label).toBe("JS (updated)");
   });
 
@@ -154,9 +155,9 @@ describe("onConflict", () => {
       .onConflict(["sku"])
       .doUpdate(["price"]);
 
-    const row = await Product.query().first() as any;
-    expect(row.name).toBe("Widget v1");   // unchanged
-    expect(row.price).toBe(99);            // updated
+    const row = (await Product.query().first()) as any;
+    expect(row.name).toBe("Widget v1"); // unchanged
+    expect(row.price).toBe(99); // updated
   });
 
   it("doNothing() with insertMany skips all conflicting rows", async () => {
@@ -173,14 +174,16 @@ describe("onConflict", () => {
 
     await Tag.query()
       .insertMany([
-        { slug: "a", label: "conflict-a" },  // skipped
-        { slug: "c", label: "new-c" },        // inserted
+        { slug: "a", label: "conflict-a" }, // skipped
+        { slug: "c", label: "new-c" }, // inserted
       ])
       .onConflict(["slug"])
       .doNothing();
 
     expect(await Tag.query().count()).toBe(3);
-    const a = await Tag.query().where((t: any) => t.slug === "a").first() as any;
+    const a = (await Tag.query()
+      .where((t: any) => t.slug === "a")
+      .first()) as any;
     expect(a.label).toBe("original-a");
   });
 
@@ -197,14 +200,16 @@ describe("onConflict", () => {
 
     await Tag.query()
       .insertMany([
-        { slug: "a", label: "updated-a" },  // conflict → update
-        { slug: "b", label: "new-b" },       // no conflict → insert
+        { slug: "a", label: "updated-a" }, // conflict → update
+        { slug: "b", label: "new-b" }, // no conflict → insert
       ])
       .onConflict(["slug"])
       .doUpdate();
 
     expect(await Tag.query().count()).toBe(2);
-    const a = await Tag.query().where((t: any) => t.slug === "a").first() as any;
+    const a = (await Tag.query()
+      .where((t: any) => t.slug === "a")
+      .first()) as any;
     expect(a.label).toBe("updated-a");
   });
 
@@ -212,4 +217,3 @@ describe("onConflict", () => {
     expect(InsertBuilder).toBeDefined();
   });
 });
-

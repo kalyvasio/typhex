@@ -17,10 +17,10 @@ await Employee.query().insert({ name: "Carol", departmentId: sales.id });
 
 console.log("\n=== select with one-to-many relation ===");
 const departmentsWithEmployees = await Department.query()
-  .select(d => ({
+  .select((d) => ({
     id: d.id,
     name: d.name,
-    employees: d.employees.query().select(e => ({ id: e.id, name: e.name })),
+    employees: d.employees.query().select((e) => ({ id: e.id, name: e.name })),
   }))
   .orderBy("id", "asc")
   .toArray();

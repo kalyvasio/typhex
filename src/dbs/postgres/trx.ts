@@ -11,13 +11,15 @@ export class PostgresTrx extends Trx {
   protected validateOptions(): void {
     // sqliteMode must never appear — check user options (it can't come from our Postgres defaults).
     if (this._options?.sqliteMode !== undefined) {
-      throw new Error("TransactionOptions.sqliteMode is not supported by PostgreSQL. Use isolationLevel, readOnly, or deferrable instead.");
+      throw new Error(
+        "TransactionOptions.sqliteMode is not supported by PostgreSQL. Use isolationLevel, readOnly, or deferrable instead.",
+      );
     }
     // Deferrable preconditions apply to the effective options (user may have omitted isolationLevel,
     // relying on the default READ_COMMITTED — which is not valid for DEFERRABLE).
     if (this._options.deferrable) {
       if (this._options.isolationLevel !== "SERIALIZABLE") {
-        throw new Error("TransactionOptions.deferrable requires isolationLevel: \"SERIALIZABLE\".");
+        throw new Error('TransactionOptions.deferrable requires isolationLevel: "SERIALIZABLE".');
       }
       if (!this._options.readOnly) {
         throw new Error("TransactionOptions.deferrable requires readOnly: true.");
@@ -43,7 +45,6 @@ export class PostgresTrx extends Trx {
     }
   }
 
-
   async commit(): Promise<void> {
     if (this._savepointName) {
       await this._conn.execute(`RELEASE SAVEPOINT ${this._savepointName}`, []);
@@ -57,7 +58,11 @@ export class PostgresTrx extends Trx {
     if (this._savepointName) {
       await this._conn.execute(`ROLLBACK TO SAVEPOINT ${this._savepointName}`, []);
     } else {
-      try { await this._conn.execute("ROLLBACK", []); } catch { /* ignore */ }
+      try {
+        await this._conn.execute("ROLLBACK", []);
+      } catch {
+        /* ignore */
+      }
       await this._cleanup?.();
     }
   }

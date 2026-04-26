@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import {Db, getActiveTrx, Trx} from "../../src/orm/db.js";
+import { Db, getActiveTrx, Trx } from "../../src/orm/db.js";
 import { Entity, rel } from "../../src/index.js";
-import { getDefaultDb, setDefaultDb, clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
+import {
+  getDefaultDb,
+  setDefaultDb,
+  clearRegistry,
+  registerEntity,
+} from "../../src/entity/global-driver.js";
 import { freshDriver } from "../helpers.js";
+import type { Driver } from "../../src/driver/types.js";
 
 describe("Db", () => {
   beforeEach(() => {
@@ -95,7 +101,7 @@ describe("Db", () => {
         db.transaction(async (trx) => {
           await TxUser2.query(trx).insert({ name: "Alice" });
           throw new Error("intentional rollback");
-        })
+        }),
       ).rejects.toThrow("intentional rollback");
       expect(await TxUser2.query().count()).toBe(0);
       await db.close();
@@ -164,7 +170,7 @@ describe("Db", () => {
           trx.transaction(async (innerTrx) => {
             await TxNestedRollback.query(innerTrx).insert({ name: "Inner" });
             throw new Error("inner rollback");
-          })
+          }),
         ).rejects.toThrow("inner rollback");
       });
       expect(await TxNestedRollback.query().count()).toBe(1);
@@ -184,7 +190,7 @@ describe("Db", () => {
         async (trx) => {
           await TxIsolation.query(trx).insert({ name: "Isolated" });
         },
-        { isolationLevel: "SERIALIZABLE" }
+        { isolationLevel: "SERIALIZABLE" },
       );
       expect(await TxIsolation.query().count()).toBe(1);
       await db.close();
@@ -217,7 +223,7 @@ describe("Db", () => {
           db.transaction(async () => {
             await AlsRollback.query().insert({ name: "Alice" });
             throw new Error("rollback");
-          })
+          }),
         ).rejects.toThrow("rollback");
         expect(await AlsRollback.query().count()).toBe(0);
         await db.close();
@@ -303,7 +309,7 @@ describe("Db", () => {
       await ExpPartial.query(trx).insert({ name: "Alice" });
       const nested = await trx.beginTrx();
       await ExpPartial.query(nested).insert({ name: "Bob" });
-      await nested.rollback();  // only Bob is rolled back
+      await nested.rollback(); // only Bob is rolled back
       await trx.commit();
       const rows = await ExpPartial.query().toArray();
       expect(rows).toHaveLength(1);
@@ -345,42 +351,42 @@ describe("Db", () => {
     // SQLite: unsupported ANSI isolation levels
     it("SQLite throws when READ_COMMITTED is used", async () => {
       const db = new Db(freshDriver());
-      await expect(
-        db.beginTrx({ isolationLevel: "READ_COMMITTED" })
-      ).rejects.toThrow(/does not support/);
+      await expect(db.beginTrx({ isolationLevel: "READ_COMMITTED" })).rejects.toThrow(
+        /does not support/,
+      );
       await db.close();
     });
 
     it("SQLite throws when READ_UNCOMMITTED is used", async () => {
       const db = new Db(freshDriver());
-      await expect(
-        db.beginTrx({ isolationLevel: "READ_UNCOMMITTED" })
-      ).rejects.toThrow(/does not support/);
+      await expect(db.beginTrx({ isolationLevel: "READ_UNCOMMITTED" })).rejects.toThrow(
+        /does not support/,
+      );
       await db.close();
     });
 
     it("SQLite throws when REPEATABLE_READ is used", async () => {
       const db = new Db(freshDriver());
-      await expect(
-        db.beginTrx({ isolationLevel: "REPEATABLE_READ" })
-      ).rejects.toThrow(/does not support/);
+      await expect(db.beginTrx({ isolationLevel: "REPEATABLE_READ" })).rejects.toThrow(
+        /does not support/,
+      );
       await db.close();
     });
 
     // SQLite: postgres-only options
     it("SQLite throws when readOnly is set", async () => {
       const db = new Db(freshDriver());
-      await expect(
-        db.beginTrx({ readOnly: true })
-      ).rejects.toThrow(/readOnly.*not supported by SQLite/);
+      await expect(db.beginTrx({ readOnly: true })).rejects.toThrow(
+        /readOnly.*not supported by SQLite/,
+      );
       await db.close();
     });
 
     it("SQLite throws when deferrable is set", async () => {
       const db = new Db(freshDriver());
-      await expect(
-        db.beginTrx({ deferrable: true })
-      ).rejects.toThrow(/deferrable.*not supported by SQLite/);
+      await expect(db.beginTrx({ deferrable: true })).rejects.toThrow(
+        /deferrable.*not supported by SQLite/,
+      );
       await db.close();
     });
 
@@ -388,7 +394,7 @@ describe("Db", () => {
     it("SQLite throws when both sqliteMode and isolationLevel are set", async () => {
       const db = new Db(freshDriver());
       await expect(
-        db.beginTrx({ sqliteMode: "immediate", isolationLevel: "SERIALIZABLE" })
+        db.beginTrx({ sqliteMode: "immediate", isolationLevel: "SERIALIZABLE" }),
       ).rejects.toThrow(/mutually exclusive/);
       await db.close();
     });
@@ -433,8 +439,9 @@ describe("Db", () => {
         execute: async () => ({ rows: [], changes: 0 }),
         release: async () => {},
       };
-      expect(() => new (PostgresTrx as any)(mockConn, { sqliteMode: "immediate" }))
-        .toThrow(/sqliteMode.*not supported by PostgreSQL/);
+      expect(() => new (PostgresTrx as any)(mockConn, { sqliteMode: "immediate" })).toThrow(
+        /sqliteMode.*not supported by PostgreSQL/,
+      );
     });
 
     it("PostgresTrx throws when deferrable is set without SERIALIZABLE", async () => {
@@ -444,8 +451,9 @@ describe("Db", () => {
         execute: async () => ({ rows: [], changes: 0 }),
         release: async () => {},
       };
-      expect(() => new (PostgresTrx as any)(mockConn, { deferrable: true, readOnly: true }))
-        .toThrow(/deferrable requires isolationLevel/);
+      expect(
+        () => new (PostgresTrx as any)(mockConn, { deferrable: true, readOnly: true }),
+      ).toThrow(/deferrable requires isolationLevel/);
     });
 
     it("PostgresTrx throws when deferrable is set without readOnly", async () => {
@@ -455,8 +463,10 @@ describe("Db", () => {
         execute: async () => ({ rows: [], changes: 0 }),
         release: async () => {},
       };
-      expect(() => new (PostgresTrx as any)(mockConn, { deferrable: true, isolationLevel: "SERIALIZABLE" }))
-        .toThrow(/deferrable requires readOnly/);
+      expect(
+        () =>
+          new (PostgresTrx as any)(mockConn, { deferrable: true, isolationLevel: "SERIALIZABLE" }),
+      ).toThrow(/deferrable requires readOnly/);
     });
   });
 
@@ -490,6 +500,41 @@ describe("Db", () => {
       await expect(db.validate()).rejects.toThrow('column "name"');
       await db.close();
     });
+
+    it("uses dialect metadata queries for Postgres validation", async () => {
+      const sql: string[] = [];
+      const driver = {
+        dialect: "postgres",
+        async execute(statement: string, params?: unknown[]) {
+          sql.push(statement);
+          expect(statement).not.toContain("PRAGMA");
+          expect(params).toEqual(["val_pg_users"]);
+          return {
+            rows: [
+              { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 },
+              { name: "name", type: "text", notnull: 1, dflt_value: null, pk: 0 },
+            ],
+            changes: 0,
+          };
+        },
+        async connect() {
+          throw new Error("connect should not be called");
+        },
+        createTrx() {
+          throw new Error("createTrx should not be called");
+        },
+        async close() {},
+      } as unknown as Driver;
+
+      Entity("val_pg_users", {
+        id: "integer primary key",
+        name: "text not null",
+      });
+      const db = new Db(driver);
+      await expect(db.validate()).resolves.not.toThrow();
+      expect(sql[0]).toContain("information_schema.columns");
+      await db.close();
+    });
   });
 
   describe("transactions with relations", () => {
@@ -498,13 +543,17 @@ describe("Db", () => {
     const TrxAuthor = Entity(
       "trx_rel_authors",
       { id: "integer primary key autoincrement", name: "text not null" },
-      { posts: rel.oneToMany(() => TrxPost, { foreignKey: "authorId" }) }
+      { posts: rel.oneToMany(() => TrxPost, { foreignKey: "authorId" }) },
     );
 
     const TrxPost = Entity(
       "trx_rel_posts",
-      { id: "integer primary key autoincrement", title: "text not null", authorId: "integer not null" },
-      { author: rel.manyToOne(() => TrxAuthor, { foreignKey: "authorId" }) }
+      {
+        id: "integer primary key autoincrement",
+        title: "text not null",
+        authorId: "integer not null",
+      },
+      { author: rel.manyToOne(() => TrxAuthor, { foreignKey: "authorId" }) },
     );
 
     let db: Db;
@@ -517,7 +566,9 @@ describe("Db", () => {
       await db.migrate();
     });
 
-    afterEach(async () => { await db.close(); });
+    afterEach(async () => {
+      await db.close();
+    });
 
     it("manyToOne relation is visible within the same transaction (callback API)", async () => {
       await db.transaction(async (trx) => {
@@ -578,7 +629,7 @@ describe("Db", () => {
           const author = await TrxAuthor.query(trx).insert({ name: "Ghost" });
           await TrxPost.query(trx).insert({ title: "Phantom", authorId: (author as any).id });
           throw new Error("abort");
-        })
+        }),
       ).rejects.toThrow("abort");
 
       expect(await TrxAuthor.query().count()).toBe(0);
@@ -592,9 +643,12 @@ describe("Db", () => {
 
         await expect(
           trx.transaction(async (inner) => {
-            await TrxPost.query(inner).insert({ title: "Inner Post", authorId: (author as any).id });
+            await TrxPost.query(inner).insert({
+              title: "Inner Post",
+              authorId: (author as any).id,
+            });
             throw new Error("inner abort");
-          })
+          }),
         ).rejects.toThrow("inner abort");
 
         // Only outer post should be visible within the outer trx

@@ -8,7 +8,7 @@
  * provided by the dialect object passed to makeCompileNode().
  */
 
-import type { IrNode, IrMember, IrConst, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
 import type { CompileOptions, DialectImpl, ResolvedOpts } from "./types.js";
 
 export const DEFAULT_OPTS: CompileOptions = {
@@ -36,26 +36,31 @@ export function compileAggregateArg(
   arg: IrNode | null,
   opts?: ResolvedOpts,
   compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
-  params?: unknown[]
+  params?: unknown[],
 ): string {
   if (arg === null) return "*";
   if (arg.kind === "member") {
-    const m = arg as IrMember;
+    const m = arg;
     let alias = opts ? (opts.paramToAlias[m.param] ?? opts.tableAlias) : "t0";
     let path = m.path;
     if (opts?.relationPathToAlias && path.length >= 1) {
       const relAlias = opts.relationPathToAlias[`${m.param}.${path[0]}`];
-      if (relAlias) { alias = relAlias; path = path.slice(1); }
+      if (relAlias) {
+        alias = relAlias;
+        path = path.slice(1);
+      }
     }
     return `${quoteId(alias ?? "t0")}.${quoteId(path[path.length - 1])}`;
   }
-  if (arg.kind === "const" && typeof (arg as IrConst).value === "number") {
-    return String((arg as IrConst).value);
+  if (arg.kind === "const" && typeof arg.value === "number") {
+    return String(arg.value);
   }
   if (compileNodeFn && opts) {
     return compileNodeFn(arg, opts, params ?? []);
   }
-  throw new Error(`[typhex] Aggregate arg of kind "${arg.kind}" requires a compile context. Use a member expression, a numeric literal, or ensure the aggregate is used within a full query (HAVING/WHERE).`);
+  throw new Error(
+    `[typhex] Aggregate arg of kind "${arg.kind}" requires a compile context. Use a member expression, a numeric literal, or ensure the aggregate is used within a full query (HAVING/WHERE).`,
+  );
 }
 
 /** Compile FUNC(DISTINCT? arg) — the standard single-argument aggregate shape.
@@ -65,7 +70,7 @@ export function compileStandardAggregate(
   agg: IrAggregate,
   opts?: ResolvedOpts,
   compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
-  params?: unknown[]
+  params?: unknown[],
 ): string {
   const argSql = compileAggregateArg(agg.arg, opts, compileNodeFn, params);
   const distinctPrefix = agg.distinct ? "DISTINCT " : "";
@@ -85,14 +90,12 @@ export function compileConcatAggregate(
   defaultSep: string | undefined,
   opts?: ResolvedOpts,
   compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
-  params?: unknown[]
+  params?: unknown[],
 ): string {
   const argSql = compileAggregateArg(agg.arg, opts, compileNodeFn, params);
   const distinctPrefix = agg.distinct ? "DISTINCT " : "";
   const sepLiteral =
-    agg.separator !== undefined
-      ? `'${agg.separator.replaceAll("'", "''")}'`
-      : defaultSep;
+    agg.separator !== undefined ? `'${agg.separator.replaceAll("'", "''")}'` : defaultSep;
   const inner =
     sepLiteral !== undefined
       ? `${distinctPrefix}${argSql}, ${sepLiteral}`
@@ -108,38 +111,38 @@ export function compileAggregate(
   agg: IrAggregate,
   opts?: ResolvedOpts,
   compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
-  params?: unknown[]
+  params?: unknown[],
 ): string {
   const CROSS_DIALECT = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT"]);
   if (!CROSS_DIALECT.has(agg.func)) {
-    throw new Error(`[typhex] Aggregate function "${agg.func}" is dialect-specific. Import it from the corresponding dialect and use with the matching database.`);
+    throw new Error(
+      `[typhex] Aggregate function "${agg.func}" is dialect-specific. Import it from the corresponding dialect and use with the matching database.`,
+    );
   }
   return compileStandardAggregate(agg.func, agg, opts, compileNodeFn, params);
 }
-
 
 /** Compile a GROUP BY clause body from an array of paths/positional references.
  *  string[] entries are resolved via alias lookup (same pattern as compileOrderBy).
  *  number entries are emitted as positional column references (GROUP BY 1).
  *  The root param is derived automatically from paramToAlias + relationPathToAlias. */
-export function compileGroupBy(
-  paths: Array<string[] | number>,
-  opts: ResolvedOpts
-): string {
-  return paths.map((entry) => {
-    if (typeof entry === "number") return String(entry);
-    if (entry.length === 0) throw new Error("[typhex] GROUP BY path cannot be empty");
-    if (entry.length === 1) return `${quoteId(opts.tableAlias)}.${quoteId(entry[0])}`;
-    // Multi-segment: scan known params to find the join alias
-    if (opts.relationPathToAlias) {
-      for (const param of Object.keys(opts.paramToAlias)) {
-        const relAlias = opts.relationPathToAlias[`${param}.${entry[0]}`];
-        if (relAlias) return `${quoteId(relAlias)}.${entry.slice(1).map(quoteId).join(".")}`;
+export function compileGroupBy(paths: Array<string[] | number>, opts: ResolvedOpts): string {
+  return paths
+    .map((entry) => {
+      if (typeof entry === "number") return String(entry);
+      if (entry.length === 0) throw new Error("[typhex] GROUP BY path cannot be empty");
+      if (entry.length === 1) return `${quoteId(opts.tableAlias)}.${quoteId(entry[0])}`;
+      // Multi-segment: scan known params to find the join alias
+      if (opts.relationPathToAlias) {
+        for (const param of Object.keys(opts.paramToAlias)) {
+          const relAlias = opts.relationPathToAlias[`${param}.${entry[0]}`];
+          if (relAlias) return `${quoteId(relAlias)}.${entry.slice(1).map(quoteId).join(".")}`;
+        }
       }
-    }
-    // No join alias found: fall back to main table with full path
-    return `${quoteId(opts.tableAlias)}.${entry.map(quoteId).join(".")}`;
-  }).join(", ");
+      // No join alias found: fall back to main table with full path
+      return `${quoteId(opts.tableAlias)}.${entry.map(quoteId).join(".")}`;
+    })
+    .join(", ");
 }
 
 type CompileNodeFn = (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string;
@@ -149,14 +152,17 @@ function compileInNode(
   opts: ResolvedOpts,
   params: unknown[],
   dialect: DialectImpl,
-  compileNode: CompileNodeFn
+  compileNode: CompileNodeFn,
 ): string {
   const left = compileNode(node.left, opts, params);
   const op = node.negated ? "NOT IN" : "IN";
   if (node.right.kind === "const" && Array.isArray(node.right.value)) {
     const list = node.right.value;
     if (list.length === 0) return node.negated ? "1=1" : "1=0";
-    const placeholders = list.map(v => { params.push(v); return dialect.placeholder(params.length); });
+    const placeholders = list.map((v) => {
+      params.push(v);
+      return dialect.placeholder(params.length);
+    });
     return `${left} ${op} (${placeholders.join(", ")})`;
   }
   if (node.right.kind === "param") {
@@ -171,14 +177,24 @@ function compileExistsNode(
   opts: ResolvedOpts,
   params: unknown[],
   dialect: DialectImpl,
-  compileNode: CompileNodeFn
+  compileNode: CompileNodeFn,
 ): string {
   const info = opts.oneToManyExists?.[`${node.rootParam}.${node.relationKey}`];
   if (!info) throw new Error(`No oneToManyExists info for ${node.rootParam}.${node.relationKey}`);
-  const innerOpts = { ...opts, paramToAlias: { ...opts.paramToAlias, [node.innerParam]: info.alias } };
+  const innerOpts = {
+    ...opts,
+    paramToAlias: { ...opts.paramToAlias, [node.innerParam]: info.alias },
+  };
   const innerSql = compileNode(node.innerWhere, innerOpts, params);
   const wrappedSql = node.negated ? `(NOT (${innerSql}))` : innerSql;
-  const existsSql = dialect.compileExists(info.targetTable, info.alias, info.fkColumns, opts.tableAlias, info.mainPk, wrappedSql);
+  const existsSql = dialect.compileExists(
+    info.targetTable,
+    info.alias,
+    info.fkColumns,
+    opts.tableAlias,
+    info.mainPk,
+    wrappedSql,
+  );
   return node.negated ? `(NOT ${existsSql})` : existsSql;
 }
 
@@ -189,9 +205,11 @@ export function makeCompileNode(dialect: DialectImpl) {
         const left = compileNode(node.left, opts, params);
         const right = compileNode(node.right, opts, params);
         const op =
-          node.op === "==" || node.op === "===" ? "=" :
-          node.op === "!=" || node.op === "!==" ? "<>" :
-          node.op;
+          node.op === "==" || node.op === "==="
+            ? "="
+            : node.op === "!=" || node.op === "!=="
+              ? "<>"
+              : node.op;
         if (node.op === "&&") return `(${left} AND ${right})`;
         if (node.op === "||") return `(${left} OR ${right})`;
         return `(${left} ${op} ${right})`;
@@ -203,7 +221,10 @@ export function makeCompileNode(dialect: DialectImpl) {
         let path = node.path;
         if (path.length >= 1 && opts.relationPathToAlias) {
           const relAlias = opts.relationPathToAlias[`${node.param}.${path[0]}`];
-          if (relAlias) { alias = relAlias; path = path.slice(1); }
+          if (relAlias) {
+            alias = relAlias;
+            path = path.slice(1);
+          }
         }
         if (path.length === 0) return quoteId(alias);
         return `${quoteId(alias)}.${path.map(quoteId).join(".")}`;
@@ -220,15 +241,21 @@ export function makeCompileNode(dialect: DialectImpl) {
         return compileExistsNode(node, opts, params, dialect, compileNode);
       case "call": {
         const receiver = compileNode(node.receiver, opts, params);
-        if (node.method === "startsWith" || node.method === "endsWith" || node.method === "includes") {
+        if (
+          node.method === "startsWith" ||
+          node.method === "endsWith" ||
+          node.method === "includes"
+        ) {
           const arg = compileNode(node.args[0], opts, params);
           return dialect.compileLike(receiver, arg, node.method);
         }
         throw new Error(`Unsupported method: ${node.method}`);
       }
       case "aggregate":
-        return dialect.compileAggregate?.(node as IrAggregate, opts, compileNode, params)
-          ?? compileAggregate(node as IrAggregate, opts, compileNode, params);
+        return (
+          dialect.compileAggregate?.(node, opts, compileNode, params) ??
+          compileAggregate(node, opts, compileNode, params)
+        );
       default:
         throw new Error(`Unknown IR node: ${(node as { kind: string }).kind}`);
     }
@@ -245,7 +272,10 @@ export function compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}
       let path = o.path;
       if (path.length >= 2 && opts.relationPathToAlias) {
         const relAlias = opts.relationPathToAlias[`${o.param}.${path[0]}`];
-        if (relAlias) { tableAlias = relAlias; path = path.slice(1); }
+        if (relAlias) {
+          tableAlias = relAlias;
+          path = path.slice(1);
+        }
       }
       const col = path.map(quoteId).join(".");
       const dir = o.direction === "desc" ? "DESC" : "ASC";
@@ -258,16 +288,17 @@ export function compileSelectList(
   select: IrSelect | null,
   columns: string[],
   options: CompileOptions = {},
-  compileAggFn: (agg: IrAggregate, opts: ResolvedOpts) => string = compileAggregate
+  compileAggFn: (agg: IrAggregate, opts: ResolvedOpts) => string = compileAggregate,
 ): string {
   const opts = resolveOpts(options);
   const rootAlias = select?.param
-    ? opts.paramToAlias?.[select.param] ?? opts.tableAlias ?? "t0"
-    : opts.tableAlias ?? "t0";
+    ? (opts.paramToAlias?.[select.param] ?? opts.tableAlias ?? "t0")
+    : (opts.tableAlias ?? "t0");
   const base = quoteId(rootAlias);
-  const aggParts = select?.aggregates && select.aggregates.length > 0
-    ? select.aggregates.map(agg => compileAggFn(agg, opts))
-    : [];
+  const aggParts =
+    select?.aggregates && select.aggregates.length > 0
+      ? select.aggregates.map((agg) => compileAggFn(agg, opts))
+      : [];
   if (!select || select.paths.length === 0) {
     if (aggParts.length > 0 && (!select || !select.rest)) {
       return aggParts.join(", ");
@@ -281,7 +312,10 @@ export function compileSelectList(
     let p = path;
     if (path.length >= 1 && opts.relationPathToAlias && select?.param) {
       const relAlias = opts.relationPathToAlias[`${select.param}.${path[0]}`];
-      if (relAlias) { alias = relAlias; p = path.slice(1); }
+      if (relAlias) {
+        alias = relAlias;
+        p = path.slice(1);
+      }
     }
     if (p.length === 0) return quoteId(alias);
     const col = `${quoteId(alias)}.${p.map(quoteId).join(".")}`;
@@ -290,7 +324,9 @@ export function compileSelectList(
   if (select.rest) {
     const explicitCols = new Set(select.paths.map((p) => p[0]));
     const restCols = columns.filter((c) => !explicitCols.has(c));
-    return [...explicitParts, restCols.map((c) => `${base}.${quoteId(c)}`), ...aggParts].flat().join(", ");
+    return [...explicitParts, restCols.map((c) => `${base}.${quoteId(c)}`), ...aggParts]
+      .flat()
+      .join(", ");
   }
   return [...explicitParts, ...aggParts].join(", ");
 }

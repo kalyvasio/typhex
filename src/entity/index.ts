@@ -14,7 +14,15 @@ export type {
   RelationTarget,
   RelationLoadedValue,
 } from "./entity.js";
-export type { InferTable, InferInsert, Flatten, Mutable, Materialized, MaterializeShape, SQLTypeMap } from "./schema-inference.js";
+export type {
+  InferTable,
+  InferInsert,
+  Flatten,
+  Mutable,
+  Materialized,
+  MaterializeShape,
+  SQLTypeMap,
+} from "./schema-inference.js";
 export { rel } from "./relations.js";
 export type {
   RelationDef,

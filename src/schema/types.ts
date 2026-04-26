@@ -42,6 +42,9 @@ export function sqlType(def: TableDefinition, col: string): string {
   if (c.primaryKey && !lower.includes("primary key")) out += " PRIMARY KEY";
   if (c.autoIncrement && !lower.includes("autoincrement")) out += " AUTOINCREMENT";
   if (c.nullable === false && !lower.includes("not null")) out += " NOT NULL";
-  if (c.default !== undefined) out += " DEFAULT " + (typeof c.default === "number" ? c.default : `'${String(c.default).replaceAll("'", "''")}'`);
+  if (c.default !== undefined)
+    out +=
+      " DEFAULT " +
+      (typeof c.default === "number" ? c.default : `'${String(c.default).replaceAll("'", "''")}'`);
   return out;
 }

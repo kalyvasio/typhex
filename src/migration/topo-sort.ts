@@ -4,7 +4,7 @@
  */
 
 export function parseFkDependencies(
-  entities: ReadonlyArray<{ table: { _table: string; _schema: Record<string, string> } }>
+  entities: ReadonlyArray<{ table: { _table: string; _schema: Record<string, string> } }>,
 ): Map<string, string[]> {
   const deps = new Map<string, string[]>();
   for (const e of entities) {

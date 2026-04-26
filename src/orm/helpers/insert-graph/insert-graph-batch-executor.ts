@@ -33,14 +33,9 @@ export class InsertGraphBatchExecutor extends InsertGraphExecutor {
     await this.insertNodeBatch(qe, group);
   }
 
-  private async insertNodeBatch(
-    qe: QueryExecutor,
-    group: InsertGroup,
-  ): Promise<void> {
+  private async insertNodeBatch(qe: QueryExecutor, group: InsertGroup): Promise<void> {
     const entity = group.items[0].entity;
-    const inserted = await entity.query(qe).insertMany(
-      group.items.map((node) => node.scalarData),
-    );
+    const inserted = await entity.query(qe).insertMany(group.items.map((node) => node.scalarData));
     if (inserted.length > 0 && inserted.length !== group.items.length) {
       throw new Error("insertGraph: insertMany did not return the expected number of rows");
     }

@@ -5,13 +5,10 @@ import { QueryBuilder } from "../../src/orm/query-builder.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 import type { RelationDef } from "../../src/entity/relations.js";
 
-const User = Entity(
-  "users",
-  {
-    id: "integer primary key autoincrement",
-    name: "text not null",
-  }
-);
+const User = Entity("users", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+});
 
 const Post = Entity(
   "posts",
@@ -22,7 +19,7 @@ const Post = Entity(
   },
   {
     author: rel.manyToOne(() => User, { foreignKey: "authorId" }),
-  }
+  },
 );
 
 describe("join hints", () => {
@@ -96,9 +93,7 @@ describe("join hints", () => {
     await Post.query().insert({ title: "Post B", authorId: (bob as any).id });
     await Post.query().insert({ title: "Post A", authorId: (alice as any).id });
 
-    const results = await Post.query()
-      .orderBy("author.name", "asc")
-      .toArray();
+    const results = await Post.query().orderBy("author.name", "asc").toArray();
 
     expect(results).toHaveLength(2);
     expect((results[0] as any).title).toBe("Post A");
@@ -168,7 +163,9 @@ describe("join type SQL keywords (mock executor)", () => {
       capturedSql = sql;
       return [];
     });
-    await buildPostQb(qe).rightJoin((p: any) => ({ author: p.author })).toArray();
+    await buildPostQb(qe)
+      .rightJoin((p: any) => ({ author: p.author }))
+      .toArray();
     expect(capturedSql).toContain("RIGHT JOIN");
   });
 
@@ -179,7 +176,9 @@ describe("join type SQL keywords (mock executor)", () => {
       capturedSql = sql;
       return [];
     });
-    await buildPostQb(qe).crossJoin((p: any) => ({ author: p.author })).toArray();
+    await buildPostQb(qe)
+      .crossJoin((p: any) => ({ author: p.author }))
+      .toArray();
     expect(capturedSql).toContain("CROSS JOIN");
   });
 
@@ -190,7 +189,9 @@ describe("join type SQL keywords (mock executor)", () => {
       capturedSql = sql;
       return [];
     });
-    await buildPostQb(qe).fullJoin((p: any) => ({ author: p.author })).toArray();
+    await buildPostQb(qe)
+      .fullJoin((p: any) => ({ author: p.author }))
+      .toArray();
     expect(capturedSql).toContain("FULL OUTER JOIN");
   });
 
@@ -201,7 +202,9 @@ describe("join type SQL keywords (mock executor)", () => {
       capturedSql = sql;
       return [];
     });
-    await buildPostQb(qe).innerJoin((p: any) => p.author).toArray();
+    await buildPostQb(qe)
+      .innerJoin((p: any) => p.author)
+      .toArray();
     expect(capturedSql).toContain("INNER JOIN");
   });
 
@@ -228,7 +231,9 @@ describe("join type SQL keywords (mock executor)", () => {
       capturedSql = sql;
       return [];
     });
-    await buildPostQb(qe).crossJoin((p: any) => ({ author: p.author })).toArray();
+    await buildPostQb(qe)
+      .crossJoin((p: any) => ({ author: p.author }))
+      .toArray();
     expect(capturedSql).toContain("INNER JOIN");
     expect(capturedSql).not.toContain("CROSS JOIN");
   });

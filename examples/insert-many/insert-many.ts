@@ -18,7 +18,7 @@ const Product = Entity("products", {
   id: "integer primary key autoincrement",
   sku: "text not null unique",
   name: "text not null",
-  price: "integer not null",   // cents
+  price: "integer not null", // cents
   stock: "integer not null",
 });
 
@@ -28,9 +28,9 @@ await db.migrate();
 // ── insertMany ────────────────────────────────────────────────────────────────
 // Bulk-insert a catalogue in one round-trip.
 await Product.query().insertMany([
-  { sku: "W-001", name: "Widget",    price: 999,  stock: 100 },
-  { sku: "G-001", name: "Gadget",    price: 1499, stock: 50  },
-  { sku: "D-001", name: "Doohickey", price: 249,  stock: 200 },
+  { sku: "W-001", name: "Widget", price: 999, stock: 100 },
+  { sku: "G-001", name: "Gadget", price: 1499, stock: 50 },
+  { sku: "D-001", name: "Doohickey", price: 249, stock: 200 },
 ]);
 
 console.log("After initial insertMany:", await Product.query().count(), "products");
@@ -41,7 +41,7 @@ console.log("After initial insertMany:", await Product.query().count(), "product
 await Product.query()
   .insertMany([
     { sku: "W-001", name: "Widget UPDATED", price: 888, stock: 999 }, // skipped
-    { sku: "T-001", name: "Thingamajig",    price: 599, stock: 75  }, // inserted
+    { sku: "T-001", name: "Thingamajig", price: 599, stock: 75 }, // inserted
   ])
   .onConflict(["sku"])
   .doNothing();
@@ -49,9 +49,9 @@ await Product.query()
 console.log("\nAfter doNothing insertMany:", await Product.query().count(), "products");
 // → 4
 
-const widget = await Product.query()
+const widget = (await Product.query()
   .where((p: any) => p.sku === "W-001")
-  .first() as any;
+  .first()) as any;
 console.log("Widget is unchanged — name:", widget.name, "| price:", widget.price);
 // → Widget | 999
 
@@ -62,9 +62,9 @@ await Product.query()
   .onConflict(["sku"])
   .doUpdate();
 
-const widgetV2 = await Product.query()
+const widgetV2 = (await Product.query()
   .where((p: any) => p.sku === "W-001")
-  .first() as any;
+  .first()) as any;
 console.log("\nWidget after doUpdate — name:", widgetV2.name, "| price:", widgetV2.price);
 // → Widget v2 | 1099
 
@@ -75,9 +75,9 @@ await Product.query()
   .onConflict(["sku"])
   .doUpdate(["price"]);
 
-const gadget = await Product.query()
+const gadget = (await Product.query()
   .where((p: any) => p.sku === "G-001")
-  .first() as any;
+  .first()) as any;
 console.log("\nGadget after partial doUpdate — name:", gadget.name, "| price:", gadget.price);
 // name is unchanged ("Gadget"), only price was updated (1799)
 
@@ -85,15 +85,15 @@ console.log("\nGadget after partial doUpdate — name:", gadget.name, "| price:"
 // Bulk-update a price list: new SKUs are inserted, existing ones get price updated.
 await Product.query()
   .insertMany([
-    { sku: "W-001", name: "irrelevant", price: 500,  stock: 0  }, // price updated to 500
-    { sku: "Z-001", name: "Zapper",     price: 3999, stock: 10 }, // new product
+    { sku: "W-001", name: "irrelevant", price: 500, stock: 0 }, // price updated to 500
+    { sku: "Z-001", name: "Zapper", price: 3999, stock: 10 }, // new product
   ])
   .onConflict(["sku"])
   .doUpdate(["price"]);
 
-const widgetFinal = await Product.query()
+const widgetFinal = (await Product.query()
   .where((p: any) => p.sku === "W-001")
-  .first() as any;
+  .first()) as any;
 console.log("\nWidget price after bulk price update:", widgetFinal.price);
 // → 500
 

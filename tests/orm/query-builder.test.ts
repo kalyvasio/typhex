@@ -197,7 +197,11 @@ describe("QueryBuilder", () => {
       // The mock db returns lastID=1 from run() but [] from query(), so the
       // re-fetch by pk finds nothing and throws "row not found".
       await expect(
-        newBuilder(db).insert({ id: undefined, name: undefined, age: undefined } as unknown as Record<string, unknown>)
+        newBuilder(db).insert({
+          id: undefined,
+          name: undefined,
+          age: undefined,
+        } as unknown as Record<string, unknown>),
       ).rejects.toThrow("insert: insert succeeded but row not found");
     });
   });
@@ -211,10 +215,7 @@ describe("QueryBuilder", () => {
 
     it("builds multi-row INSERT with RETURNING * and returns hydrated rows", async () => {
       // The mock db.query returns [] by default, so hydratedRows = [].
-      const rows = await newBuilder(db).insertMany([
-        { name: "Alice" },
-        { name: "Bob" },
-      ]);
+      const rows = await newBuilder(db).insertMany([{ name: "Alice" }, { name: "Bob" }]);
       // insertMany uses db.query (RETURNING *) not db.run
       const [sql, params] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("INSERT");
@@ -222,14 +223,14 @@ describe("QueryBuilder", () => {
       expect(sql).toContain("RETURNING *");
       expect(params).toContain("Alice");
       expect(params).toContain("Bob");
-      expect(rows).toEqual([]);  // mock returns [] from query
+      expect(rows).toEqual([]); // mock returns [] from query
     });
 
     it("unions columns in entity order; missing columns default to null", async () => {
       // newBuilder has columnNames: ["id", "name", "age", "country"]
       // entity order: name before age
       await newBuilder(db).insertMany([
-        { age: 25 },      // age first in input — entity order must win
+        { age: 25 }, // age first in input — entity order must win
         { name: "Alice" },
       ]);
       const [sql, params] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];

@@ -61,7 +61,9 @@ describe("Db migration API (integration)", () => {
     expect(result.applied).toHaveLength(1);
     expect(result.applied[0]).toMatch(/add_accounts_table/);
 
-    const rows = await db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`);
+    const rows = await db.query(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='accounts'`,
+    );
     expect(rows).toHaveLength(1);
 
     await db.close();
@@ -134,9 +136,11 @@ describe("Db migration API (integration)", () => {
 
     await expect(db.migrate()).resolves.not.toThrow();
 
-    const tables = ((await driver.execute(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`
-    ).then(r => r.rows)) as Array<{ name: string }>).map((r) => r.name);
+    const tables = (
+      (await driver
+        .execute(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+        .then((r) => r.rows)) as Array<{ name: string }>
+    ).map((r) => r.name);
     expect(tables).toContain("users");
     expect(tables).toContain("posts");
     expect(tables).toContain("comments");

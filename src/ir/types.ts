@@ -73,9 +73,16 @@ export interface IrCall {
 
 export interface IrAggregate {
   kind: "aggregate";
-  func: "SUM" | "AVG" | "MIN" | "MAX" | "COUNT"   // cross-dialect
-      | "GROUP_CONCAT"                              // SQLite
-      | "STRING_AGG" | "ARRAY_AGG" | "JSON_AGG";   // PostgreSQL
+  func:
+    | "SUM"
+    | "AVG"
+    | "MIN"
+    | "MAX"
+    | "COUNT" // cross-dialect
+    | "GROUP_CONCAT" // SQLite
+    | "STRING_AGG"
+    | "ARRAY_AGG"
+    | "JSON_AGG"; // PostgreSQL
   arg: IrNode | null; // null for COUNT(*)
   alias?: string;
   distinct?: boolean;
@@ -125,10 +132,10 @@ export type JoinType = "inner" | "left" | "right" | "cross" | "full";
 
 export const JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
   inner: "INNER JOIN",
-  left:  "LEFT JOIN",
+  left: "LEFT JOIN",
   right: "RIGHT JOIN",
   cross: "CROSS JOIN",
-  full:  "FULL OUTER JOIN",
+  full: "FULL OUTER JOIN",
 };
 
 export interface JoinHint {
@@ -169,12 +176,16 @@ export function isIrNode(node: unknown): node is IrNode {
  *  (e.g. "u" from `u.name === "Alice"`). */
 export function collectParamNamesFromWhere(node: IrNode, out: Set<string>): void {
   switch (node.kind) {
-    case "member": out.add(node.param); break;
+    case "member":
+      out.add(node.param);
+      break;
     case "binary":
       collectParamNamesFromWhere(node.left, out);
       collectParamNamesFromWhere(node.right, out);
       break;
-    case "unary": collectParamNamesFromWhere(node.operand, out); break;
+    case "unary":
+      collectParamNamesFromWhere(node.operand, out);
+      break;
     case "in":
       collectParamNamesFromWhere(node.left, out);
       collectParamNamesFromWhere(node.right, out);
@@ -183,8 +194,11 @@ export function collectParamNamesFromWhere(node: IrNode, out: Set<string>): void
       collectParamNamesFromWhere(node.receiver, out);
       for (const a of node.args) collectParamNamesFromWhere(a, out);
       break;
-    case "exists": out.add(node.rootParam); break;
-    default: break;
+    case "exists":
+      out.add(node.rootParam);
+      break;
+    default:
+      break;
   }
 }
 
@@ -192,26 +206,54 @@ export function isIrSelect(node: unknown): node is IrSelect {
   if (node == null || typeof node !== "object") return false;
   const o = node as Record<string, unknown>;
   if (typeof o.param !== "string" || !Array.isArray(o.paths)) return false;
-  if (!o.paths.every((p: unknown) => Array.isArray(p) && (p as unknown[]).every((x: unknown) => typeof x === "string"))) return false;
+  if (
+    !o.paths.every(
+      (p: unknown) =>
+        Array.isArray(p) && (p as unknown[]).every((x: unknown) => typeof x === "string"),
+    )
+  )
+    return false;
   if (o.rest !== undefined && typeof o.rest !== "boolean") return false;
   if (o.relations !== undefined) {
     if (!Array.isArray(o.relations)) return false;
-    if (!o.relations.every((r: unknown) => {
-      const x = r as Record<string, unknown>;
-      return x && typeof x.name === "string" && typeof x.outputKey === "string" &&
-        (x.subPaths === undefined || (Array.isArray(x.subPaths) && x.subPaths.every((p: unknown) =>
-          Array.isArray(p) && (p as unknown[]).every((s: unknown) => typeof s === "string")))) &&
-        (x.whereIr === undefined || isIrNode(x.whereIr)) &&
-        (x.orderBy === undefined || (Array.isArray(x.orderBy) && x.orderBy.every((o: unknown) =>
-          typeof o === "object" && o !== null && "param" in o && "path" in o && "direction" in o)));
-    })) return false;
+    if (
+      !o.relations.every((r: unknown) => {
+        const x = r as Record<string, unknown>;
+        return (
+          x &&
+          typeof x.name === "string" &&
+          typeof x.outputKey === "string" &&
+          (x.subPaths === undefined ||
+            (Array.isArray(x.subPaths) &&
+              x.subPaths.every(
+                (p: unknown) =>
+                  Array.isArray(p) && (p as unknown[]).every((s: unknown) => typeof s === "string"),
+              ))) &&
+          (x.whereIr === undefined || isIrNode(x.whereIr)) &&
+          (x.orderBy === undefined ||
+            (Array.isArray(x.orderBy) &&
+              x.orderBy.every(
+                (o: unknown) =>
+                  typeof o === "object" &&
+                  o !== null &&
+                  "param" in o &&
+                  "path" in o &&
+                  "direction" in o,
+              )))
+        );
+      })
+    )
+      return false;
   }
   if (o.aggregates !== undefined) {
     if (!Array.isArray(o.aggregates)) return false;
-    if (!o.aggregates.every((a: unknown) => {
-      const x = a as Record<string, unknown>;
-      return x && x.kind === "aggregate" && typeof x.func === "string";
-    })) return false;
+    if (
+      !o.aggregates.every((a: unknown) => {
+        const x = a as Record<string, unknown>;
+        return x && x.kind === "aggregate" && typeof x.func === "string";
+      })
+    )
+      return false;
   }
   if (o.groupBy !== undefined) {
     if (!Array.isArray(o.groupBy)) return false;

@@ -16,6 +16,7 @@ const fromUS = users.where((u) => u.country === country).toArray();
 ```
 
 **Key benefits:**
+
 - ✅ **Type-safe queries** — TypeScript knows your table structure
 - ✅ **No SQL injection** — All queries are parameterized
 - ✅ **Familiar syntax** — Write predicates like you write JavaScript
@@ -30,18 +31,23 @@ Write queries using arrow functions that feel like JavaScript:
 
 ```ts
 users.where((u) => u.age > 18 && u.active).toArray();
-users.where((u) => u.name.startsWith("A")).orderBy("age", "desc").first();
+users
+  .where((u) => u.name.startsWith("A"))
+  .orderBy("age", "desc")
+  .first();
 users.where((u) => u.id in [1, 2, 3]).count();
 ```
 
 ### Two Modes: Runtime Parsing or Compile-Time Transformation
 
 **Runtime mode** (works everywhere):
+
 - Parses arrow functions from source using Acorn
 - Supports a safe subset of JavaScript expressions
 - Requires passing closure variables explicitly: `.where((u) => u.country === country, { country })`
 
 **Transformer mode** (TypeScript projects):
+
 - Compiles predicates to IR at build time
 - **Auto-captures closure variables** — no need to pass them manually
 - Zero runtime parsing overhead
@@ -118,11 +124,13 @@ users.delete((u) => u.country === "UK");
 For TypeScript projects, use the compile-time transformer to automatically capture closure variables:
 
 1. **Install ts-patch**:
+
    ```bash
    npm install --save-dev ts-patch
    ```
 
 2. **Configure your `tsconfig.json`**:
+
    ```json
    {
      "compilerOptions": {
@@ -132,19 +140,19 @@ For TypeScript projects, use the compile-time transformer to automatically captu
    ```
 
 3. **Patch TypeScript** (one-time setup):
+
    ```bash
    npx ts-patch install
    ```
 
 4. **Write queries without passing closure variables**:
+
    ```ts
    const country = "US";
    const minAge = 25;
-   
+
    // No second argument needed! Transformer auto-captures `country` and `minAge`
-   const results = users
-     .where((u) => u.country === country && u.age >= minAge)
-     .toArray();
+   const results = users.where((u) => u.country === country && u.age >= minAge).toArray();
    ```
 
 The transformer rewrites `.where((u) => u.country === country)` to `.where(ir, { country })` at compile time, so you get the convenience without runtime overhead.
@@ -156,6 +164,7 @@ The transformer rewrites `.where((u) => u.country === country)` to `.where(ir, {
 The runtime parser supports a limited but practical subset of JavaScript:
 
 **✅ Supported:**
+
 - Comparisons: `===`, `!==`, `==`, `!=`, `>`, `>=`, `<`, `<=`
 - Logical operators: `&&`, `||`, `!`
 - Member access: `u.name`, `u.profile.age` (nested properties)
@@ -166,6 +175,7 @@ The runtime parser supports a limited but practical subset of JavaScript:
 - Closure variables: Pass as second argument: `.where((u) => u.country === country, { country })`
 
 **❌ Not supported (runtime):**
+
 - Function calls (except `.startsWith`, `.endsWith`, `.includes`)
 - Loops, ternaries, assignments
 - `await`, `new`, `instanceof`
@@ -189,9 +199,7 @@ const filtered = users
   .toArray();
 
 // String matching
-const matching = users
-  .where((u) => u.name.startsWith("A"))
-  .toArray();
+const matching = users.where((u) => u.name.startsWith("A")).toArray();
 
 // Array membership
 const ids = [1, 2, 3];
@@ -205,10 +213,7 @@ const selected = users.where((u) => u.id in ids, { ids }).toArray();
 const newId = users.insert({ name: "Charlie", age: 28, country: "CA" });
 
 // Update
-const updated = users.update(
-  (u) => u.name === "Alice",
-  { age: 31 }
-);
+const updated = users.update((u) => u.name === "Alice", { age: 31 });
 
 // Delete
 const deleted = users.delete((u) => u.country === "UK");
@@ -287,10 +292,12 @@ Both APIs support nesting. Each nested call creates a savepoint, so you can roll
 await db.transaction(async (trx) => {
   await User.query(trx).insert({ name: "Alice" });
 
-  await trx.transaction(async (nested) => {
-    await Post.query(nested).insert({ title: "Draft" });
-    throw new Error("discard draft"); // only rolls back the savepoint
-  }).catch(() => {});
+  await trx
+    .transaction(async (nested) => {
+      await Post.query(nested).insert({ title: "Draft" });
+      throw new Error("discard draft"); // only rolls back the savepoint
+    })
+    .catch(() => {});
 
   // Alice was still inserted
 });
@@ -341,6 +348,7 @@ Typhex uses a **query IR (Intermediate Representation)** that bridges JavaScript
 3. **Execution**: SQL is executed through a driver abstraction (SQLite, PostgreSQL, etc.)
 
 This architecture enables:
+
 - Safe SQL generation (no injection)
 - Cross-database compatibility (IR is database-agnostic)
 - Performance (IR can be cached/optimized)
@@ -355,7 +363,7 @@ const db = new Db(driver);
 const table = db.defineTable<T>("tableName", {
   column: "type constraints",
   // or
-  column: { type: "type", primaryKey: true, nullable: false }
+  column: { type: "type", primaryKey: true, nullable: false },
 });
 db.migrate(); // Create tables
 ```
@@ -365,29 +373,30 @@ db.migrate(); // Create tables
 ```ts
 table
   .where((entity) => predicate)
-  .select(["col1", "col2"])  // Optional: select specific columns
+  .select(["col1", "col2"]) // Optional: select specific columns
   .orderBy("column", "asc" | "desc")
   .limit(n)
   .offset(n)
-  .toArray()    // Execute and return array
-  .first()      // Execute and return first result
-  .count()      // Execute and return count
-  .update(set)  // Update matching rows
-  .delete()     // Delete matching rows
+  .toArray() // Execute and return array
+  .first() // Execute and return first result
+  .count() // Execute and return count
+  .update(set) // Update matching rows
+  .delete(); // Delete matching rows
 ```
 
 ### CRUD
 
 ```ts
-table.insert({ col1: value1, col2: value2 });  // Returns lastInsertRowid
+table.insert({ col1: value1, col2: value2 }); // Returns lastInsertRowid
 table.update((e) => predicate, { col: value }); // Returns number of rows updated
-table.delete((e) => predicate);                 // Returns number of rows deleted
-table.findById(id);                              // Returns entity or undefined
+table.delete((e) => predicate); // Returns number of rows deleted
+table.findById(id); // Returns entity or undefined
 ```
 
 ## Contributing
 
 Contributions welcome! Areas for improvement:
+
 - Additional database drivers (PostgreSQL, MySQL, etc.)
 - Built-in relations and joins
 - More predicate operators

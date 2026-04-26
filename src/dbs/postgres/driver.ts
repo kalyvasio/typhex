@@ -5,7 +5,7 @@
 
 import pg from "pg";
 import type { Driver, Connection, ExecuteResult, TransactionOptions } from "../../driver/types.js";
-import {PostgresTrx} from "./trx.js";
+import { PostgresTrx } from "./trx.js";
 import { isRecord } from "../../utils.js";
 
 const { Pool } = pg;
@@ -97,7 +97,7 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
   async function runQuery(
     queryable: { query(sql: string, params: unknown[]): Promise<pg.QueryResult> },
     sql: string,
-    params: unknown[] = []
+    params: unknown[] = [],
   ): Promise<ExecuteResult> {
     const bound = params.map(toBindable);
     try {

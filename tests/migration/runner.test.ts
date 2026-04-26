@@ -21,14 +21,24 @@ describe("runMigrations", () => {
   });
 
   it("applies all pending scripts in order", async () => {
-    writeFileSync(join(tmpDir, "001_add_users.sql"), 'CREATE TABLE "users" ("id" integer primary key);');
-    writeFileSync(join(tmpDir, "002_add_posts.sql"), 'CREATE TABLE "posts" ("id" integer primary key);');
+    writeFileSync(
+      join(tmpDir, "001_add_users.sql"),
+      'CREATE TABLE "users" ("id" integer primary key);',
+    );
+    writeFileSync(
+      join(tmpDir, "002_add_posts.sql"),
+      'CREATE TABLE "posts" ("id" integer primary key);',
+    );
 
     const result = await runMigrations(driver, tmpDir);
     expect(result.applied).toEqual(["001_add_users", "002_add_posts"]);
     expect(result.skipped).toEqual([]);
 
-    const tables = ((await driver.execute(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).then(r => r.rows)) as Array<{ name: string }>)
+    const tables = (
+      (await driver
+        .execute(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`)
+        .then((r) => r.rows)) as Array<{ name: string }>
+    )
       .map((r) => r.name)
       .filter((n) => n !== "_typhex_migrations")
       .sort();
@@ -36,17 +46,26 @@ describe("runMigrations", () => {
   });
 
   it("skips already-applied migrations", async () => {
-    writeFileSync(join(tmpDir, "001_add_users.sql"), 'CREATE TABLE "users" ("id" integer primary key);');
+    writeFileSync(
+      join(tmpDir, "001_add_users.sql"),
+      'CREATE TABLE "users" ("id" integer primary key);',
+    );
     await runMigrations(driver, tmpDir);
 
-    writeFileSync(join(tmpDir, "002_add_posts.sql"), 'CREATE TABLE "posts" ("id" integer primary key);');
+    writeFileSync(
+      join(tmpDir, "002_add_posts.sql"),
+      'CREATE TABLE "posts" ("id" integer primary key);',
+    );
     const result = await runMigrations(driver, tmpDir);
     expect(result.applied).toEqual(["002_add_posts"]);
     expect(result.skipped).toEqual(["001_add_users"]);
   });
 
   it("returns empty when no pending migrations", async () => {
-    writeFileSync(join(tmpDir, "001_add_users.sql"), 'CREATE TABLE "users" ("id" integer primary key);');
+    writeFileSync(
+      join(tmpDir, "001_add_users.sql"),
+      'CREATE TABLE "users" ("id" integer primary key);',
+    );
     await runMigrations(driver, tmpDir);
 
     const result = await runMigrations(driver, tmpDir);
@@ -58,7 +77,9 @@ describe("runMigrations", () => {
     writeFileSync(join(tmpDir, "001_init.sql"), 'CREATE TABLE "t" ("id" integer primary key);');
     await runMigrations(driver, tmpDir);
 
-    const rows = (await driver.execute(`SELECT "name" FROM "_typhex_migrations"`).then(r => r.rows)) as Array<{ name: string }>;
+    const rows = (await driver
+      .execute(`SELECT "name" FROM "_typhex_migrations"`)
+      .then((r) => r.rows)) as Array<{ name: string }>;
     expect(rows).toHaveLength(1);
     expect(rows[0].name).toBe("001_init");
   });
@@ -69,8 +90,11 @@ describe("runMigrations", () => {
 
     await expect(runMigrations(driver, tmpDir)).rejects.toThrow();
 
-    const tables = ((await driver.execute(`SELECT name FROM sqlite_master WHERE type='table'`).then(r => r.rows)) as Array<{ name: string }>)
-      .map((r) => r.name);
+    const tables = (
+      (await driver
+        .execute(`SELECT name FROM sqlite_master WHERE type='table'`)
+        .then((r) => r.rows)) as Array<{ name: string }>
+    ).map((r) => r.name);
     expect(tables).not.toContain("good");
   });
 

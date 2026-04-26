@@ -6,9 +6,7 @@
 import * as ts from "typescript";
 import { isTyphexType, memberPath, unwrapObjectLiteral } from "./shared.js";
 
-const JOIN_METHOD_NAMES = new Set([
-  "innerJoin", "leftJoin", "rightJoin", "crossJoin", "fullJoin",
-]);
+const JOIN_METHOD_NAMES = new Set(["innerJoin", "leftJoin", "rightJoin", "crossJoin", "fullJoin"]);
 
 /**
  * Rewrite `innerJoin`/`leftJoin`/`rightJoin`/`crossJoin`/`fullJoin` calls into
@@ -17,7 +15,7 @@ const JOIN_METHOD_NAMES = new Set([
  */
 export function transformJoinCall(
   call: ts.CallExpression,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.CallExpression | null {
   const fn = matchJoinCall(call, checker);
   if (!fn) return null;
@@ -29,10 +27,9 @@ export function transformJoinCall(
   if (!keys || keys.length === 0) return null;
 
   const f = ts.factory;
-  return f.updateCallExpression(
-    call, call.expression, call.typeArguments,
-    [f.createArrayLiteralExpression(keys.map(k => f.createStringLiteral(k)))]
-  );
+  return f.updateCallExpression(call, call.expression, call.typeArguments, [
+    f.createArrayLiteralExpression(keys.map((k) => f.createStringLiteral(k))),
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -45,7 +42,7 @@ export function transformJoinCall(
  */
 function matchJoinCall(
   call: ts.CallExpression,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.ArrowFunction | ts.FunctionExpression | null {
   const expr = call.expression;
   if (!ts.isPropertyAccessExpression(expr)) return null;
@@ -59,9 +56,7 @@ function matchJoinCall(
 }
 
 /** Return the first parameter name if it's a plain identifier; null otherwise. */
-function getSingleIdentifierParam(
-  fn: ts.ArrowFunction | ts.FunctionExpression
-): string | null {
+function getSingleIdentifierParam(fn: ts.ArrowFunction | ts.FunctionExpression): string | null {
   const param = fn.parameters[0]?.name;
   if (!param || !ts.isIdentifier(param)) return null;
   return param.text;
@@ -76,16 +71,11 @@ function getSingleIdentifierParam(
  * `p => ({ author: p.author })` (object literal) and `p => p.author`
  * (single member access) forms.
  */
-function extractRelationKeys(
-  body: ts.ConciseBody,
-  paramName: string
-): string[] | null {
+function extractRelationKeys(body: ts.ConciseBody, paramName: string): string[] | null {
   if (ts.isBlock(body)) return null;
 
   // Form 1: p => ({ author: p.author }) — object literal body
-  const objLit = unwrapObjectLiteral(
-    ts.isParenthesizedExpression(body) ? body.expression : (body as ts.Expression)
-  );
+  const objLit = unwrapObjectLiteral(ts.isParenthesizedExpression(body) ? body.expression : body);
   if (objLit) return extractKeysFromObjectLiteral(objLit);
 
   // Form 2: p => p.author — single member access
@@ -99,9 +89,7 @@ function extractRelationKeys(
 }
 
 /** Collect the property key names from an object literal; null if any entry is unsupported. */
-function extractKeysFromObjectLiteral(
-  objLit: ts.ObjectLiteralExpression
-): string[] | null {
+function extractKeysFromObjectLiteral(objLit: ts.ObjectLiteralExpression): string[] | null {
   const keys: string[] = [];
   for (const prop of objLit.properties) {
     if (!ts.isPropertyAssignment(prop)) return null;
@@ -114,7 +102,7 @@ function extractKeysFromObjectLiteral(
 
 /** Extract the key text of an object literal property name (identifier or string literal). */
 function getObjectLiteralKeyName(name: ts.PropertyName): string | null {
-  if (ts.isIdentifier(name))    return name.text;
+  if (ts.isIdentifier(name)) return name.text;
   if (ts.isStringLiteral(name)) return name.text;
   return null;
 }
