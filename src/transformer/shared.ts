@@ -3,13 +3,7 @@
  */
 
 import ts from "typescript";
-import type {
-  IrNode,
-  IrSelect,
-  IrBinary,
-  IrOrderBy,
-  IrAggregate,
-} from "../ir/types.js";
+import type { IrNode, IrSelect, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
 // Typhex type detection
@@ -36,15 +30,11 @@ export function checkSymbolIsTyphex(symbol: ts.Symbol): boolean {
 /** Check whether a source file path points at Typhex's ORM Table/QueryBuilder definitions. */
 function isTyphexDeclarationFile(rawPath: string): boolean {
   const normalized = rawPath.replaceAll("\\", "/");
-  const inTyphexPackage =
-    normalized.includes("/typhex/") || normalized.includes("/typhex\\");
+  const inTyphexPackage = normalized.includes("/typhex/") || normalized.includes("/typhex\\");
   const inOrmModule =
-    normalized.includes("/orm/table") ||
-    normalized.includes("/orm/query-builder");
+    normalized.includes("/orm/table") || normalized.includes("/orm/query-builder");
   const hasValidExtension =
-    normalized.endsWith(".ts") ||
-    normalized.endsWith(".js") ||
-    normalized.endsWith(".d.ts");
+    normalized.endsWith(".ts") || normalized.endsWith(".js") || normalized.endsWith(".d.ts");
   return inTyphexPackage && inOrmModule && hasValidExtension;
 }
 
@@ -53,10 +43,7 @@ function isTyphexDeclarationFile(rawPath: string): boolean {
  * Table/QueryBuilder. Swallows any checker errors so a compilation-level
  * type resolution failure never blocks the rest of the transform.
  */
-export function isTyphexType(
-  receiver: ts.Expression,
-  checker: ts.TypeChecker
-): boolean {
+export function isTyphexType(receiver: ts.Expression, checker: ts.TypeChecker): boolean {
   try {
     const symbol = resolveTypeSymbol(receiver, checker);
     return symbol ? checkSymbolIsTyphex(symbol) : false;
@@ -72,7 +59,7 @@ export function isTyphexType(
  */
 function resolveTypeSymbol(
   receiver: ts.Expression,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.Symbol | undefined {
   const receiverType = checker.getTypeAtLocation(receiver);
 
@@ -81,9 +68,7 @@ function resolveTypeSymbol(
 
   // Fall back to the symbol returned from the constructor signature — this
   // handles class instance types that don't have a symbol attached directly.
-  const constructorProp = receiverType
-    .getProperties()
-    .find(p => p.getName() === "constructor");
+  const constructorProp = receiverType.getProperties().find((p) => p.getName() === "constructor");
   if (constructorProp) {
     const signatures = checker
       .getTypeOfSymbolAtLocation(constructorProp, receiver)
@@ -113,7 +98,7 @@ export interface ResolvedMember {
  */
 export function resolveMemberPath(
   expr: ts.PropertyAccessExpression,
-  paramNames: string[]
+  paramNames: string[],
 ): ResolvedMember | null {
   const parts: string[] = [];
   let current: ts.Expression = expr;
@@ -128,10 +113,7 @@ export function resolveMemberPath(
 }
 
 /** Single-param convenience wrapper returning just the path. */
-export function memberPath(
-  expr: ts.PropertyAccessExpression,
-  paramName: string
-): string[] | null {
+export function memberPath(expr: ts.PropertyAccessExpression, paramName: string): string[] | null {
   const result = resolveMemberPath(expr, [paramName]);
   return result ? result.path : null;
 }
@@ -141,9 +123,7 @@ export function memberPath(
 // ---------------------------------------------------------------------------
 
 /** Unwrap a possibly-parenthesized expression and return it if it's an object literal. */
-export function unwrapObjectLiteral(
-  expr: ts.Expression
-): ts.ObjectLiteralExpression | null {
+export function unwrapObjectLiteral(expr: ts.Expression): ts.ObjectLiteralExpression | null {
   const inner = ts.isParenthesizedExpression(expr) ? expr.expression : expr;
   return ts.isObjectLiteralExpression(inner) ? inner : null;
 }
@@ -160,7 +140,7 @@ export function isIdentifierNamed(node: ts.Node, name: string): boolean {
  * - Other shapes return null (caller should bail / fall back to runtime).
  */
 export function getArrowExpressionBody(
-  fn: ts.ArrowFunction | ts.FunctionExpression
+  fn: ts.ArrowFunction | ts.FunctionExpression,
 ): ts.Expression | null {
   if (!ts.isBlock(fn.body)) return fn.body;
   if (fn.body.statements.length !== 1) return null;
@@ -182,7 +162,7 @@ export function matchTyphexMethodCall(
   call: ts.CallExpression,
   methodName: string,
   checker: ts.TypeChecker,
-  isTyphex: (receiver: ts.Expression, checker: ts.TypeChecker) => boolean
+  isTyphex: (receiver: ts.Expression, checker: ts.TypeChecker) => boolean,
 ): ts.ArrowFunction | ts.FunctionExpression | null {
   const expr = call.expression;
   if (!ts.isPropertyAccessExpression(expr)) return null;
@@ -200,23 +180,21 @@ export function matchTyphexMethodCall(
 // ---------------------------------------------------------------------------
 
 const BINARY_OP_MAP: Record<number, IrBinary["op"] | "in" | undefined> = {
-  [ts.SyntaxKind.AmpersandAmpersandToken]:      "&&",
-  [ts.SyntaxKind.BarBarToken]:                  "||",
-  [ts.SyntaxKind.EqualsEqualsEqualsToken]:      "===",
+  [ts.SyntaxKind.AmpersandAmpersandToken]: "&&",
+  [ts.SyntaxKind.BarBarToken]: "||",
+  [ts.SyntaxKind.EqualsEqualsEqualsToken]: "===",
   [ts.SyntaxKind.ExclamationEqualsEqualsToken]: "!==",
-  [ts.SyntaxKind.EqualsEqualsToken]:            "==",
-  [ts.SyntaxKind.ExclamationEqualsToken]:       "!=",
-  [ts.SyntaxKind.GreaterThanToken]:             ">",
-  [ts.SyntaxKind.GreaterThanEqualsToken]:       ">=",
-  [ts.SyntaxKind.LessThanToken]:                "<",
-  [ts.SyntaxKind.LessThanEqualsToken]:          "<=",
-  [ts.SyntaxKind.InKeyword]:                    "in",
+  [ts.SyntaxKind.EqualsEqualsToken]: "==",
+  [ts.SyntaxKind.ExclamationEqualsToken]: "!=",
+  [ts.SyntaxKind.GreaterThanToken]: ">",
+  [ts.SyntaxKind.GreaterThanEqualsToken]: ">=",
+  [ts.SyntaxKind.LessThanToken]: "<",
+  [ts.SyntaxKind.LessThanEqualsToken]: "<=",
+  [ts.SyntaxKind.InKeyword]: "in",
 };
 
 /** Map a TS binary-operator SyntaxKind to its IR operator string (or null if unsupported). */
-export function binaryOpFromSyntaxKind(
-  kind: ts.SyntaxKind
-): IrBinary["op"] | "in" | null {
+export function binaryOpFromSyntaxKind(kind: ts.SyntaxKind): IrBinary["op"] | "in" | null {
   return BINARY_OP_MAP[kind] ?? null;
 }
 
@@ -225,15 +203,22 @@ export function binaryOpFromSyntaxKind(
 // ---------------------------------------------------------------------------
 
 export const AGGREGATE_FUNCS = new Set([
-  "SUM", "AVG", "MIN", "MAX", "COUNT",
-  "GROUP_CONCAT", "STRING_AGG", "ARRAY_AGG", "JSON_AGG",
+  "SUM",
+  "AVG",
+  "MIN",
+  "MAX",
+  "COUNT",
+  "GROUP_CONCAT",
+  "STRING_AGG",
+  "ARRAY_AGG",
+  "JSON_AGG",
 ]);
 
 const AGGREGATE_FUNC_MAP: Record<string, string> = {
   groupconcat: "GROUP_CONCAT",
-  stringagg:   "STRING_AGG",
-  arrayagg:    "ARRAY_AGG",
-  jsonagg:     "JSON_AGG",
+  stringagg: "STRING_AGG",
+  arrayagg: "ARRAY_AGG",
+  jsonagg: "JSON_AGG",
 };
 
 /** Map the JS stub identifier to the canonical IR func name. */
@@ -257,7 +242,7 @@ export interface TsAggregateParseResult {
  */
 export function parseTsAggregateCall(
   call: ts.CallExpression,
-  paramNames: string[]
+  paramNames: string[],
 ): TsAggregateParseResult | null {
   const callee = call.expression;
   if (!ts.isIdentifier(callee)) return null;
@@ -268,7 +253,7 @@ export function parseTsAggregateCall(
 
   const { arg, distinct } = parseTsAggregateArg(
     call.arguments[0] as ts.Expression | undefined,
-    paramNames
+    paramNames,
   );
   const separator = parseTsAggregateSeparator(funcName, call);
 
@@ -289,7 +274,7 @@ export function parseTsAggregateCall(
  */
 function parseTsAggregateArg(
   argExpr: ts.Expression | undefined,
-  paramNames: string[]
+  paramNames: string[],
 ): { arg: IrNode | null; distinct: boolean } {
   if (!argExpr) return { arg: null, distinct: false };
 
@@ -313,7 +298,7 @@ function parseTsAggregateArg(
 /** Extract the member path from `distinct(p.field)` — only bare property access is allowed. */
 function parseDistinctWrapperArg(
   distinctCall: ts.CallExpression,
-  paramNames: string[]
+  paramNames: string[],
 ): { arg: IrNode | null; distinct: boolean } {
   const inner = distinctCall.arguments[0] as ts.Expression | undefined;
   if (!inner || !ts.isPropertyAccessExpression(inner)) {
@@ -331,10 +316,7 @@ function parseDistinctWrapperArg(
  * Extract the string-literal separator argument of `GROUP_CONCAT` /
  * `STRING_AGG`; returns undefined for other aggregates or missing separators.
  */
-function parseTsAggregateSeparator(
-  funcName: string,
-  call: ts.CallExpression
-): string | undefined {
+function parseTsAggregateSeparator(funcName: string, call: ts.CallExpression): string | undefined {
   if (funcName !== "GROUP_CONCAT" && funcName !== "STRING_AGG") return undefined;
   const sepExpr = call.arguments[1] as ts.Expression | undefined;
   return sepExpr && ts.isStringLiteral(sepExpr) ? sepExpr.text : undefined;
@@ -348,13 +330,16 @@ function parseTsAggregateSeparator(
 function valueToTsExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
   if (value === null) return f.createNull();
   switch (typeof value) {
-    case "string":  return f.createStringLiteral(value);
-    case "number":  return f.createNumericLiteral(value);
-    case "boolean": return value ? f.createTrue() : f.createFalse();
+    case "string":
+      return f.createStringLiteral(value);
+    case "number":
+      return f.createNumericLiteral(value);
+    case "boolean":
+      return value ? f.createTrue() : f.createFalse();
   }
   if (Array.isArray(value)) {
     return f.createArrayLiteralExpression(
-      (value as unknown[]).map(v => valueToTsExpression(v, f))
+      (value as unknown[]).map((v) => valueToTsExpression(v, f)),
     );
   }
   // JSON.stringify returns undefined at runtime for undefined/functions/symbols
@@ -363,7 +348,7 @@ function valueToTsExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
 
 /** Build a `["a", "b", "c"]` array-literal node from a JS string array. */
 function stringArrayLiteral(items: string[], f: ts.NodeFactory): ts.ArrayLiteralExpression {
-  return f.createArrayLiteralExpression(items.map(p => f.createStringLiteral(p)));
+  return f.createArrayLiteralExpression(items.map((p) => f.createStringLiteral(p)));
 }
 
 /**
@@ -383,21 +368,21 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       return irAggregateToTsLiteral(ir);
     case "binary":
       props.push(
-        f.createPropertyAssignment("op",    f.createStringLiteral(ir.op)),
-        f.createPropertyAssignment("left",  irNodeToTsLiteral(ir.left)),
+        f.createPropertyAssignment("op", f.createStringLiteral(ir.op)),
+        f.createPropertyAssignment("left", irNodeToTsLiteral(ir.left)),
         f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)),
       );
       break;
     case "unary":
       props.push(
-        f.createPropertyAssignment("op",      f.createStringLiteral(ir.op)),
+        f.createPropertyAssignment("op", f.createStringLiteral(ir.op)),
         f.createPropertyAssignment("operand", irNodeToTsLiteral(ir.operand)),
       );
       break;
     case "member":
       props.push(
         f.createPropertyAssignment("param", f.createStringLiteral(ir.param)),
-        f.createPropertyAssignment("path",  stringArrayLiteral(ir.path, f)),
+        f.createPropertyAssignment("path", stringArrayLiteral(ir.path, f)),
       );
       break;
     case "const":
@@ -408,25 +393,26 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       break;
     case "in":
       props.push(
-        f.createPropertyAssignment("left",  irNodeToTsLiteral(ir.left)),
+        f.createPropertyAssignment("left", irNodeToTsLiteral(ir.left)),
         f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)),
       );
       break;
     case "call":
       props.push(
-        f.createPropertyAssignment("method",   f.createStringLiteral(ir.method)),
+        f.createPropertyAssignment("method", f.createStringLiteral(ir.method)),
         f.createPropertyAssignment("receiver", irNodeToTsLiteral(ir.receiver)),
-        f.createPropertyAssignment("args",
-          f.createArrayLiteralExpression(ir.args.map(a => irNodeToTsLiteral(a)))
+        f.createPropertyAssignment(
+          "args",
+          f.createArrayLiteralExpression(ir.args.map((a) => irNodeToTsLiteral(a))),
         ),
       );
       break;
     case "exists":
       props.push(
-        f.createPropertyAssignment("rootParam",   f.createStringLiteral(ir.rootParam)),
+        f.createPropertyAssignment("rootParam", f.createStringLiteral(ir.rootParam)),
         f.createPropertyAssignment("relationKey", f.createStringLiteral(ir.relationKey)),
-        f.createPropertyAssignment("innerParam",  f.createStringLiteral(ir.innerParam)),
-        f.createPropertyAssignment("innerWhere",  irNodeToTsLiteral(ir.innerWhere)),
+        f.createPropertyAssignment("innerParam", f.createStringLiteral(ir.innerParam)),
+        f.createPropertyAssignment("innerWhere", irNodeToTsLiteral(ir.innerWhere)),
       );
       break;
   }
@@ -437,8 +423,8 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
 export function irOrderByToTsLiteral(ir: IrOrderBy): ts.ObjectLiteralExpression {
   const f = ts.factory;
   return f.createObjectLiteralExpression([
-    f.createPropertyAssignment("param",     f.createStringLiteral(ir.param)),
-    f.createPropertyAssignment("path",      stringArrayLiteral(ir.path, f)),
+    f.createPropertyAssignment("param", f.createStringLiteral(ir.param)),
+    f.createPropertyAssignment("path", stringArrayLiteral(ir.path, f)),
     f.createPropertyAssignment("direction", f.createStringLiteral(ir.direction)),
   ]);
 }
@@ -449,11 +435,12 @@ export function irAggregateToTsLiteral(agg: IrAggregate): ts.ObjectLiteralExpres
   const props: ts.ObjectLiteralElementLike[] = [
     f.createPropertyAssignment("kind", f.createStringLiteral("aggregate")),
     f.createPropertyAssignment("func", f.createStringLiteral(agg.func)),
-    f.createPropertyAssignment("arg",  agg.arg ? irNodeToTsLiteral(agg.arg) : f.createNull()),
+    f.createPropertyAssignment("arg", agg.arg ? irNodeToTsLiteral(agg.arg) : f.createNull()),
   ];
-  if (agg.alias)                 props.push(f.createPropertyAssignment("alias",     f.createStringLiteral(agg.alias)));
-  if (agg.distinct)              props.push(f.createPropertyAssignment("distinct",  f.createTrue()));
-  if (agg.separator !== undefined) props.push(f.createPropertyAssignment("separator", f.createStringLiteral(agg.separator)));
+  if (agg.alias) props.push(f.createPropertyAssignment("alias", f.createStringLiteral(agg.alias)));
+  if (agg.distinct) props.push(f.createPropertyAssignment("distinct", f.createTrue()));
+  if (agg.separator !== undefined)
+    props.push(f.createPropertyAssignment("separator", f.createStringLiteral(agg.separator)));
   return f.createObjectLiteralExpression(props);
 }
 
@@ -462,10 +449,9 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
   const f = ts.factory;
   const props: ts.ObjectLiteralElementLike[] = [
     f.createPropertyAssignment("param", f.createStringLiteral(sel.param)),
-    f.createPropertyAssignment("paths",
-      f.createArrayLiteralExpression(
-        sel.paths.map(path => stringArrayLiteral(path, f))
-      )
+    f.createPropertyAssignment(
+      "paths",
+      f.createArrayLiteralExpression(sel.paths.map((path) => stringArrayLiteral(path, f))),
     ),
   ];
 
@@ -476,9 +462,12 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
     props.push(f.createPropertyAssignment("rest", f.createTrue()));
   }
   if (sel.aggregates && sel.aggregates.length > 0) {
-    props.push(f.createPropertyAssignment("aggregates",
-      f.createArrayLiteralExpression(sel.aggregates.map(irAggregateToTsLiteral))
-    ));
+    props.push(
+      f.createPropertyAssignment(
+        "aggregates",
+        f.createArrayLiteralExpression(sel.aggregates.map(irAggregateToTsLiteral)),
+      ),
+    );
   }
   if (sel.groupBy && sel.groupBy.length > 0) {
     props.push(f.createPropertyAssignment("groupBy", groupByToTsLiteral(sel.groupBy, f)));
@@ -489,13 +478,11 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
 /** Serialize a groupBy entry list — numbers are positional, arrays are member paths. */
 function groupByToTsLiteral(
   groupBy: Array<string[] | number>,
-  f: ts.NodeFactory
+  f: ts.NodeFactory,
 ): ts.ArrayLiteralExpression {
   return f.createArrayLiteralExpression(
-    groupBy.map(entry =>
-      typeof entry === "number"
-        ? f.createNumericLiteral(entry)
-        : stringArrayLiteral(entry, f)
-    )
+    groupBy.map((entry) =>
+      typeof entry === "number" ? f.createNumericLiteral(entry) : stringArrayLiteral(entry, f),
+    ),
   );
 }

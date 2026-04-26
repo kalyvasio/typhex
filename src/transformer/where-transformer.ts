@@ -25,41 +25,36 @@ const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
  * the transformer silently skips them and the runtime parser can handle them
  * later if needed.
  */
-function exprToIr(
-  expr: ts.Expression,
-  paramNames: string[],
-  freeVars: Set<string>
-): IrNode | null {
+function exprToIr(expr: ts.Expression, paramNames: string[], freeVars: Set<string>): IrNode | null {
   if (ts.isParenthesizedExpression(expr)) {
     return exprToIr(expr.expression, paramNames, freeVars);
   }
-  if (ts.isBinaryExpression(expr))                    return binaryExprToIr(expr, paramNames, freeVars);
-  if (isBangExpression(expr))                         return unaryExprToIr(expr, paramNames, freeVars);
-  if (ts.isPropertyAccessExpression(expr))            return memberExprToIr(expr, paramNames);
-  if (ts.isIdentifier(expr))                          return identifierToIr(expr, paramNames, freeVars);
-  if (isConstantLiteral(expr))                        return literalToIr(expr);
-  if (ts.isCallExpression(expr))                      return callExprToIr(expr, paramNames, freeVars);
-  if (ts.isArrayLiteralExpression(expr))              return arrayLiteralToIr(expr, paramNames, freeVars);
+  if (ts.isBinaryExpression(expr)) return binaryExprToIr(expr, paramNames, freeVars);
+  if (isBangExpression(expr)) return unaryExprToIr(expr, paramNames, freeVars);
+  if (ts.isPropertyAccessExpression(expr)) return memberExprToIr(expr, paramNames);
+  if (ts.isIdentifier(expr)) return identifierToIr(expr, paramNames, freeVars);
+  if (isConstantLiteral(expr)) return literalToIr(expr);
+  if (ts.isCallExpression(expr)) return callExprToIr(expr, paramNames, freeVars);
+  if (ts.isArrayLiteralExpression(expr)) return arrayLiteralToIr(expr, paramNames, freeVars);
   return null;
 }
 
 // ---- Node kind predicates ---------------------------------------------------
 
 /** Narrowing predicate: is this a `!<expr>` prefix unary expression? */
-function isBangExpression(
-  expr: ts.Expression
-): expr is ts.PrefixUnaryExpression {
-  return ts.isPrefixUnaryExpression(expr)
-      && expr.operator === ts.SyntaxKind.ExclamationToken;
+function isBangExpression(expr: ts.Expression): expr is ts.PrefixUnaryExpression {
+  return ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken;
 }
 
 /** True if the expression is a supported literal constant (string/number/bool/null). */
 function isConstantLiteral(expr: ts.Expression): boolean {
-  return ts.isStringLiteral(expr)
-      || ts.isNumericLiteral(expr)
-      || expr.kind === ts.SyntaxKind.TrueKeyword
-      || expr.kind === ts.SyntaxKind.FalseKeyword
-      || expr.kind === ts.SyntaxKind.NullKeyword;
+  return (
+    ts.isStringLiteral(expr) ||
+    ts.isNumericLiteral(expr) ||
+    expr.kind === ts.SyntaxKind.TrueKeyword ||
+    expr.kind === ts.SyntaxKind.FalseKeyword ||
+    expr.kind === ts.SyntaxKind.NullKeyword
+  );
 }
 
 // ---- Per-node-kind handlers -------------------------------------------------
@@ -68,12 +63,12 @@ function isConstantLiteral(expr: ts.Expression): boolean {
 function binaryExprToIr(
   expr: ts.BinaryExpression,
   paramNames: string[],
-  freeVars: Set<string>
+  freeVars: Set<string>,
 ): IrNode | null {
   const opStr = binaryOpFromSyntaxKind(expr.operatorToken.kind);
   if (!opStr) return null;
 
-  const left  = exprToIr(expr.left,  paramNames, freeVars);
+  const left = exprToIr(expr.left, paramNames, freeVars);
   const right = exprToIr(expr.right, paramNames, freeVars);
   if (!left || !right) return null;
 
@@ -85,7 +80,7 @@ function binaryExprToIr(
 function unaryExprToIr(
   expr: ts.PrefixUnaryExpression,
   paramNames: string[],
-  freeVars: Set<string>
+  freeVars: Set<string>,
 ): IrNode | null {
   const operand = exprToIr(expr.operand, paramNames, freeVars);
   if (!operand) return null;
@@ -93,10 +88,7 @@ function unaryExprToIr(
 }
 
 /** Handle `p.a.b.c` — resolves against the lambda params and returns an IrMember. */
-function memberExprToIr(
-  expr: ts.PropertyAccessExpression,
-  paramNames: string[]
-): IrNode | null {
+function memberExprToIr(expr: ts.PropertyAccessExpression, paramNames: string[]): IrNode | null {
   const resolved = resolveMemberPath(expr, paramNames);
   if (!resolved) return null;
   return { kind: "member", param: resolved.param, path: resolved.path };
@@ -107,11 +99,7 @@ function memberExprToIr(
  * empty path) or a closure variable (→ IrParam; the caller records it in
  * `freeVars` so the rewritten call can pass it along at runtime).
  */
-function identifierToIr(
-  expr: ts.Identifier,
-  paramNames: string[],
-  freeVars: Set<string>
-): IrNode {
+function identifierToIr(expr: ts.Identifier, paramNames: string[], freeVars: Set<string>): IrNode {
   if (paramNames.includes(expr.text)) {
     return { kind: "member", param: expr.text, path: [] };
   }
@@ -127,9 +115,9 @@ function literalToIr(expr: ts.Expression): IrConst {
 
 /** Convert a literal TS expression into its JS value (string/number/bool/null). */
 function extractLiteralValue(expr: ts.Expression): unknown {
-  if (ts.isStringLiteral(expr))  return expr.text;
+  if (ts.isStringLiteral(expr)) return expr.text;
   if (ts.isNumericLiteral(expr)) return Number(expr.text);
-  if (expr.kind === ts.SyntaxKind.TrueKeyword)  return true;
+  if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
   if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
   return null;
 }
@@ -141,7 +129,7 @@ function extractLiteralValue(expr: ts.Expression): unknown {
 function arrayLiteralToIr(
   expr: ts.ArrayLiteralExpression,
   paramNames: string[],
-  freeVars: Set<string>
+  freeVars: Set<string>,
 ): IrNode | null {
   const values: unknown[] = [];
   for (const element of expr.elements) {
@@ -162,7 +150,7 @@ function arrayLiteralToIr(
 function callExprToIr(
   expr: ts.CallExpression,
   paramNames: string[],
-  freeVars: Set<string>
+  freeVars: Set<string>,
 ): IrNode | null {
   const callee = expr.expression;
 
@@ -192,7 +180,7 @@ function tryParseAllowedMethod(
   call: ts.CallExpression,
   callee: ts.PropertyAccessExpression,
   paramNames: string[],
-  freeVars: Set<string>
+  freeVars: Set<string>,
 ): IrCall | null {
   const method = callee.name.text;
   if (!ALLOWED_METHODS.has(method)) return null;
@@ -200,8 +188,8 @@ function tryParseAllowedMethod(
   const receiver = exprToIr(callee.expression, paramNames, freeVars);
   if (!receiver) return null;
 
-  const args = call.arguments.map(a => exprToIr(a, paramNames, freeVars));
-  if (args.some(a => a === null)) return null;
+  const args = call.arguments.map((a) => exprToIr(a, paramNames, freeVars));
+  if (args.some((a) => a === null)) return null;
 
   return { kind: "call", method, receiver, args: args as IrNode[] };
 }
@@ -215,7 +203,7 @@ function tryParseSomeEvery(
   call: ts.CallExpression,
   callee: ts.PropertyAccessExpression,
   paramNames: string[],
-  _freeVars: Set<string>
+  _freeVars: Set<string>,
 ): IrExists | null {
   const method = callee.name.text;
   if (method !== "some" && method !== "every") return null;
@@ -247,9 +235,7 @@ function tryParseSomeEvery(
 }
 
 /** Return the first parameter's name if it's a plain identifier; null otherwise. */
-function getFirstParamName(
-  fn: ts.ArrowFunction | ts.FunctionExpression
-): string | null {
+function getFirstParamName(fn: ts.ArrowFunction | ts.FunctionExpression): string | null {
   const param = fn.parameters[0]?.name;
   if (!param || !ts.isIdentifier(param)) return null;
   return param.text;
@@ -260,12 +246,8 @@ function getFirstParamName(
 // ---------------------------------------------------------------------------
 
 /** Extract the lambda parameter names as strings; defaults to "u" per slot. */
-function extractParamNames(
-  fn: ts.ArrowFunction | ts.FunctionExpression
-): string[] {
-  return fn.parameters.map(p =>
-    p.name && ts.isIdentifier(p.name) ? p.name.text : "u"
-  );
+function extractParamNames(fn: ts.ArrowFunction | ts.FunctionExpression): string[] {
+  return fn.parameters.map((p) => (p.name && ts.isIdentifier(p.name) ? p.name.text : "u"));
 }
 
 /**
@@ -274,7 +256,7 @@ function extractParamNames(
  * inner expressions can't be mapped onto the supported IR subset.
  */
 function arrowToIr(
-  fn: ts.ArrowFunction | ts.FunctionExpression
+  fn: ts.ArrowFunction | ts.FunctionExpression,
 ): { ir: IrNode; freeVars: string[] } | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
@@ -300,7 +282,7 @@ function arrowToIr(
 function transformArrowCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
-  methodName: string
+  methodName: string,
 ): ts.CallExpression | null {
   const arrow = matchTyphexMethodCall(call, methodName, checker, isTyphexType);
   if (!arrow) return null;
@@ -308,18 +290,16 @@ function transformArrowCall(
   const result = arrowToIr(arrow);
   if (!result) return null;
 
-  return ts.factory.updateCallExpression(
-    call, call.expression, call.typeArguments,
-    [irNodeToTsLiteral(result.ir), buildFreeVarsLiteral(result.freeVars)]
-  );
+  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [
+    irNodeToTsLiteral(result.ir),
+    buildFreeVarsLiteral(result.freeVars),
+  ]);
 }
 
 /** Build the `{ foo, bar }` literal passed as the second argument of the rewritten call. */
 function buildFreeVarsLiteral(freeVars: string[]): ts.ObjectLiteralExpression {
   const f = ts.factory;
-  const props = freeVars.map(v =>
-    f.createShorthandPropertyAssignment(f.createIdentifier(v))
-  );
+  const props = freeVars.map((v) => f.createShorthandPropertyAssignment(f.createIdentifier(v)));
   return f.createObjectLiteralExpression(props);
 }
 
@@ -330,7 +310,7 @@ function buildFreeVarsLiteral(freeVars: string[]): ts.ObjectLiteralExpression {
 /** Rewrite a `.where(arrow)` call on a Typhex Table/QueryBuilder into IR form. */
 export function transformWhereCall(
   call: ts.CallExpression,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.CallExpression | null {
   return transformArrowCall(call, checker, "where");
 }
@@ -338,7 +318,7 @@ export function transformWhereCall(
 /** Rewrite a `.having(arrow)` call on a Typhex Table/QueryBuilder into IR form. */
 export function transformHavingCall(
   call: ts.CallExpression,
-  checker: ts.TypeChecker
+  checker: ts.TypeChecker,
 ): ts.CallExpression | null {
   return transformArrowCall(call, checker, "having");
 }

@@ -3,7 +3,13 @@
  * and computes the full RelationContext consumed by RelationRunner and QueryBuilder.
  */
 
-import type { RelationsMap, RelationDef, RelationOptions, JunctionOptions, RelationType } from "../../../entity/relations.js";
+import type {
+  RelationsMap,
+  RelationDef,
+  RelationOptions,
+  JunctionOptions,
+  RelationType,
+} from "../../../entity/relations.js";
 import { toArray } from "../../../utils.js";
 import { getPkColumnsFromSchema, type AnyEntityClass } from "../../../entity/entity.js";
 import type { IrSelect, IrNode, IrSelectRelation } from "../../../ir/types.js";
@@ -29,7 +35,7 @@ export interface RelationFetchMetadata {
 // ─── relation context ─────────────────────────────────────────────────────────
 
 export type RelationContext = {
-  columnPaths: string[][] | null;   // null = no relation transformation; use selectIr as-is
+  columnPaths: string[][] | null; // null = no relation transformation; use selectIr as-is
   columnAliases: string[] | null;
   relationFetches: RelationFetchMetadata[];
   reusableJoinKeys: Set<string>;
@@ -40,40 +46,62 @@ export type RelationContext = {
 /** Builds the full relation-loading context from a query's select/where IR and relation map.
  *  rootParam is the row parameter name derived from the IR (e.g. "u"), passed in by the caller. */
 export function buildRelationContext(
-    selectIr: IrSelect | null,
-    relations: RelationsMap | undefined,
-    whereIr: IrNode | null,
-    pkColumns: string[] | null | undefined,
-    rootParam: string
+  selectIr: IrSelect | null,
+  relations: RelationsMap | undefined,
+  whereIr: IrNode | null,
+  pkColumns: string[] | null | undefined,
+  rootParam: string,
 ): RelationContext {
-  const reusableJoinKeys = (relations && selectIr)
+  const reusableJoinKeys =
+    relations && selectIr
       ? getReusableJoinKeys(whereIr, selectIr, relations, rootParam)
       : new Set<string>();
-  const hasRelations = !!(relations && selectIr &&
-      (selectIr.relations?.length || selectIr.paths.some((p) => p.length >= 1 && relations[p[0]])));
+  const hasRelations = !!(
+    relations &&
+    selectIr &&
+    (selectIr.relations?.length || selectIr.paths.some((p) => p.length >= 1 && relations[p[0]]))
+  );
 
   let columnPaths: string[][] | null = null;
   let columnAliases: string[] | null = null;
   let relationFetches: RelationFetchMetadata[] = [];
 
   if (hasRelations) {
-    const { columnPaths: paths, columnAliases: aliases, relationFetches: fetches } = resolveSelectColumnsAndRelations(
-        selectIr, relations, pkColumns,
-        reusableJoinKeys.size > 0 ? reusableJoinKeys : undefined
+    const {
+      columnPaths: paths,
+      columnAliases: aliases,
+      relationFetches: fetches,
+    } = resolveSelectColumnsAndRelations(
+      selectIr,
+      relations,
+      pkColumns,
+      reusableJoinKeys.size > 0 ? reusableJoinKeys : undefined,
     );
     relationFetches = fetches;
     columnPaths = paths;
     columnAliases = aliases;
   }
 
-  const hasReusableRelationInSelect = reusableJoinKeys.size > 0 && !!(selectIr && (
-      selectIr.paths.some((p) => p.length > 1 && reusableJoinKeys.has(p[0])) ||
-      (selectIr.relations ?? []).some((r) => reusableJoinKeys.has(r.name) && (r.subPaths?.length ?? 0) > 0)
-  ));
+  const hasReusableRelationInSelect =
+    reusableJoinKeys.size > 0 &&
+    !!(
+      selectIr &&
+      (selectIr.paths.some((p) => p.length > 1 && reusableJoinKeys.has(p[0])) ||
+        (selectIr.relations ?? []).some(
+          (r) => reusableJoinKeys.has(r.name) && (r.subPaths?.length ?? 0) > 0,
+        ))
+    );
 
   const skipLoadFor = computeSkipSet(selectIr, reusableJoinKeys, hasReusableRelationInSelect);
 
-  return { columnPaths, columnAliases, relationFetches, reusableJoinKeys, hasReusableRelationInSelect, skipLoadFor };
+  return {
+    columnPaths,
+    columnAliases,
+    relationFetches,
+    reusableJoinKeys,
+    hasReusableRelationInSelect,
+    skipLoadFor,
+  };
 }
 
 /** Produce the IrSelect handed to the SQL compiler.
@@ -82,17 +110,17 @@ export function buildRelationContext(
 export function resolveSelectForSql(
   selectIr: IrSelect | null,
   columnPaths: string[][] | null,
-  columnAliases: string[] | null
+  columnAliases: string[] | null,
 ): IrSelect | null {
   if (columnPaths === null) return selectIr;
-  return (columnPaths.length > 0 || selectIr?.rest)
+  return columnPaths.length > 0 || selectIr?.rest
     ? {
         param: selectIr!.param,
         paths: columnPaths,
         aliases: columnAliases!,
-        ...(selectIr!.rest       ? { rest:       true                   } : {}),
+        ...(selectIr!.rest ? { rest: true } : {}),
         ...(selectIr!.aggregates?.length ? { aggregates: selectIr!.aggregates } : {}),
-        ...(selectIr!.groupBy?.length   ? { groupBy:     selectIr!.groupBy     } : {}),
+        ...(selectIr!.groupBy?.length ? { groupBy: selectIr!.groupBy } : {}),
       }
     : selectIr;
 }
@@ -106,26 +134,36 @@ function resolveSelectColumnsAndRelations(
   relations: RelationsMap,
   pkColumns?: string[] | null,
   /** Relation keys already joined in the main query — include their paths in columnPaths, exclude from relationFetches. */
-  joinedRelationKeys?: Set<string>
+  joinedRelationKeys?: Set<string>,
 ): { columnPaths: string[][]; columnAliases: string[]; relationFetches: RelationFetchMetadata[] } {
   if (!select) return { columnPaths: [], columnAliases: [], relationFetches: [] };
 
   const relNames = new Set(Object.keys(relations));
   const fromPaths = classifyPathEntries(select, relNames, joinedRelationKeys, relations);
   const seenOutputKeys = new Set(fromPaths.relationFetches.map((m) => m.relation.outputKey));
-  const fromRelations = classifyRelationEntries(select, relations, joinedRelationKeys, seenOutputKeys);
+  const fromRelations = classifyRelationEntries(
+    select,
+    relations,
+    joinedRelationKeys,
+    seenOutputKeys,
+  );
 
   const columnPaths = [...fromPaths.columnPaths, ...fromRelations.columnPaths];
   const columnAliases = [...fromPaths.columnAliases, ...fromRelations.columnAliases];
   const relationFetches = [...fromPaths.relationFetches, ...fromRelations.relationFetches];
 
   const effectivePkColumns = pkColumns?.length ? pkColumns : ["id"];
-  const { paths: keyPaths, aliases: keyAliases } = missingJoinKeyColumns(relationFetches, columnPaths, effectivePkColumns);
+  const { paths: keyPaths, aliases: keyAliases } = missingJoinKeyColumns(
+    relationFetches,
+    columnPaths,
+    effectivePkColumns,
+  );
   columnPaths.push(...keyPaths);
   columnAliases.push(...keyAliases);
 
   for (const f of relationFetches) {
-    if (f.relationType === "one-to-many" || f.relationType === "many-to-many") f.parentPkColumns = effectivePkColumns;
+    if (f.relationType === "one-to-many" || f.relationType === "many-to-many")
+      f.parentPkColumns = effectivePkColumns;
   }
 
   return { columnPaths, columnAliases, relationFetches };
@@ -151,7 +189,11 @@ function isJoinedRelation(name: string, joinedRelationKeys: Set<string> | undefi
 // ─── path-entry branch actions ───
 
 /** Builds a fetch for an entire relation with no subfield restriction, e.g. select u => u.company. */
-function wholeRelationFetch(name: string, outputKey: string, relations: RelationsMap): RelationFetchMetadata | null {
+function wholeRelationFetch(
+  name: string,
+  outputKey: string,
+  relations: RelationsMap,
+): RelationFetchMetadata | null {
   return buildRelationFetchMeta({ name, outputKey }, relations[name]);
 }
 
@@ -161,7 +203,12 @@ function joinedRelationColumnAlias(path: string[], explicitAlias?: string): stri
 }
 
 /** Builds a fetch for a single field on a relation, e.g. ["company","name"] → fetch company, select only "name". */
-function relationFieldFetch(name: string, outputKey: string, subPath: string[], relations: RelationsMap): RelationFetchMetadata | null {
+function relationFieldFetch(
+  name: string,
+  outputKey: string,
+  subPath: string[],
+  relations: RelationsMap,
+): RelationFetchMetadata | null {
   return buildRelationFetchMeta({ name, outputKey, subPaths: [subPath] }, relations[name]);
 }
 
@@ -174,7 +221,7 @@ function classifyPathEntries(
   select: IrSelect,
   relNames: Set<string>,
   joinedRelationKeys: Set<string> | undefined,
-  relations: RelationsMap
+  relations: RelationsMap,
 ) {
   const columnPaths: string[][] = [];
   const columnAliases: string[] = [];
@@ -209,7 +256,10 @@ function classifyPathEntries(
 /** Expands a joined relation's subPaths into flat SQL column paths,
  *  e.g. { name:"company", subPaths:[["id"],["name"]] } → ["company","id"], ["company","name"]
  *  with aliases "company_id", "company_name". */
-function expandJoinedRelationToColumns(r: IrSelectRelation): { paths: string[][]; aliases: string[] } {
+function expandJoinedRelationToColumns(r: IrSelectRelation): {
+  paths: string[][];
+  aliases: string[];
+} {
   const paths: string[][] = [];
   const aliases: string[] = [];
   for (const sub of r.subPaths ?? []) {
@@ -227,7 +277,7 @@ function classifyRelationEntries(
   select: IrSelect,
   relations: RelationsMap,
   joinedRelationKeys: Set<string> | undefined,
-  seenOutputKeys: Set<string>
+  seenOutputKeys: Set<string>,
 ) {
   const columnPaths: string[][] = [];
   const columnAliases: string[] = [];
@@ -259,7 +309,7 @@ function classifyRelationEntries(
 function missingJoinKeyColumns(
   fetches: RelationFetchMetadata[],
   existingPaths: string[][],
-  pkColumns: string[]
+  pkColumns: string[],
 ): { paths: string[][]; aliases: string[] } {
   const paths: string[][] = [];
   const aliases: string[] = [];
@@ -286,12 +336,11 @@ function missingJoinKeyColumns(
 function computeSkipSet(
   selectIr: IrSelect | null,
   reusableJoinKeys: Set<string>,
-  hasReusableRelationInSelect: boolean
+  hasReusableRelationInSelect: boolean,
 ): Set<string> {
   const skip = new Set<string>();
   if (!hasReusableRelationInSelect || !selectIr) return skip;
-  for (const p of selectIr.paths)
-    if (p.length > 1 && reusableJoinKeys.has(p[0])) skip.add(p[0]);
+  for (const p of selectIr.paths) if (p.length > 1 && reusableJoinKeys.has(p[0])) skip.add(p[0]);
   for (const r of selectIr.relations ?? [])
     if (reusableJoinKeys.has(r.name) && r.subPaths?.length) skip.add(r.name);
   return skip;
@@ -302,17 +351,17 @@ function computeSkipSet(
  *  Returns null if the target entity cannot be resolved or the relation type is unsupported. */
 function buildRelationFetchMeta(
   ir: IrSelectRelation,
-  relDef: RelationDef
+  relDef: RelationDef,
 ): RelationFetchMetadata | null {
   const target = relDef._target();
   const targetEntity =
-    target &&
-    typeof (target as Partial<AnyEntityClass>).query === "function"
+    target && typeof (target as Partial<AnyEntityClass>).query === "function"
       ? (target as AnyEntityClass)
       : null;
   if (!targetEntity) return null;
 
-  const targetSchema = (targetEntity as { table?: { _schema: Record<string, string> } }).table?._schema;
+  const targetSchema = (targetEntity as { table?: { _schema: Record<string, string> } }).table
+    ?._schema;
   const targetPkColumnsFromSchema = targetSchema ? getPkColumnsFromSchema(targetSchema) : ["id"];
 
   switch (relDef._relType) {
@@ -323,7 +372,8 @@ function buildRelationFetchMeta(
         relationType: relDef._relType,
         relation: ir,
         fkColumns: toArray(opts.foreignKey),
-        targetPkColumns: opts.references != null ? toArray(opts.references) : targetPkColumnsFromSchema,
+        targetPkColumns:
+          opts.references != null ? toArray(opts.references) : targetPkColumnsFromSchema,
         targetEntity,
       };
     }

@@ -31,7 +31,11 @@ function bindableParams(params: unknown[]): unknown[] {
 }
 
 /** Execute a statement against the better-sqlite3 Database instance. */
-function executeSql(db: import("better-sqlite3").Database, sql: string, params: unknown[]): ExecuteResult {
+function executeSql(
+  db: import("better-sqlite3").Database,
+  sql: string,
+  params: unknown[],
+): ExecuteResult {
   const stmt = db.prepare(sql);
   if (stmt.reader) {
     return { rows: stmt.all(...bindableParams(params)), changes: 0 };
@@ -55,7 +59,9 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
       async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
         return executeSql(db, sql, params);
       },
-      async release(): Promise<void> { /* no-op for SQLite */ },
+      async release(): Promise<void> {
+        /* no-op for SQLite */
+      },
     };
   }
 

@@ -11,13 +11,11 @@ export async function diffSchemaBase(
   dialect: "sqlite" | "postgres",
   getDbTables: () => Promise<string[]>,
   getDbColumns: (table: string) => Promise<DbColumnInfo[]>,
-  entities: readonly RegisteredEntity[]
+  entities: readonly RegisteredEntity[],
 ): Promise<DiffAction[]> {
   const actions: DiffAction[] = [];
   const dbTables = new Set(await getDbTables());
-  const entityTables = new Map(
-    entities.map((e) => [e.table._table, e.table._schema])
-  );
+  const entityTables = new Map(entities.map((e) => [e.table._table, e.table._schema]));
 
   for (const [table, schema] of entityTables) {
     if (!dbTables.has(table)) {
@@ -38,7 +36,13 @@ export async function diffSchemaBase(
         const dbBaseType = extractBaseType(dbCol.type);
         const entityBaseType = extractBaseType(defStr);
         if (dbBaseType !== entityBaseType) {
-          actions.push({ kind: "alter_column", table, column: col, oldDef: dbCol.type, newDef: def });
+          actions.push({
+            kind: "alter_column",
+            table,
+            column: col,
+            oldDef: dbCol.type,
+            newDef: def,
+          });
         }
       }
     }
@@ -66,7 +70,7 @@ export function generateCommonSql(action: DiffAction, dialect: DialectImpl): str
   switch (action.kind) {
     case "add_table": {
       const cols = Object.entries(action.schema).map(
-        ([c, def]) => `  ${esc(c)} ${dialect.toColumnDef(def)}`
+        ([c, def]) => `  ${esc(c)} ${dialect.toColumnDef(def)}`,
       );
       return `CREATE TABLE ${esc(action.table)} (\n${cols.join(",\n")}\n);`;
     }

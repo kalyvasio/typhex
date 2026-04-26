@@ -9,8 +9,21 @@ import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
 import { QueryBuilder, QueryState } from "../orm/query-builder.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
-import type { InferTable, InferInsert, Flatten, Materialized, MaterializeShape } from "./schema-inference.js";
-import type { JunctionOptions, RelationDef, RelationsMap, RelationQueryable, RelationQueryBuilder, ManyRelation } from "./relations.js";
+import type {
+  InferTable,
+  InferInsert,
+  Flatten,
+  Materialized,
+  MaterializeShape,
+} from "./schema-inference.js";
+import type {
+  JunctionOptions,
+  RelationDef,
+  RelationsMap,
+  RelationQueryable,
+  RelationQueryBuilder,
+  ManyRelation,
+} from "./relations.js";
 import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
 import { getActiveTrx } from "../orm/db.js";
@@ -33,24 +46,32 @@ export type RelationLoadedValue<R> =
     : never;
 
 /** Unified row type: materialized columns + loaded relation data + EntityBase. */
-export type Row<TShape extends Record<string, unknown>, TRels extends RelationsMap = {}> =
-  Flatten<MaterializeShape<TShape> & { [K in keyof TRels]: RelationLoadedValue<TRels[K]> }> & EntityBase;
+export type Row<TShape extends Record<string, unknown>, TRels extends RelationsMap = {}> = Flatten<
+  MaterializeShape<TShape> & { [K in keyof TRels]: RelationLoadedValue<TRels[K]> }
+> &
+  EntityBase;
 
 /** Canonical static entity contract used across entity/query/relation type layers. */
 export interface AnyEntityClass {
   table: TableDef<Record<string, string>, RelationsMap>;
-  query<C extends AnyEntityClass>(this: C, executor?: QueryExecutor): QueryBuilder<C, EntityInstance<C>>;
+  query<C extends AnyEntityClass>(
+    this: C,
+    executor?: QueryExecutor,
+  ): QueryBuilder<C, EntityInstance<C>>;
   transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T>;
 }
 
 /** Extract schema/relations from an entity class. */
-export type EntitySchema<E extends AnyEntityClass> = E["table"] extends TableDef<infer S, any> ? S : never;
-export type EntityRelations<E extends AnyEntityClass> = E["table"] extends TableDef<any, infer R> ? R : never;
+export type EntitySchema<E extends AnyEntityClass> =
+  E["table"] extends TableDef<infer S, any> ? S : never;
+export type EntityRelations<E extends AnyEntityClass> =
+  E["table"] extends TableDef<any, infer R> ? R : never;
 
 /** Canonical materialized fields and relation targets. */
 export type EntityFields<E extends AnyEntityClass> = Materialized<EntitySchema<E>>;
 /** Instance type of the related entity. When relation target is entity class E, yields EntityInstance<E>. */
-export type RelationTarget<R> = R extends RelationDef<infer E, any> ? (E extends AnyEntityClass ? EntityInstance<E> : E) : never;
+export type RelationTarget<R> =
+  R extends RelationDef<infer E, any> ? (E extends AnyEntityClass ? EntityInstance<E> : E) : never;
 
 /** Relation properties with .query() — use only as select callback parameter (SelectRow). */
 export type EntityRelationProps<E extends AnyEntityClass> = {
@@ -63,37 +84,40 @@ export type EntityRelationPropsLoaded<E extends AnyEntityClass> = {
 };
 
 /** Table-derived instance type (used when E is not a class or as fallback). */
-type EntityInstanceFromTable<E extends AnyEntityClass> = Flatten<EntityFields<E> & EntityRelationPropsLoaded<E>> & EntityBase;
+type EntityInstanceFromTable<E extends AnyEntityClass> = Flatten<
+  EntityFields<E> & EntityRelationPropsLoaded<E>
+> &
+  EntityBase;
 
 /** Table-derived select row type. */
-type SelectRowFromTable<E extends AnyEntityClass> = Flatten<EntityFields<E> & EntityRelationProps<E>> & EntityBase;
+type SelectRowFromTable<E extends AnyEntityClass> = Flatten<
+  EntityFields<E> & EntityRelationProps<E>
+> &
+  EntityBase;
 
 /** Loaded entity instance. Uses InstanceType<E> when E is a class so subclass declare (OneToMany etc.) flows through. */
-export type EntityInstance<E extends AnyEntityClass> =
-  E extends new (...args: any[]) => infer R
-    ? R extends EntityBase
-      ? R
-      : EntityInstanceFromTable<E>
-    : EntityInstanceFromTable<E>;
+export type EntityInstance<E extends AnyEntityClass> = E extends new (...args: any[]) => infer R
+  ? R extends EntityBase
+    ? R
+    : EntityInstanceFromTable<E>
+  : EntityInstanceFromTable<E>;
 
 /** Row type in select(u => ...) callback. Uses InstanceType<E> when E is a class so subclass declare flows through. */
-export type SelectRow<E extends AnyEntityClass> =
-  E extends new (...args: any[]) => infer R
-    ? R extends EntityBase
-      ? R
-      : SelectRowFromTable<E>
-    : SelectRowFromTable<E>;
+export type SelectRow<E extends AnyEntityClass> = E extends new (...args: any[]) => infer R
+  ? R extends EntityBase
+    ? R
+    : SelectRowFromTable<E>
+  : SelectRowFromTable<E>;
 
 /** Backward-compatible alias for entity instance extraction. */
 export type EntityRow<E> = E extends AnyEntityClass ? EntityInstance<E> : never;
 
 /** Resolve entity class from instance type (e.g. Post) or pass-through if already a class. Use for OneToMany<Post> with import type. */
-export type EntityClassOf<T> = T extends EntityInstance<infer E> ? E : (T extends AnyEntityClass ? T : never);
+export type EntityClassOf<T> =
+  T extends EntityInstance<infer E> ? E : T extends AnyEntityClass ? T : never;
 
 function hasPrimaryKey(def: string): boolean {
-  const stripped = def
-    .replaceAll(/'[^']*'/g, "")
-    .replaceAll(/--[^\n]*/g, "");
+  const stripped = def.replaceAll(/'[^']*'/g, "").replaceAll(/--[^\n]*/g, "");
   return /\bprimary\s+key\b/i.test(stripped);
 }
 
@@ -108,11 +132,11 @@ export function getPkColumnsFromSchema(schema: Record<string, string>): string[]
   return getPkColumns(schema);
 }
 
-function createTableDef<TTable extends string, TSchema extends Record<string, string>, TRels extends RelationsMap>(
-  table: TTable,
-  schema: TSchema,
-  relations: TRels
-): TableDef<TSchema, TRels> {
+function createTableDef<
+  TTable extends string,
+  TSchema extends Record<string, string>,
+  TRels extends RelationsMap,
+>(table: TTable, schema: TSchema, relations: TRels): TableDef<TSchema, TRels> {
   return {
     _table: table,
     _schema: schema,
@@ -140,11 +164,7 @@ export function Entity<
   TTable extends string,
   const TSchema extends Record<string, string>,
   const TRels extends RelationsMap = {},
->(
-  tableName: TTable,
-  schema: TSchema,
-  relations?: TRels
-): EntityClass<TTable, TSchema, TRels> {
+>(tableName: TTable, schema: TSchema, relations?: TRels): EntityClass<TTable, TSchema, TRels> {
   const rels = (relations ?? {}) as TRels;
   const tableDef = createTableDef(tableName, schema, rels);
   const cols = getColumnNames(schema as TableDefinition);
@@ -152,17 +172,21 @@ export function Entity<
 
   function resolveDb() {
     const resolved = getDefaultDb();
-    if (!resolved) throw new Error(`Entity "${tableName}": no Db. Use new Db(driver) to instantiate typhex.`);
+    if (!resolved)
+      throw new Error(`Entity "${tableName}": no Db. Use new Db(driver) to instantiate typhex.`);
     return resolved;
   }
 
-  function resolveRelationTarget(rel: RelationDef): { table: string; pk: string[]; schema: Record<string, string> } | null {
+  function resolveRelationTarget(
+    rel: RelationDef,
+  ): { table: string; pk: string[]; schema: Record<string, string> } | null {
     try {
       const target = rel._target();
       const entityClass =
         target && typeof target === "function"
           ? (target as { table?: TableDef<Record<string, string>, RelationsMap> })
-          : (target as { _selectType?: { table?: TableDef<Record<string, string>, RelationsMap> } })?._selectType;
+          : (target as { _selectType?: { table?: TableDef<Record<string, string>, RelationsMap> } })
+              ?._selectType;
       const tbl = entityClass?.table;
       if (tbl) {
         const schema = tbl._schema;
@@ -202,9 +226,7 @@ export function Entity<
 
     static table = tableDef;
 
-    static async transaction<T>(
-      fn: (trx: Trx) => Promise<T>
-    ): Promise<T> {
+    static async transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T> {
       const db = resolveDb();
       return db.transaction(fn);
     }
@@ -219,14 +241,16 @@ export function Entity<
           sourcePkCols: pkCols,
           options: opts,
           resolveTarget: () => resolveRelationTarget(rd),
-          materialize: (junctionSchema) => { Entity(opts.junction, junctionSchema); },
+          materialize: (junctionSchema) => {
+            Entity(opts.junction, junctionSchema);
+          },
         });
       }
     }
 
     private static _resolveRelations(Ctor: any): RelationsMap {
       const classRels = Ctor.relations as RelationsMap | undefined;
-      return classRels && Object.keys(classRels).length > 0 ? classRels : rels as RelationsMap;
+      return classRels && Object.keys(classRels).length > 0 ? classRels : (rels as RelationsMap);
     }
 
     static query(this: new (data?: any) => any, executor?: QueryExecutor) {

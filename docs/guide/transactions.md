@@ -25,10 +25,12 @@ COMMIT
 If the callback throws, the transaction is rolled back automatically:
 
 ```ts
-await db.transaction(async () => {
-  await User.query().insert({ name: "Bob" });
-  throw new Error("oops");
-}).catch((e) => console.log("rolled back:", e.message));
+await db
+  .transaction(async () => {
+    await User.query().insert({ name: "Bob" });
+    throw new Error("oops");
+  })
+  .catch((e) => console.log("rolled back:", e.message));
 ```
 
 ```sql
@@ -70,10 +72,12 @@ await db.transaction(async (outer) => {
   const dave = await User.query(outer).insert({ name: "Dave" });
 
   // Inner savepoint — will be rolled back
-  await outer.transaction(async (inner) => {
-    await Post.query(inner).insert({ title: "Draft", authorId: dave.id });
-    throw new Error("discard draft");
-  }).catch(() => {}); // only the draft is lost
+  await outer
+    .transaction(async (inner) => {
+      await Post.query(inner).insert({ title: "Draft", authorId: dave.id });
+      throw new Error("discard draft");
+    })
+    .catch(() => {}); // only the draft is lost
 
   // Dave still exists; publish a different post
   await Post.query(outer).insert({ title: "Published", authorId: dave.id });
@@ -95,9 +99,12 @@ COMMIT
 ### Isolation Level
 
 ```ts
-await db.transaction(async () => {
-  // ...
-}, { isolationLevel: "SERIALIZABLE" });
+await db.transaction(
+  async () => {
+    // ...
+  },
+  { isolationLevel: "SERIALIZABLE" },
+);
 ```
 
 ```sql

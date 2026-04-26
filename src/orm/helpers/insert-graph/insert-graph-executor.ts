@@ -22,16 +22,20 @@ export abstract class InsertGraphExecutor {
   }
 
   protected async insertSingleNode(qe: QueryExecutor, node: PlannedNode): Promise<void> {
-    const inserted = await node.entity.query(qe).insert(node.scalarData) as Record<string, unknown>;
+    const inserted = (await node.entity.query(qe).insert(node.scalarData)) as Record<
+      string,
+      unknown
+    >;
     node.insertedRow = inserted;
     node.materializedRow = inserted;
   }
 
   private getReadyNodes(): PlannedNode[] {
     return this.plan.nodes
-      .filter((node) =>
-        node.insertedRow == null &&
-        node.dependencyIds.every((id) => this.plan.nodes[id]?.insertedRow != null),
+      .filter(
+        (node) =>
+          node.insertedRow == null &&
+          node.dependencyIds.every((id) => this.plan.nodes[id]?.insertedRow != null),
       )
       .sort((left, right) => left.id - right.id);
   }

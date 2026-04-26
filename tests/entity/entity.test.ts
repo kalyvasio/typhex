@@ -97,7 +97,9 @@ describe("Entity()", () => {
       await db.migrate();
       await User.query().insert({ name: "Alice", age: 30 });
       await User.query().insert({ name: "Bob", age: 20 });
-      const adults = await User.query().where((u) => u.age > 25).toArray();
+      const adults = await User.query()
+        .where((u) => u.age > 25)
+        .toArray();
       expect(adults).toHaveLength(1);
       expect((adults[0] as any).name).toBe("Alice");
     });
@@ -108,7 +110,11 @@ describe("Entity()", () => {
       await User.query().insert({ name: "Alice", age: 30 });
       await User.query().insert({ name: "Bob", age: 20 });
       expect(await User.query().count()).toBe(2);
-      expect(await User.query().where((u) => u.age > 25).count()).toBe(1);
+      expect(
+        await User.query()
+          .where((u) => u.age > 25)
+          .count(),
+      ).toBe(1);
     });
 
     it("first returns single row or undefined", async () => {
@@ -210,9 +216,13 @@ describe("Entity()", () => {
       await db.migrate();
       await User.query().insert({ name: "Alice", age: 30 });
       await User.query().insert({ name: "Bob", age: 25 });
-      const changed = await User.query().where((u) => u.name === "Bob").update({ age: 26 });
+      const changed = await User.query()
+        .where((u) => u.name === "Bob")
+        .update({ age: 26 });
       expect(changed).toBe(1);
-      const bob = await User.query().where((u) => u.name === "Bob").first();
+      const bob = await User.query()
+        .where((u) => u.name === "Bob")
+        .first();
       expect((bob as any).age).toBe(26);
     });
 
@@ -221,7 +231,9 @@ describe("Entity()", () => {
       await db.migrate();
       await User.query().insert({ name: "Alice", age: 30 });
       await User.query().insert({ name: "Bob", age: 25 });
-      const deleted = await User.query().where((u) => u.name === "Bob").delete();
+      const deleted = await User.query()
+        .where((u) => u.name === "Bob")
+        .delete();
       expect(deleted).toBe(1);
       expect(await User.query().count()).toBe(1);
     });
@@ -275,7 +287,9 @@ describe("Entity subclassing", () => {
     await db.migrate();
 
     class UserEntity extends Base {
-      get tag() { return `user:${(this as any).id}`; }
+      get tag() {
+        return `user:${(this as any).id}`;
+      }
     }
 
     await UserEntity.query().insert({ name: "Alice", age: 30 });
@@ -302,7 +316,9 @@ describe("lifecycle hooks", () => {
 
     let hookCalled = false;
     class UserEntity extends Base {
-      beforeSave() { hookCalled = true; }
+      beforeSave() {
+        hookCalled = true;
+      }
     }
 
     const u = new UserEntity({ name: "Alice", age: 30 });
@@ -316,7 +332,9 @@ describe("lifecycle hooks", () => {
 
     let hookCalled = false;
     class UserEntity extends Base {
-      afterSave() { hookCalled = true; }
+      afterSave() {
+        hookCalled = true;
+      }
     }
 
     const u = new UserEntity({ name: "Alice", age: 30 });
@@ -330,8 +348,12 @@ describe("lifecycle hooks", () => {
 
     const calls: string[] = [];
     class UserEntity extends Base {
-      beforeCreate() { calls.push("beforeCreate"); }
-      afterCreate() { calls.push("afterCreate"); }
+      beforeCreate() {
+        calls.push("beforeCreate");
+      }
+      afterCreate() {
+        calls.push("afterCreate");
+      }
     }
 
     const u = new UserEntity({ name: "Alice", age: 30 });
@@ -345,8 +367,12 @@ describe("lifecycle hooks", () => {
 
     const calls: string[] = [];
     class UserEntity extends Base {
-      beforeUpdate() { calls.push("beforeUpdate"); }
-      afterUpdate() { calls.push("afterUpdate"); }
+      beforeUpdate() {
+        calls.push("beforeUpdate");
+      }
+      afterUpdate() {
+        calls.push("afterUpdate");
+      }
     }
 
     const u = await UserEntity.query().insert({ name: "Alice", age: 30 });
@@ -361,8 +387,12 @@ describe("lifecycle hooks", () => {
 
     const calls: string[] = [];
     class UserEntity extends Base {
-      beforeDelete() { calls.push("beforeDelete"); }
-      afterDelete() { calls.push("afterDelete"); }
+      beforeDelete() {
+        calls.push("beforeDelete");
+      }
+      afterDelete() {
+        calls.push("afterDelete");
+      }
     }
 
     const u = await UserEntity.query().insert({ name: "Alice", age: 30 });
@@ -376,7 +406,9 @@ describe("lifecycle hooks", () => {
 
     let hookCalled = false;
     class UserEntity extends Base {
-      afterLoad() { hookCalled = true; }
+      afterLoad() {
+        hookCalled = true;
+      }
     }
 
     await UserEntity.query().insert({ name: "Alice", age: 30 });
@@ -390,7 +422,9 @@ describe("lifecycle hooks", () => {
 
     let calls = 0;
     class UserEntity extends Base {
-      afterLoad() { calls += 1; }
+      afterLoad() {
+        calls += 1;
+      }
     }
 
     await UserEntity.query().insert({ name: "Alice", age: 30 });
@@ -451,14 +485,18 @@ describe("driver resolution", () => {
 
   it("throws when no driver is set", () => {
     const User = Entity("things", { id: "integer primary key" });
-    expect(() => User.query()).toThrow("Entity \"things\": no Db. Use new Db(driver) to instantiate typhex.");
+    expect(() => User.query()).toThrow(
+      'Entity "things": no Db. Use new Db(driver) to instantiate typhex.',
+    );
   });
 
   it("Db constructor sets default driver for queries", async () => {
     const driver = freshDriver();
     const db = new Db(driver);
     const User = Entity("users2", userSchema);
-    await driver.execute(`CREATE TABLE "users2" ("id" integer primary key autoincrement, "name" text not null, "age" integer)`);
+    await driver.execute(
+      `CREATE TABLE "users2" ("id" integer primary key autoincrement, "name" text not null, "age" integer)`,
+    );
     await User.query().insert({ name: "Test", age: 1 });
     expect(await User.query().count()).toBe(1);
     await db.close();

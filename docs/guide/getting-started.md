@@ -57,7 +57,9 @@ INSERT INTO users (name, age, country) VALUES (?, ?, ?)
 With the transformer active, write predicates as plain TypeScript — closure variables are captured automatically:
 
 ```ts
-const adults = await User.query().where((u) => u.age > 18).toArray();
+const adults = await User.query()
+  .where((u) => u.age > 18)
+  .toArray();
 ```
 
 ```sql
@@ -69,7 +71,9 @@ Closure variables work without a second argument:
 
 ```ts
 const country = "US";
-const fromUS = await User.query().where((u) => u.country === country).toArray();
+const fromUS = await User.query()
+  .where((u) => u.country === country)
+  .toArray();
 ```
 
 ```sql
@@ -140,10 +144,14 @@ SELECT id AS userId, name AS fullName FROM users
 
 ```ts
 // Shorthand: select all
-const all = await User.query().select((u) => u).toArray();
+const all = await User.query()
+  .select((u) => u)
+  .toArray();
 
 // Shorthand: single column
-const ages = await User.query().select((u) => u.age).toArray();
+const ages = await User.query()
+  .select((u) => u.age)
+  .toArray();
 ```
 
 ## String Predicates
@@ -151,8 +159,12 @@ const ages = await User.query().select((u) => u.age).toArray();
 `.startsWith()`, `.endsWith()`, and `.includes()` compile to SQL `LIKE`:
 
 ```ts
-const a  = await User.query().where((u) => u.name.startsWith("A")).toArray();
-const al = await User.query().where((u) => u.name.includes("al")).toArray();
+const a = await User.query()
+  .where((u) => u.name.startsWith("A"))
+  .toArray();
+const al = await User.query()
+  .where((u) => u.name.includes("al"))
+  .toArray();
 ```
 
 ```sql
@@ -163,8 +175,12 @@ SELECT ... FROM users WHERE name LIKE '%' || ? || '%'  -- includes → params: [
 ## Array Membership
 
 ```ts
-const selected = await User.query().where((u) => u.id in [1, 3]).toArray();
-const excluded = await User.query().where((u) => !(u.id in [2])).toArray();
+const selected = await User.query()
+  .where((u) => u.id in [1, 3])
+  .toArray();
+const excluded = await User.query()
+  .where((u) => !(u.id in [2]))
+  .toArray();
 ```
 
 ```sql
@@ -176,7 +192,9 @@ Variable arrays work too — captured automatically with the transformer:
 
 ```ts
 const ids = [1, 2];
-const byIds = await User.query().where((u) => u.id in ids).toArray();
+const byIds = await User.query()
+  .where((u) => u.id in ids)
+  .toArray();
 ```
 
 ## Update, Patch, and Delete
@@ -213,7 +231,9 @@ DELETE FROM users WHERE country = ?
 ## Count and FindById
 
 ```ts
-const n    = await User.query().where((u) => u.country === "US").count();
+const n = await User.query()
+  .where((u) => u.country === "US")
+  .count();
 const user = await User.query().findById(1);
 ```
 
@@ -226,7 +246,7 @@ SELECT ... FROM users WHERE id = ? LIMIT 1           -- params: [1]
 
 ```ts
 const dave = new User({ name: "Dave", age: 35, country: "US" });
-await dave.query().save();   // INSERT — populates dave.id
+await dave.query().save(); // INSERT — populates dave.id
 await dave.query().delete(); // DELETE WHERE id = ?
 ```
 

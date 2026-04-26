@@ -19,7 +19,7 @@ export async function fetchRelations(
   qe: QueryExecutor,
   rows: Record<string, unknown>[],
   fetches: RelationFetchMetadata[],
-  skip: Set<string>
+  skip: Set<string>,
 ): Promise<Map<string, Map<string, unknown> | Map<string, unknown[]>>> {
   const result = new Map<string, Map<string, unknown> | Map<string, unknown[]>>();
   for (const meta of fetches) {
@@ -42,10 +42,17 @@ export async function fetchRelations(
 async function fetchOneToMany(
   qe: QueryExecutor,
   meta: RelationFetchMetadata,
-  rows: Record<string, unknown>[]
+  rows: Record<string, unknown>[],
 ): Promise<Map<string, unknown[]>> {
   const parentPkCols = meta.parentPkColumns ?? ["id"];
-  const related = await fetchRows(qe, rows, parentPkCols, meta.fkColumns, meta.targetEntity, meta.relation);
+  const related = await fetchRows(
+    qe,
+    rows,
+    parentPkCols,
+    meta.fkColumns,
+    meta.targetEntity,
+    meta.relation,
+  );
   return groupByCompositeKey(related, meta.fkColumns);
 }
 
@@ -53,9 +60,16 @@ async function fetchOneToMany(
 async function fetchOneToOne(
   qe: QueryExecutor,
   meta: RelationFetchMetadata,
-  rows: Record<string, unknown>[]
+  rows: Record<string, unknown>[],
 ): Promise<Map<string, unknown>> {
-  const related = await fetchRows(qe, rows, meta.fkColumns, meta.targetPkColumns, meta.targetEntity, meta.relation);
+  const related = await fetchRows(
+    qe,
+    rows,
+    meta.fkColumns,
+    meta.targetPkColumns,
+    meta.targetEntity,
+    meta.relation,
+  );
   return indexByCompositeKey(related, meta.targetPkColumns);
 }
 
@@ -63,7 +77,7 @@ async function fetchOneToOne(
 async function fetchManyToMany(
   qe: QueryExecutor,
   meta: RelationFetchMetadata,
-  rows: Record<string, unknown>[]
+  rows: Record<string, unknown>[],
 ): Promise<Map<string, unknown[]>> {
   const j = meta.junction!;
   const parentPkCols = meta.parentPkColumns ?? ["id"];
@@ -74,20 +88,33 @@ async function fetchManyToMany(
   // Step 1: parent rows → junction rows (no user relation options)
   const junctionEntity = getEntityByTableName(j.table) as AnyEntityClass;
 
-  const junctionRows = await fetchRows(
-    qe, rows, parentPkCols, j.foreignKey,
+  const junctionRows = (await fetchRows(
+    qe,
+    rows,
+    parentPkCols,
+    j.foreignKey,
     junctionEntity,
-  ) as Record<string, unknown>[];
+  )) as Record<string, unknown>[];
   if (junctionRows.length === 0) return out;
 
   // Step 2: junction rows → target entities (with user relation options)
-  const related = await fetchRows(qe, junctionRows, j.referenceKey, meta.targetPkColumns, meta.targetEntity, meta.relation);
+  const related = await fetchRows(
+    qe,
+    junctionRows,
+    j.referenceKey,
+    meta.targetPkColumns,
+    meta.targetEntity,
+    meta.relation,
+  );
   // Build targetKey → [parentKeys] from junction rows so we can iterate
   // `related` in fetch order (preserving any orderBy applied to the relation).
   const targetToParents = new Map<string, string[]>();
   for (const jr of junctionRows) {
     const parentKey = makeCompositeKey(remapCols(jr, j.foreignKey, parentPkCols), parentPkCols);
-    const targetKey = makeCompositeKey(remapCols(jr, j.referenceKey, meta.targetPkColumns), meta.targetPkColumns);
+    const targetKey = makeCompositeKey(
+      remapCols(jr, j.referenceKey, meta.targetPkColumns),
+      meta.targetPkColumns,
+    );
     const arr = targetToParents.get(targetKey) ?? [];
     arr.push(parentKey);
     targetToParents.set(targetKey, arr);
@@ -114,7 +141,7 @@ async function fetchRows(
   srcCols: string[],
   tgtCols: string[],
   entity: AnyEntityClass,
-  rel?: IrSelectRelation
+  rel?: IrSelectRelation,
 ): Promise<unknown[]> {
   const baseWhere = buildFetchByIdIr(srcRows, srcCols, tgtCols);
   if (!baseWhere) return [];
@@ -125,7 +152,7 @@ async function fetchRows(
   if (rel?.limitNum != null) chain = chain.limit(rel.limitNum);
   if (rel?.offsetNum != null) chain = chain.offset(rel.offsetNum);
   if (rel?.subPaths && rel.subPaths.length > 0) {
-    const cols = rel.subPaths.flatMap((p) => p[0] ?? p) as string[];
+    const cols = rel.subPaths.flatMap((p) => p[0] ?? p);
     for (const col of tgtCols) {
       if (!cols.includes(col)) cols.push(col);
     }
@@ -136,7 +163,11 @@ async function fetchRows(
 }
 
 /** Remap column values from a junction row onto a new column namespace for makeCompositeKey. */
-function remapCols(row: Record<string, unknown>, from: string[], to: string[]): Record<string, unknown> {
+function remapCols(
+  row: Record<string, unknown>,
+  from: string[],
+  to: string[],
+): Record<string, unknown> {
   const r: Record<string, unknown> = {};
   for (let i = 0; i < to.length; i++) r[to[i]] = row[from[i] ?? from[0]];
   return r;

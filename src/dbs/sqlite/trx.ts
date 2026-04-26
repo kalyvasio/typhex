@@ -12,7 +12,9 @@ export class SqliteTrx extends Trx {
     const options = this._options;
 
     if (options.readOnly !== undefined) {
-      throw new Error("TransactionOptions.readOnly is not supported by SQLite. Use sqliteMode: \"immediate\" or \"exclusive\" to control locking.");
+      throw new Error(
+        'TransactionOptions.readOnly is not supported by SQLite. Use sqliteMode: "immediate" or "exclusive" to control locking.',
+      );
     }
     if (options.deferrable !== undefined) {
       throw new Error("TransactionOptions.deferrable is not supported by SQLite.");
@@ -20,14 +22,14 @@ export class SqliteTrx extends Trx {
     if (options.sqliteMode && options.isolationLevel) {
       throw new Error(
         "TransactionOptions.sqliteMode and isolationLevel are mutually exclusive for SQLite. " +
-        "Use sqliteMode for native SQLite transaction modes, or isolationLevel: \"SERIALIZABLE\" for the ANSI level."
+          'Use sqliteMode for native SQLite transaction modes, or isolationLevel: "SERIALIZABLE" for the ANSI level.',
       );
     }
     if (options.isolationLevel && options.isolationLevel !== "SERIALIZABLE") {
       throw new Error(
         `SQLite does not support the "${options.isolationLevel}" isolation level. ` +
-        `Only "SERIALIZABLE" is supported (mapped to BEGIN IMMEDIATE). ` +
-        `Use sqliteMode: "immediate" | "exclusive" | "deferred" for fine-grained control.`
+          `Only "SERIALIZABLE" is supported (mapped to BEGIN IMMEDIATE). ` +
+          `Use sqliteMode: "immediate" | "exclusive" | "deferred" for fine-grained control.`,
       );
     }
   }
@@ -50,7 +52,6 @@ export class SqliteTrx extends Trx {
     }
   }
 
-
   async commit(): Promise<void> {
     if (this._savepointName) {
       await this._conn.execute(`RELEASE SAVEPOINT ${this._savepointName}`, []);
@@ -64,10 +65,12 @@ export class SqliteTrx extends Trx {
     if (this._savepointName) {
       await this._conn.execute(`ROLLBACK TO SAVEPOINT ${this._savepointName}`, []);
     } else {
-      try { await this._conn.execute("ROLLBACK", []); } catch { /* ignore */ }
+      try {
+        await this._conn.execute("ROLLBACK", []);
+      } catch {
+        /* ignore */
+      }
       await this._cleanup?.();
     }
   }
-
-
 }

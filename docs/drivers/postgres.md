@@ -5,15 +5,17 @@
 ```ts
 import { Db, createPostgresDriver } from "typhex";
 
-const db = new Db(createPostgresDriver({
-  connectionString: process.env.TYPHEX_POSTGRES_URL!,
-}));
+const db = new Db(
+  createPostgresDriver({
+    connectionString: process.env.TYPHEX_POSTGRES_URL!,
+  }),
+);
 ```
 
 ## Options
 
-| Option | Type | Description |
-|--------|------|-------------|
+| Option             | Type     | Description                                                              |
+| ------------------ | -------- | ------------------------------------------------------------------------ |
 | `connectionString` | `string` | Standard PostgreSQL URI: `postgresql://user:password@host:port/database` |
 
 ## Installation

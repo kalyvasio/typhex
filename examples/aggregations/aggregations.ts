@@ -5,7 +5,17 @@
  *   or: npm run aggregations  (from examples/)
  */
 
-import { Db, Entity, createSqliteDriver, count, sum, avg, min, max, distinct } from "../../src/index.js";
+import {
+  Db,
+  Entity,
+  createSqliteDriver,
+  count,
+  sum,
+  avg,
+  min,
+  max,
+  distinct,
+} from "../../src/index.js";
 import { groupConcat } from "../../src/sqlite.js";
 
 const Order = Entity("orders", {
@@ -21,23 +31,29 @@ await db.migrate();
 await Order.query().insert({ category: "electronics", status: "shipped", price: 299 });
 await Order.query().insert({ category: "electronics", status: "shipped", price: 199 });
 await Order.query().insert({ category: "electronics", status: "pending", price: 399 });
-await Order.query().insert({ category: "clothing",    status: "shipped", price: 49  });
-await Order.query().insert({ category: "clothing",    status: "pending", price: 79  });
-await Order.query().insert({ category: "clothing",    status: "pending", price: 59  });
-await Order.query().insert({ category: "books",       status: "shipped", price: 19  });
+await Order.query().insert({ category: "clothing", status: "shipped", price: 49 });
+await Order.query().insert({ category: "clothing", status: "pending", price: 79 });
+await Order.query().insert({ category: "clothing", status: "pending", price: 59 });
+await Order.query().insert({ category: "books", status: "shipped", price: 19 });
 
 // --- Shorthand select forms (runtime-parsed arrows) ---
 
 // select * — p => p
-const all = await Order.query().select((o) => o).toArray();
+const all = await Order.query()
+  .select((o) => o)
+  .toArray();
 console.log("Select * (all columns):", all.length, "rows");
 
 // single column — p => p.category
-const categories = await Order.query().select((o) => o.category).toArray();
+const categories = await Order.query()
+  .select((o) => o.category)
+  .toArray();
 console.log("Single column (category):", categories);
 
 // single aggregate — p => count(p.id)
-const total = await Order.query().select((o) => count(o.id)).toArray();
+const total = await Order.query()
+  .select((o) => count(o.id))
+  .toArray();
 console.log("Total order count:", total);
 
 // --- Object-form selects with aggregates ---
@@ -51,7 +67,12 @@ console.log("Revenue by category:", revenueByCategory);
 
 // multiple aggregates in one select
 const stats = await Order.query()
-  .select((o) => ({ total: count(o.id), minPrice: min(o.price), maxPrice: max(o.price), avgPrice: avg(o.price) }))
+  .select((o) => ({
+    total: count(o.id),
+    minPrice: min(o.price),
+    maxPrice: max(o.price),
+    avgPrice: avg(o.price),
+  }))
   .toArray();
 console.log("Order stats:", stats);
 
@@ -96,7 +117,7 @@ const shippedStats = await Order.query()
   .select((o) => ({ category: o.category, cnt: count(o.id), total: sum(o.price) }))
   .groupBy((o) => o.category)
   .having((o) => count(o.id) > 0)
-  .orderBy(o=> o.category, "asc")
+  .orderBy((o) => o.category, "asc")
   .toArray();
 console.log("Shipped orders by category:", shippedStats);
 

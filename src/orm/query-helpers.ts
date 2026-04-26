@@ -9,11 +9,7 @@ import { isRecord } from "../utils.js";
 const DEFAULT_ROW_PARAM = "u";
 
 /** Build IR for: column === value. Used for PK lookups, etc. */
-export function whereColumnEq(
-  column: string,
-  value: unknown,
-  param = DEFAULT_ROW_PARAM
-): IrNode {
+export function whereColumnEq(column: string, value: unknown, param = DEFAULT_ROW_PARAM): IrNode {
   return {
     kind: "binary",
     op: "===",
@@ -26,7 +22,7 @@ export function whereColumnEq(
 export function whereColumnIn(
   column: string,
   values: unknown[],
-  param = DEFAULT_ROW_PARAM
+  param = DEFAULT_ROW_PARAM,
 ): IrNode {
   return {
     kind: "in",
@@ -62,7 +58,7 @@ export function makeCompositeKey(row: Record<string, unknown>, cols: string[]): 
 export function buildFetchByIdIr(
   rows: Record<string, unknown>[],
   srcCols: string[],
-  tgtCols: string[]
+  tgtCols: string[],
 ): IrNode | null {
   let where: IrNode | null = null;
   for (let i = 0; i < tgtCols.length; i++) {
@@ -76,10 +72,7 @@ export function buildFetchByIdIr(
 
 /** Build WHERE IR for a primary key match. Accepts a Record keyed by PK column names
  *  (entity instance, composite id object, or the result of `pkToRecord`). */
-export function buildFindByIdIr(
-  pkColumns: string[],
-  id: Record<string, unknown>
-): IrNode {
+export function buildFindByIdIr(pkColumns: string[], id: Record<string, unknown>): IrNode {
   let node = whereColumnEq(pkColumns[0], id[pkColumns[0]]);
   for (let i = 1; i < pkColumns.length; i++) {
     node = whereAnd(node, whereColumnEq(pkColumns[i], id[pkColumns[i]]));

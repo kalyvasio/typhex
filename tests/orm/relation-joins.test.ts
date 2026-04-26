@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { buildRelationJoins, buildRelationPathToAlias, buildOneToManyExists, getReusableJoinKeys } from "../../src/orm/helpers/relations/relation-joins.js";
+import {
+  buildRelationJoins,
+  buildRelationPathToAlias,
+  buildOneToManyExists,
+  getReusableJoinKeys,
+} from "../../src/orm/helpers/relations/relation-joins.js";
 import type { IrNode, IrOrderBy, IrSelect, JoinType } from "../../src/ir/types.js";
 import type { RelationsMap } from "../../src/entity/relations.js";
 
@@ -180,9 +185,7 @@ describe("relation-joins", () => {
     });
 
     it("returns join when relation column used in orderBy (dot-notation path)", () => {
-      const orderBy: IrOrderBy[] = [
-        { param: "u", path: ["company", "name"], direction: "asc" },
-      ];
+      const orderBy: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
@@ -195,9 +198,7 @@ describe("relation-joins", () => {
     });
 
     it("returns empty when orderBy path has only one segment (not a relation column)", () => {
-      const orderBy: IrOrderBy[] = [
-        { param: "u", path: ["name"], direction: "asc" },
-      ];
+      const orderBy: IrOrderBy[] = [{ param: "u", path: ["name"], direction: "asc" }];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toEqual([]);
     });
@@ -209,9 +210,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "u", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const orderBy: IrOrderBy[] = [
-        { param: "u", path: ["company", "name"], direction: "asc" },
-      ];
+      const orderBy: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
       const result = buildRelationJoins(ctx, where, "u", orderBy);
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
@@ -219,9 +218,7 @@ describe("relation-joins", () => {
 
     it("does not join one-to-many relation from orderBy", () => {
       mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
-      const orderBy: IrOrderBy[] = [
-        { param: "u", path: ["employees", "name"], direction: "asc" },
-      ];
+      const orderBy: IrOrderBy[] = [{ param: "u", path: ["employees", "name"], direction: "asc" }];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(0);
       mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
@@ -237,7 +234,10 @@ describe("relation-joins", () => {
     it("returns empty when relation only in select", () => {
       const select: IrSelect = {
         param: "c",
-        paths: [["company", "id"], ["company", "name"]],
+        paths: [
+          ["company", "id"],
+          ["company", "name"],
+        ],
         aliases: ["company_id", "company_name"],
       };
       const result = getReusableJoinKeys(null, select, mockRelations, "c");
@@ -269,7 +269,10 @@ describe("relation-joins", () => {
       };
       const select: IrSelect = {
         param: "c",
-        paths: [["company", "id"], ["company", "name"]],
+        paths: [
+          ["company", "id"],
+          ["company", "name"],
+        ],
         aliases: ["company_id", "company_name"],
       };
       const result = getReusableJoinKeys(where, select, mockRelations, "c");
@@ -347,7 +350,13 @@ describe("relation-joins", () => {
         param: "c",
         path: ["tags", "name"],
       };
-      const result = buildOneToManyExists(where, relationsWithJunction, "c", ["id"], mockResolveTarget);
+      const result = buildOneToManyExists(
+        where,
+        relationsWithJunction,
+        "c",
+        ["id"],
+        mockResolveTarget,
+      );
       expect(Object.keys(result)).toHaveLength(0);
     });
 
@@ -402,7 +411,7 @@ describe("relation-joins", () => {
           targetTable: "companies",
           targetPkColumns: ["id"],
           foreignKeys: ["companyId"],
-          joinType: 'left' as JoinType,
+          joinType: "left" as JoinType,
           relType: "many-to-one" as const,
         },
       ];

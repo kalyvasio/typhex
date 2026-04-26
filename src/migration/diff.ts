@@ -10,7 +10,7 @@ import { getDbMigrations } from "../dbs/index.js";
 
 export async function diffSchema(
   driver: Driver,
-  entities: readonly RegisteredEntity[]
+  entities: readonly RegisteredEntity[],
 ): Promise<DiffAction[]> {
   return getDbMigrations(driver.dialect).diffSchema(driver, entities);
 }

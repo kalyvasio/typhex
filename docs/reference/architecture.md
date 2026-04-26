@@ -34,17 +34,17 @@ The IR is a tree of typed nodes that describes a predicate or projection in a da
 
 Key IR node types:
 
-| Node | Description |
-|------|-------------|
+| Node       | Description                                                   |
+| ---------- | ------------------------------------------------------------- |
 | `IrBinary` | Binary operator: `=`, `!=`, `>`, `>=`, `<`, `<=`, `AND`, `OR` |
-| `IrUnary` | Unary operator: `NOT` |
-| `IrMember` | Column access: `u.name` → `"name"` |
-| `IrConst` | Literal value: number, string, boolean, null |
-| `IrParam` | Closure variable: bound at execution time |
-| `IrCall` | Method call: `startsWith`, `endsWith`, `includes` |
-| `IrIn` | Array membership: `id IN (...)` |
-| `IrExists` | EXISTS subquery (for `oneToMany` `.some()` predicates) |
-| `IrSelect` | Projection descriptor: paths and aliases |
+| `IrUnary`  | Unary operator: `NOT`                                         |
+| `IrMember` | Column access: `u.name` → `"name"`                            |
+| `IrConst`  | Literal value: number, string, boolean, null                  |
+| `IrParam`  | Closure variable: bound at execution time                     |
+| `IrCall`   | Method call: `startsWith`, `endsWith`, `includes`             |
+| `IrIn`     | Array membership: `id IN (...)`                               |
+| `IrExists` | EXISTS subquery (for `oneToMany` `.some()` predicates)        |
+| `IrSelect` | Projection descriptor: paths and aliases                      |
 
 ## Driver Abstraction
 

@@ -20,12 +20,11 @@ async function getApplied(driver: Driver): Promise<Set<string>> {
   await ensureTrackingTable(driver);
   const esc = (n: string) => `"${n.replaceAll('"', '""')}"`;
   const table = esc("_typhex_migrations");
-  const rows = (await driver.execute(
-    `SELECT ${esc("name")} FROM ${table} ORDER BY ${esc("id")}`
-  ).then(r => r.rows)) as Array<{ name: string }>;
+  const rows = (await driver
+    .execute(`SELECT ${esc("name")} FROM ${table} ORDER BY ${esc("id")}`)
+    .then((r) => r.rows)) as Array<{ name: string }>;
   return new Set(rows.map((r) => r.name));
 }
-
 
 export interface MigrationResult {
   applied: string[];
@@ -67,7 +66,11 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
     }
     await conn.execute("COMMIT", []);
   } catch (e) {
-    try { await conn.execute("ROLLBACK", []); } catch { /* ignore */ }
+    try {
+      await conn.execute("ROLLBACK", []);
+    } catch {
+      /* ignore */
+    }
     throw e;
   } finally {
     await conn.release();
@@ -78,14 +81,16 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
 
 export async function migrationStatus(
   driver: Driver,
-  dir: string
+  dir: string,
 ): Promise<{ applied: MigrationRecord[]; pending: string[] }> {
   await ensureTrackingTable(driver);
   const esc = (n: string) => `"${n.replaceAll('"', '""')}"`;
   const table = esc("_typhex_migrations");
-  const appliedRows = (await driver.execute(
-    `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${table} ORDER BY ${esc("id")}`
-  ).then(r => r.rows)) as MigrationRecord[];
+  const appliedRows = (await driver
+    .execute(
+      `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${table} ORDER BY ${esc("id")}`,
+    )
+    .then((r) => r.rows)) as MigrationRecord[];
   const appliedNames = new Set(appliedRows.map((r) => r.name));
 
   let files: string[] = [];
@@ -99,9 +104,7 @@ export async function migrationStatus(
     // ENOENT: dir doesn't exist yet, files stays []
   }
 
-  const pending = files
-    .map((f) => f.replace(/\.sql$/, ""))
-    .filter((n) => !appliedNames.has(n));
+  const pending = files.map((f) => f.replace(/\.sql$/, "")).filter((n) => !appliedNames.has(n));
 
   return { applied: appliedRows, pending };
 }

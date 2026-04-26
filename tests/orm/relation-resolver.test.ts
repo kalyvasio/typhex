@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildRelationContext,
-} from "../../src/orm/helpers/relations/relation-context-builder.js";
+import { buildRelationContext } from "../../src/orm/helpers/relations/relation-context-builder.js";
 import type { RelationFetchMetadata } from "../../src/orm/helpers/relations/relation-context-builder.js";
-import { assembleJoined, assembleFetched } from "../../src/orm/helpers/relations/relation-assembler.js";
+import {
+  assembleJoined,
+  assembleFetched,
+} from "../../src/orm/helpers/relations/relation-assembler.js";
 import type { IrSelect } from "../../src/ir/types.js";
 
 const mockRelations = {
@@ -34,7 +35,8 @@ const mockRelationsToMany = {
 // A WHERE IR that references company.name — makes getReusableJoinKeys produce {"company"}
 // when the select also references company and rootParam is "c".
 const companyJoinWhereIr = {
-  kind: "binary", op: "===",
+  kind: "binary",
+  op: "===",
   left: { kind: "member", param: "c", path: ["company", "name"] },
   right: { kind: "const", value: "Acme" },
 };
@@ -71,7 +73,10 @@ describe("relation-resolver", () => {
       ];
       const select: IrSelect = {
         param: "c",
-        paths: [["company", "id"], ["company", "name"]],
+        paths: [
+          ["company", "id"],
+          ["company", "name"],
+        ],
         aliases: ["company_id", "company_name"],
       };
       assembleJoined(rows, new Set(["company"]), select);
@@ -81,12 +86,13 @@ describe("relation-resolver", () => {
     });
 
     it("falls back to relKey_field alias when no explicit aliases provided", () => {
-      const rows: Record<string, unknown>[] = [
-        { id: 1, company_id: 10, company_name: "Acme" },
-      ];
+      const rows: Record<string, unknown>[] = [{ id: 1, company_id: 10, company_name: "Acme" }];
       const select: IrSelect = {
         param: "c",
-        paths: [["company", "id"], ["company", "name"]],
+        paths: [
+          ["company", "id"],
+          ["company", "name"],
+        ],
         aliases: [], // empty → forces the ?? fallback inside collectJoinedSubPaths
       };
       assembleJoined(rows, new Set(["company"]), select);
@@ -96,7 +102,9 @@ describe("relation-resolver", () => {
     });
 
     it("builds from select.relations with subPaths", () => {
-      const rows: Record<string, unknown>[] = [{ id: 1, name: "John", company_id: 1, company_name: "Acme" }];
+      const rows: Record<string, unknown>[] = [
+        { id: 1, name: "John", company_id: 1, company_name: "Acme" },
+      ];
       const select: IrSelect = {
         param: "c",
         paths: [["id"], ["name"]],
@@ -108,7 +116,9 @@ describe("relation-resolver", () => {
     });
 
     it("uses outputKey from IrSelectRelation when it differs from relation name", () => {
-      const rows: Record<string, unknown>[] = [{ id: 1, name: "John", employer_id: 1, employer_name: "Acme" }];
+      const rows: Record<string, unknown>[] = [
+        { id: 1, name: "John", employer_id: 1, employer_name: "Acme" },
+      ];
       const select: IrSelect = {
         param: "c",
         paths: [["id"], ["name"]],
@@ -169,12 +179,23 @@ describe("relation-resolver", () => {
     it("attaches to-many relation using composite PK lookup", () => {
       const rows: Record<string, unknown>[] = [{ id: 5 }];
       const fetch = makeToManyFetch();
-      const postsMap = new Map<string, unknown[]>([["5", [{ id: 1, userId: 5 }, { id: 2, userId: 5 }]]]);
+      const postsMap = new Map<string, unknown[]>([
+        [
+          "5",
+          [
+            { id: 1, userId: 5 },
+            { id: 2, userId: 5 },
+          ],
+        ],
+      ]);
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
 
-      expect(rows[0].posts).toEqual([{ id: 1, userId: 5 }, { id: 2, userId: 5 }]);
+      expect(rows[0].posts).toEqual([
+        { id: 1, userId: 5 },
+        { id: 2, userId: 5 },
+      ]);
     });
 
     it("sets to-many to empty array when id not in fetched map", () => {
@@ -240,7 +261,13 @@ describe("relation-resolver", () => {
         aliases: ["id", "name"],
         relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
+      const ctx = buildRelationContext(
+        select,
+        mockRelations,
+        companyJoinWhereIr as any,
+        ["id"],
+        "c",
+      );
       expect(ctx.columnPaths).toContainEqual(["company", "id"]);
       expect(ctx.columnPaths).toContainEqual(["company", "name"]);
       expect(ctx.relationFetches).toHaveLength(0);
@@ -252,7 +279,13 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company", "name"]],
         aliases: ["id", "company_name"],
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
+      const ctx = buildRelationContext(
+        select,
+        mockRelations,
+        companyJoinWhereIr as any,
+        ["id"],
+        "c",
+      );
       expect(ctx.columnPaths).toContainEqual(["company", "name"]);
       expect(ctx.columnAliases).toContain("company_name");
       expect(ctx.relationFetches).toHaveLength(0);
@@ -428,7 +461,7 @@ describe("relation-resolver", () => {
         mockRelationsWithTarget,
         whereIr as any,
         ["id"],
-        "c"
+        "c",
       );
       expect(ctx.reusableJoinKeys.has("company")).toBe(true);
       expect(ctx.skipLoadFor.has("company")).toBe(true);
@@ -448,7 +481,13 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company" }], // no subPaths → subPaths?.length = undefined → ?? 0
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, whereIr as any, ["id"], "c");
+      const ctx = buildRelationContext(
+        select,
+        mockRelationsWithTarget,
+        whereIr as any,
+        ["id"],
+        "c",
+      );
       // subPaths undefined → (r.subPaths?.length ?? 0) = 0 → not > 0 → hasReusableRelationInSelect = false
       expect(ctx.hasReusableRelationInSelect).toBe(false);
     });
@@ -473,7 +512,7 @@ describe("relation-resolver", () => {
         mockRelationsWithTarget,
         whereIr as any,
         ["id"],
-        "c"
+        "c",
       );
       // reusableJoinKeys has "company" but hasReusableRelationInSelect = false (no matching path/relation)
       expect(ctx.reusableJoinKeys.has("company")).toBe(true);
@@ -498,7 +537,7 @@ describe("relation-resolver", () => {
         mockRelationsWithTarget,
         whereIr as any,
         ["id"],
-        "c"
+        "c",
       );
       expect(ctx.skipLoadFor.has("company")).toBe(true);
     });
@@ -513,7 +552,13 @@ describe("relation-resolver", () => {
         paths: [["id"], ["name"], ["company", "name"]],
         aliases: [], // shorter → aliases[i] is undefined → fallback
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
+      const ctx = buildRelationContext(
+        select,
+        mockRelations,
+        companyJoinWhereIr as any,
+        ["id"],
+        "c",
+      );
       expect(ctx.columnPaths).toContainEqual(["id"]);
       expect(ctx.columnAliases).toContain("id");
       expect(ctx.columnAliases).toContain("name");
@@ -526,7 +571,13 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company", "name"]],
         aliases: [], // empty → aliases[1] for ["company","name"] is undefined
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
+      const ctx = buildRelationContext(
+        select,
+        mockRelations,
+        companyJoinWhereIr as any,
+        ["id"],
+        "c",
+      );
       expect(ctx.columnAliases).toContain("company_name");
     });
   });
@@ -539,7 +590,13 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company", subPaths: [[]] }], // empty subPath
       };
-      const ctx = buildRelationContext(select, mockRelations, companyJoinWhereIr as any, ["id"], "c");
+      const ctx = buildRelationContext(
+        select,
+        mockRelations,
+        companyJoinWhereIr as any,
+        ["id"],
+        "c",
+      );
       // empty sub produces no column path
       expect(ctx.columnPaths).not.toContainEqual(["company"]);
       expect(ctx.columnPaths!.filter((p) => p[0] === "company")).toHaveLength(0);

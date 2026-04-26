@@ -36,7 +36,9 @@ function parseArgs(argv: string[]): Record<string, string> {
 function resolveDbPath(cliDb: string | undefined, configDb: string | undefined): string {
   const raw = cliDb ?? configDb ?? process.env.TYPHEX_DATABASE ?? process.env.TYPHEX_DB;
   if (!raw) {
-    throw new Error("Database path required. Use --db <path>, config.database, or TYPHEX_DATABASE.");
+    throw new Error(
+      "Database path required. Use --db <path>, config.database, or TYPHEX_DATABASE.",
+    );
   }
   return raw === ":memory:" ? raw : resolveWithinCwd(raw, "--db");
 }
@@ -56,7 +58,7 @@ function resolveWithinCwd(pathArg: string, label: string): string {
 async function withDriver<T>(
   config: TyphexConfig,
   dbPath: string,
-  callback: (driver: Awaited<ReturnType<typeof createDriver>>) => Promise<T>
+  callback: (driver: Awaited<ReturnType<typeof createDriver>>) => Promise<T>,
 ): Promise<T> {
   const driver = createDriver({
     dialect: config.dialect,

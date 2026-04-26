@@ -22,7 +22,7 @@ describe("dbs/sqlite", () => {
     it("creates a driver with async execute", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
-        const rows = await driver.execute("SELECT 1 as x").then(r => r.rows);
+        const rows = await driver.execute("SELECT 1 as x").then((r) => r.rows);
         expect(rows).toEqual([{ x: 1 }]);
 
         await driver.execute('CREATE TABLE "t" ("id" integer primary key)');
@@ -43,7 +43,7 @@ describe("dbs/sqlite", () => {
           await db.run('INSERT INTO "t" ("id") VALUES (1)');
           await db.run('INSERT INTO "t" ("id") VALUES (2)');
         });
-        const rows = await driver.execute('SELECT * FROM "t"').then(r => r.rows);
+        const rows = await driver.execute('SELECT * FROM "t"').then((r) => r.rows);
         expect(rows).toHaveLength(2);
       } finally {
         await db.close();
@@ -59,9 +59,9 @@ describe("dbs/sqlite", () => {
           db.transaction(async () => {
             await db.run('INSERT INTO "t" ("id") VALUES (1)');
             throw new Error("abort");
-          })
+          }),
         ).rejects.toThrow("abort");
-        const rows = await driver.execute('SELECT * FROM "t"').then(r => r.rows);
+        const rows = await driver.execute('SELECT * FROM "t"').then((r) => r.rows);
         expect(rows).toHaveLength(0);
       } finally {
         await db.close();
@@ -76,9 +76,9 @@ describe("dbs/sqlite", () => {
     });
 
     it("rejects sequence allocation compilation", () => {
-      expect(() =>
-        sqliteDialect.compileNextSequenceValues("users", "id", 2),
-      ).toThrow("SQLite does not support sequence allocation");
+      expect(() => sqliteDialect.compileNextSequenceValues("users", "id", 2)).toThrow(
+        "SQLite does not support sequence allocation",
+      );
     });
 
     it("escapes identifiers", () => {
@@ -144,8 +144,11 @@ describe("dbs/sqlite", () => {
       const { sql, params, returningRow } = sqliteDialect.compileInsertMany(
         "users",
         ["name", "age"],
-        [["Alice", 30], ["Bob", 25]],
-        "id"
+        [
+          ["Alice", 30],
+          ["Bob", 25],
+        ],
+        "id",
       );
       expect(sql).toContain('INSERT INTO "users"');
       expect(sql).toContain('"name"');
@@ -160,7 +163,7 @@ describe("dbs/sqlite", () => {
       const { sql, returningRow } = sqliteDialect.compileInsertMany(
         "users",
         ["name", "age"],
-        [["Alice", 30]]
+        [["Alice", 30]],
       );
       expect(sql).not.toContain("RETURNING");
       expect(returningRow).toBe(false);
@@ -175,8 +178,11 @@ describe("dbs/sqlite", () => {
       const { sql, params } = sqliteDialect.compileInsertMany(
         "users",
         ["name", "age"],
-        [["Alice", SQL_DEFAULT], [SQL_DEFAULT, 25]],
-        "id"
+        [
+          ["Alice", SQL_DEFAULT],
+          [SQL_DEFAULT, 25],
+        ],
+        "id",
       );
       expect(sql).toContain("VALUES");
       expect(sql).not.toContain("DEFAULT");
@@ -185,7 +191,10 @@ describe("dbs/sqlite", () => {
 
     it("compileInsert produces single-row INSERT without RETURNING (SQLite ignores pk)", () => {
       const { sql, params, returningRow } = sqliteDialect.compileInsert(
-        "users", ["name", "age"], ["Alice", 30], "id"
+        "users",
+        ["name", "age"],
+        ["Alice", 30],
+        "id",
       );
       expect(sql).toBe('INSERT INTO "users" ("name", "age") VALUES (?, ?)');
       expect(params).toEqual(["Alice", 30]);
@@ -200,18 +209,24 @@ describe("dbs/sqlite", () => {
 
     it("compileInsert doNothing emits ON CONFLICT ... DO NOTHING", () => {
       const { sql } = sqliteDialect.compileInsert(
-        "users", ["name", "slug"], ["Alice", "alice"], undefined,
-        { conflictColumns: ["slug"], action: "nothing" }
+        "users",
+        ["name", "slug"],
+        ["Alice", "alice"],
+        undefined,
+        { conflictColumns: ["slug"], action: "nothing" },
       );
       expect(sql).toBe(
-        'INSERT INTO "users" ("name", "slug") VALUES (?, ?) ON CONFLICT ("slug") DO NOTHING'
+        'INSERT INTO "users" ("name", "slug") VALUES (?, ?) ON CONFLICT ("slug") DO NOTHING',
       );
     });
 
     it("compileInsert doUpdate infers update columns (excludes conflict columns)", () => {
       const { sql } = sqliteDialect.compileInsert(
-        "users", ["name", "slug"], ["Alice", "alice"], undefined,
-        { conflictColumns: ["slug"], action: "update" }
+        "users",
+        ["name", "slug"],
+        ["Alice", "alice"],
+        undefined,
+        { conflictColumns: ["slug"], action: "update" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET');
       expect(sql).toContain('"name" = excluded."name"');
@@ -220,8 +235,11 @@ describe("dbs/sqlite", () => {
 
     it("compileInsert doUpdate with explicit updateColumns", () => {
       const { sql } = sqliteDialect.compileInsert(
-        "products", ["sku", "name", "price"], ["X1", "Widget", 10], undefined,
-        { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] }
+        "products",
+        ["sku", "name", "price"],
+        ["X1", "Widget", 10],
+        undefined,
+        { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] },
       );
       expect(sql).toContain('ON CONFLICT ("sku") DO UPDATE SET "price" = excluded."price"');
       expect(sql).not.toContain('"name" = excluded."name"');
@@ -229,8 +247,14 @@ describe("dbs/sqlite", () => {
 
     it("compileInsertMany doNothing emits ON CONFLICT ... DO NOTHING", () => {
       const { sql } = sqliteDialect.compileInsertMany(
-        "tags", ["slug", "label"], [["ts", "TypeScript"], ["js", "JavaScript"]], undefined,
-        { conflictColumns: ["slug"], action: "nothing" }
+        "tags",
+        ["slug", "label"],
+        [
+          ["ts", "TypeScript"],
+          ["js", "JavaScript"],
+        ],
+        undefined,
+        { conflictColumns: ["slug"], action: "nothing" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
       expect(sql).not.toContain("RETURNING");
@@ -238,8 +262,11 @@ describe("dbs/sqlite", () => {
 
     it("compileInsertMany doUpdate emits ON CONFLICT ... DO UPDATE SET", () => {
       const { sql } = sqliteDialect.compileInsertMany(
-        "tags", ["slug", "label"], [["ts", "TypeScript"]], undefined,
-        { conflictColumns: ["slug"], action: "update" }
+        "tags",
+        ["slug", "label"],
+        [["ts", "TypeScript"]],
+        undefined,
+        { conflictColumns: ["slug"], action: "update" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = excluded."label"');
     });
@@ -269,7 +296,7 @@ describe("dbs/sqlite", () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
         await driver.execute(
-          'CREATE TABLE "users" ("id" integer primary key, "name" text not null)'
+          'CREATE TABLE "users" ("id" integer primary key, "name" text not null)',
         );
         const cols = await sqliteMigrations.getDbColumns(driver, "users");
         expect(cols.map((c) => c.name)).toEqual(["id", "name"]);

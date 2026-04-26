@@ -33,7 +33,7 @@ const Post = Entity(
   },
   {
     author: rel.manyToOne(() => User, { foreignKey: "authorId" }), // [!code highlight]
-  }
+  },
 );
 ```
 
@@ -41,12 +41,12 @@ The target entity is passed as a thunk (`() => User`) to allow forward-reference
 
 ### Relation helpers
 
-| Helper | Direction | What it means |
-|--------|-----------|---------------|
-| `rel.manyToOne(() => Target, { foreignKey })` | N:1 | This table holds the foreign key |
-| `rel.oneToMany(() => Target, { foreignKey })` | 1:N | The other table holds the foreign key |
-| `rel.oneToOne(() => Target, { foreignKey })` | 1:1 | FK on this table; loads a single related row |
-| `rel.manyToMany(() => Target, { junction, foreignKey, referenceKey })` | M:N | Via a junction table |
+| Helper                                                                 | Direction | What it means                                |
+| ---------------------------------------------------------------------- | --------- | -------------------------------------------- |
+| `rel.manyToOne(() => Target, { foreignKey })`                          | N:1       | This table holds the foreign key             |
+| `rel.oneToMany(() => Target, { foreignKey })`                          | 1:N       | The other table holds the foreign key        |
+| `rel.oneToOne(() => Target, { foreignKey })`                           | 1:1       | FK on this table; loads a single related row |
+| `rel.manyToMany(() => Target, { junction, foreignKey, referenceKey })` | M:N       | Via a junction table                         |
 
 ## One-to-One Relations
 
@@ -59,9 +59,10 @@ const UserProfile = Entity("user_profiles", {
   bio: "text",
 });
 
-const User = Entity("users",
+const User = Entity(
+  "users",
   { id: "integer primary key autoincrement", name: "text not null" },
-  { profile: rel.oneToOne(() => UserProfile, { foreignKey: "userId" }) }
+  { profile: rel.oneToOne(() => UserProfile, { foreignKey: "userId" }) },
 );
 
 // Load the profile alongside the user
@@ -86,15 +87,16 @@ A `manyToMany` relation works through a junction table that you manage directly 
 import { Entity, rel, type ManyToMany } from "typhex";
 import { Tag } from "./tag.js";
 
-export class Post extends Entity("posts",
+export class Post extends Entity(
+  "posts",
   { id: "integer primary key autoincrement", title: "text not null" },
   {
     tags: rel.manyToMany(() => Tag, {
-      junction: "post_tags",   // junction table name
-      foreignKey: "postId",    // column pointing to this entity
-      referenceKey: "tagId",   // column pointing to the target
+      junction: "post_tags", // junction table name
+      foreignKey: "postId", // column pointing to this entity
+      referenceKey: "tagId", // column pointing to the target
     }),
-  }
+  },
 ) {
   declare tags: ManyToMany<Tag>; // needed when Post and Tag are in separate files
 }
@@ -113,7 +115,10 @@ const posts = await Post.query()
   .select((p) => ({
     id: p.id,
     title: p.title,
-    tags: p.tags.query().select((t) => ({ name: t.name })).orderBy((t) => t.name, "asc"),
+    tags: p.tags
+      .query()
+      .select((t) => ({ name: t.name }))
+      .orderBy((t) => t.name, "asc"),
   }))
   .toArray();
 ```
@@ -138,20 +143,24 @@ When a table's primary key spans multiple columns, mark each column with `"prima
 const Project = Entity(
   "projects",
   {
-    tenantId:  "text primary key",
+    tenantId: "text primary key",
     projectId: "text primary key",
-    name:      "text not null",
+    name: "text not null",
   },
   {
     tasks: rel.oneToMany(() => Task, { foreignKey: ["tenantId", "projectId"] }),
-  }
+  },
 );
 
 const Task = Entity(
   "tasks",
-  { id: "integer primary key autoincrement", tenantId: "text not null",
-    projectId: "text not null", title: "text not null" },
-  { project: rel.manyToOne(() => Project, { foreignKey: ["tenantId", "projectId"] }) }
+  {
+    id: "integer primary key autoincrement",
+    tenantId: "text not null",
+    projectId: "text not null",
+    title: "text not null",
+  },
+  { project: rel.manyToOne(() => Project, { foreignKey: ["tenantId", "projectId"] }) },
 );
 ```
 
@@ -190,7 +199,9 @@ class UserEntity extends User {
 }
 
 // Query and use the computed property
-const user = await UserEntity.query().where((u) => u.age > 18).first();
+const user = await UserEntity.query()
+  .where((u) => u.age > 18)
+  .first();
 console.log(user?.displayName);
 ```
 

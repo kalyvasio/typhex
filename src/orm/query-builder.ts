@@ -5,17 +5,42 @@
  * (except insert, which is synchronous to support save()).
  */
 
-import { type IrNode, type IrOrderBy, type IrSelect, type OrderDirection, type JoinHint, type JoinType } from "../ir/types.js";
+import {
+  type IrNode,
+  type IrOrderBy,
+  type IrSelect,
+  type OrderDirection,
+  type JoinHint,
+  type JoinType,
+} from "../ir/types.js";
 import type { QueryExecutor } from "./db.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
-import { resolveWhereIr, resolveOrderBy, resolveSelectIr, resolveGroupByPaths, resolveJoinKeys } from "../parser/resolve.js";
-import { resolveParamSentinels, type OnConflictClause, type ExpandPlaceholdersResult, type DialectImpl } from "../dbs/types.js";
-import { buildRelationContext, resolveSelectForSql } from "./helpers/relations/relation-context-builder.js";
+import {
+  resolveWhereIr,
+  resolveOrderBy,
+  resolveSelectIr,
+  resolveGroupByPaths,
+  resolveJoinKeys,
+} from "../parser/resolve.js";
+import {
+  resolveParamSentinels,
+  type OnConflictClause,
+  type ExpandPlaceholdersResult,
+  type DialectImpl,
+} from "../dbs/types.js";
+import {
+  buildRelationContext,
+  resolveSelectForSql,
+} from "./helpers/relations/relation-context-builder.js";
 import { resolveRelations } from "./helpers/relations/relation-resolver.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
 import {
-  DEFAULT_ROW_PARAM, getDialectOrThrow, getRootParam, getCompileOpts, buildJoinsSql,
+  DEFAULT_ROW_PARAM,
+  getDialectOrThrow,
+  getRootParam,
+  getCompileOpts,
+  buildJoinsSql,
 } from "./compile-context.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 
@@ -33,7 +58,9 @@ export interface QueryState<T = unknown> {
   selectIr: IrSelect | null;
   relations?: RelationsMap;
   hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
-  resolveRelationTarget?: (rel: RelationDef) => { table: string; pk: string[]; schema: Record<string, string> } | null;
+  resolveRelationTarget?: (
+    rel: RelationDef,
+  ) => { table: string; pk: string[]; schema: Record<string, string> } | null;
   joinHints?: JoinHint[];
   havingIr?: IrNode | null;
   havingParams?: Record<string, unknown>;
@@ -41,10 +68,7 @@ export interface QueryState<T = unknown> {
 }
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
-export class QueryBuilder<
-  C extends AnyEntityClass = AnyEntityClass,
-  T = EntityInstance<C>,
-> {
+export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityInstance<C>> {
   protected static readonly isDebugSqlEnabled = ((): boolean => {
     const debugFlag = process?.env?.TYPHEX_DEBUG;
     return debugFlag === "1" || debugFlag === "true" || debugFlag === "yes";
@@ -211,10 +235,7 @@ export class QueryBuilder<
   async insertGraph(
     input: Record<string, unknown> | Record<string, unknown>[],
   ): Promise<EntityInstance<C> | EntityInstance<C>[]> {
-    return new InsertGraphPlanner(
-      this.state as QueryState<EntityInstance<C>>,
-      input,
-    ).execute();
+    return new InsertGraphPlanner(this.state as QueryState<EntityInstance<C>>, input).execute();
   }
 
   /** Select single row by primary key (scalar or composite object). */
@@ -305,8 +326,18 @@ export class QueryBuilder<
     const opts = getCompileOpts(this.state);
     const whereResult = dialect.compileWhere(this.state.whereIr, opts);
     const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
-    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(whereResult.sql, resolved);
-    const { sql, params } = dialect.compileUpdate(tableName, set, columnNames, whereSql, whereParams, { returning: true });
+    const { sql: whereSql, params: whereParams } = dialect.expandPlaceholders(
+      whereResult.sql,
+      resolved,
+    );
+    const { sql, params } = dialect.compileUpdate(
+      tableName,
+      set,
+      columnNames,
+      whereSql,
+      whereParams,
+      { returning: true },
+    );
     if (!sql) return [];
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = (await qe.query(sql, params)) as Record<string, unknown>[];
@@ -340,7 +371,9 @@ export class QueryBuilder<
     const whereResult = dialect.compileWhere(this.state.whereIr, opts);
     const resolved = resolveParamSentinels(whereResult.params, this.state.whereParams);
     const { sql: whereSql, params } = dialect.expandPlaceholders(whereResult.sql, resolved);
-    const { sql, params: runParams } = dialect.compileDelete(tableName, whereSql, params, { returning: true });
+    const { sql, params: runParams } = dialect.compileDelete(tableName, whereSql, params, {
+      returning: true,
+    });
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, runParams);
     const rows = (await qe.query(sql, runParams)) as Record<string, unknown>[];
     if (!hydrate) return rows as EntityInstance<C>[];
@@ -461,7 +494,10 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     ) as Promise<R>;
   }
 
-  private async _doInsert(row: Record<string, unknown>, onConflict?: OnConflictClause): Promise<EntityInstance<C>> {
+  private async _doInsert(
+    row: Record<string, unknown>,
+    onConflict?: OnConflictClause,
+  ): Promise<EntityInstance<C>> {
     const { tableName, columnNames, qe, hydrate } = this.state;
     const dialect = getDialectOrThrow(this.state);
     const cols = columnNames.filter((c) => row[c] !== undefined);
@@ -482,16 +518,17 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     const result = await qe.run(compiled.sql, compiled.params);
     // For single auto-increment PKs use lastID; for composite PKs all values are in `row`.
     const pkRow =
-      pkCols.length === 1 && result.lastID != null
-        ? { ...row, [pkCols[0]]: result.lastID }
-        : row;
+      pkCols.length === 1 && result.lastID != null ? { ...row, [pkCols[0]]: result.lastID } : row;
     const whereIr = buildFindByIdIr(pkCols, pkRow);
     const inst = await this.clone().where(whereIr).first();
     if (!inst) throw new Error("insert: insert succeeded but row not found");
     return inst;
   }
 
-  private async _doInsertMany(rows: Record<string, unknown>[], onConflict?: OnConflictClause): Promise<EntityInstance<C>[]> {
+  private async _doInsertMany(
+    rows: Record<string, unknown>[],
+    onConflict?: OnConflictClause,
+  ): Promise<EntityInstance<C>[]> {
     if (rows.length === 0) return [];
     const { tableName, columnNames, qe, hydrate } = this.state;
     const dialect = getDialectOrThrow(this.state);
@@ -508,7 +545,9 @@ export class InsertBuilder<C extends AnyEntityClass, R>
       const returned = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
       const hydratedRows: EntityInstance<C>[] = [];
       for (const raw of returned)
-        hydratedRows.push(hydrate ? (await hydrate(raw)) as EntityInstance<C> : raw as EntityInstance<C>);
+        hydratedRows.push(
+          hydrate ? ((await hydrate(raw)) as EntityInstance<C>) : (raw as EntityInstance<C>),
+        );
       return hydratedRows;
     }
 

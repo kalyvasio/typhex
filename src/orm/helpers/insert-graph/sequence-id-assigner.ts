@@ -24,7 +24,9 @@ export class SequenceIdAssigner {
 
   private requireSinglePkColumn(pkColumns: string[]): string {
     if (pkColumns.length !== 1) {
-      throw new Error("insertGraph: sequence-backed batch inserts require a single primary key column");
+      throw new Error(
+        "insertGraph: sequence-backed batch inserts require a single primary key column",
+      );
     }
     return pkColumns[0];
   }
@@ -37,7 +39,9 @@ export class SequenceIdAssigner {
 
   private extractValues(rows: unknown[], expectedCount: number): unknown[] {
     if (rows.length !== expectedCount) {
-      throw new Error("insertGraph: sequence allocation did not return the expected number of rows");
+      throw new Error(
+        "insertGraph: sequence allocation did not return the expected number of rows",
+      );
     }
     return rows.map((row) => {
       if (row != null && typeof row === "object") {

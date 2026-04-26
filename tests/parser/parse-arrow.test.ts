@@ -93,7 +93,8 @@ describe("parser/parse-arrow", () => {
   });
 
   it("parses relation.some() for one-to-many EXISTS", () => {
-    const fn = (d: { employees: { name: string }[] }) => d.employees.some((e) => e.name === "Alice");
+    const fn = (d: { employees: { name: string }[] }) =>
+      d.employees.some((e) => e.name === "Alice");
     const ir = parseArrowToIr(fn, { paramNames: ["d"] });
     expect(ir.kind).toBe("exists");
     if (ir.kind === "exists") {
@@ -224,7 +225,10 @@ describe("parser/parseArrowToIrSelect", () => {
   });
 
   it("parses (c) => ({ ...c, company: c.company }) with spread of param", () => {
-    const fn = (c: { id: number; name: string; company: unknown }) => ({ ...c, company: c.company });
+    const fn = (c: { id: number; name: string; company: unknown }) => ({
+      ...c,
+      company: c.company,
+    });
     const ir = parseArrowToIrSelect(fn);
     expect(ir?.param).toBe("c");
     expect(ir?.paths).toEqual([["company"]]);

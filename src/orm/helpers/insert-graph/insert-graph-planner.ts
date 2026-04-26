@@ -79,7 +79,9 @@ export class InsertGraphPlanner<C extends AnyEntityClass> {
 
     await selectExecutor(plan).execute();
     const roots = await this.materializeRootRows(plan);
-    return Array.isArray(this.input) ? roots as EntityInstance<C>[] : roots[0] as EntityInstance<C>;
+    return Array.isArray(this.input)
+      ? (roots as EntityInstance<C>[])
+      : (roots[0] as EntityInstance<C>);
   }
 
   private buildInsertGraphPlan(
@@ -148,7 +150,12 @@ export class InsertGraphPlanner<C extends AnyEntityClass> {
     const options = relDef._options as RelationOptions;
     const info = resolveTargetInfo(relDef);
     const parentNode = this.planGraphNode(plan, capabilities, info, relValue);
-    addDependency(node, parentNode.id, getReferenceColumns(info, options), toArray(options.foreignKey));
+    addDependency(
+      node,
+      parentNode.id,
+      getReferenceColumns(info, options),
+      toArray(options.foreignKey),
+    );
   }
 
   private planOneToManyChildren(
@@ -257,9 +264,7 @@ async function materializeRoot(
 
 function selectExecutor(plan: InsertGraphPlan): InsertGraphExecutor {
   const canBatch = plan.nodes.every((node) => node.idResolution !== "unresolvableInBatch");
-  return canBatch
-    ? new InsertGraphBatchExecutor(plan)
-    : new InsertGraphSequentialExecutor(plan);
+  return canBatch ? new InsertGraphBatchExecutor(plan) : new InsertGraphSequentialExecutor(plan);
 }
 
 function createEntityInfo(entity: AnyEntityClass): InsertEntityInfo {
@@ -275,7 +280,9 @@ function createEntityInfo(entity: AnyEntityClass): InsertEntityInfo {
 function assertKnownRelation(relKey: string, entityInfo: InsertEntityInfo): RelationDef {
   const relDef = entityInfo.rels?.[relKey];
   if (!relDef) {
-    throw new Error(`insertGraph: unknown relation "${relKey}" on entity "${entityInfo.tableName}"`);
+    throw new Error(
+      `insertGraph: unknown relation "${relKey}" on entity "${entityInfo.tableName}"`,
+    );
   }
   return relDef;
 }
@@ -406,10 +413,7 @@ function addDependency(
   node.pendingCopies.push({ sourceNodeId, sourceColumns, targetColumns });
 }
 
-function registerPlannedNode(
-  plan: InsertGraphPlan,
-  fields: PlannedNodeInput,
-): PlannedNode {
+function registerPlannedNode(plan: InsertGraphPlan, fields: PlannedNodeInput): PlannedNode {
   const node: PlannedNode = {
     id: plan.nodes.length,
     dependencyIds: [],

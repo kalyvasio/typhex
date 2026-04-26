@@ -16,8 +16,8 @@ const db = new Db(createSqliteDriver({ path: ":memory:" }));
 
 ## Options
 
-| Option | Type | Description |
-|--------|------|-------------|
+| Option | Type     | Description                             |
+| ------ | -------- | --------------------------------------- |
 | `path` | `string` | Path to the `.db` file, or `":memory:"` |
 
 ## Installation

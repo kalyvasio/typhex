@@ -66,13 +66,15 @@ export function getRelationJoins(state: QueryState<unknown>): RelationJoinInfo[]
     state.whereIr,
     rootParam,
     state.orderBy,
-    state.joinHints
+    state.joinHints,
   );
 }
 
 /** Compile all relation joins to a SQL JOIN fragment. */
 export function buildJoinsSql(state: QueryState<unknown>, dialect: DialectImpl): string {
-  return getRelationJoins(state).map((j) => dialect.buildJoinClause(j)).join("");
+  return getRelationJoins(state)
+    .map((j) => dialect.buildJoinClause(j))
+    .join("");
 }
 
 /** Assemble the compile options passed to every dialect compiler call:
@@ -90,13 +92,15 @@ export function getCompileOpts(state: QueryState<unknown>) {
           state.relations,
           rootParam,
           mainPk,
-          state.resolveRelationTarget
+          state.resolveRelationTarget,
         )
       : undefined;
   return {
     tableAlias: TABLE_ALIAS,
     paramToAlias,
-    relationPathToAlias: Object.keys(relationPathToAlias).length > 0 ? relationPathToAlias : undefined,
-    oneToManyExists: oneToManyExists && Object.keys(oneToManyExists).length > 0 ? oneToManyExists : undefined,
+    relationPathToAlias:
+      Object.keys(relationPathToAlias).length > 0 ? relationPathToAlias : undefined,
+    oneToManyExists:
+      oneToManyExists && Object.keys(oneToManyExists).length > 0 ? oneToManyExists : undefined,
   };
 }
