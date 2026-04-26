@@ -45,7 +45,6 @@
     "test:postgres": "TYPHEX_POSTGRES_URL=${TYPHEX_POSTGRES_URL:-postgresql://postgres:postgres@localhost:5433/typhex_test} vitest run tests/dbs/postgres.test.ts tests/integration/scenarios-postgres.test.ts",
     "test:transformer": "vitest run tests/transformer tests/parser",
     "coverage": "vitest run --coverage",
-    "coverage": "vitest run --coverage",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
