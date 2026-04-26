@@ -25,11 +25,11 @@ import { rel } from "typhex";
 Defines a many-to-one (N:1) relation. The current table holds the foreign key.
 
 ```ts
-rel.manyToOne(() => Company, { foreignKey: "companyId" })
+rel.manyToOne(() => Company, { foreignKey: "companyId" });
 ```
 
-| Option | Type | Description |
-|--------|------|-------------|
+| Option       | Type     | Description                                     |
+| ------------ | -------- | ----------------------------------------------- |
 | `foreignKey` | `string` | Column on this table that references the target |
 
 ### `rel.oneToMany(targetFn, options)`
@@ -37,11 +37,11 @@ rel.manyToOne(() => Company, { foreignKey: "companyId" })
 Defines a one-to-many (1:N) relation. The target table holds the foreign key.
 
 ```ts
-rel.oneToMany(() => Employee, { foreignKey: "departmentId" })
+rel.oneToMany(() => Employee, { foreignKey: "departmentId" });
 ```
 
-| Option | Type | Description |
-|--------|------|-------------|
+| Option       | Type     | Description                                           |
+| ------------ | -------- | ----------------------------------------------------- |
 | `foreignKey` | `string` | Column on the target table that references this table |
 
 ### `rel.oneToOne(targetFn, options)`
@@ -49,11 +49,11 @@ rel.oneToMany(() => Employee, { foreignKey: "departmentId" })
 Defines a one-to-one (1:1) relation. The FK lives on this table.
 
 ```ts
-rel.oneToOne(() => UserProfile, { foreignKey: "userId" })
+rel.oneToOne(() => UserProfile, { foreignKey: "userId" });
 ```
 
-| Option | Type | Description |
-|--------|------|-------------|
+| Option       | Type                 | Description                                    |
+| ------------ | -------------------- | ---------------------------------------------- |
 | `foreignKey` | `string \| string[]` | Column(s) on this table pointing to the target |
 
 ### `rel.manyToMany(targetFn, options)`
@@ -61,13 +61,13 @@ rel.oneToOne(() => UserProfile, { foreignKey: "userId" })
 Defines a many-to-many (M:N) relation via a junction table.
 
 ```ts
-rel.manyToMany(() => Tag, { junction: "post_tags", foreignKey: "postId", referenceKey: "tagId" })
+rel.manyToMany(() => Tag, { junction: "post_tags", foreignKey: "postId", referenceKey: "tagId" });
 ```
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `junction` | `string` | Junction table name |
-| `foreignKey` | `string` | Column pointing to this entity |
+| Option         | Type     | Description                          |
+| -------------- | -------- | ------------------------------------ |
+| `junction`     | `string` | Junction table name                  |
+| `foreignKey`   | `string` | Column pointing to this entity       |
 | `referenceKey` | `string` | Column pointing to the target entity |
 
 See [Composite Primary Keys](/guide/entities-relations#composite-primary-keys) for multi-column PK and FK syntax.
@@ -88,7 +88,7 @@ Sets the driver as the default for all entities registered in the current proces
 Creates all registered tables that don't exist yet.
 
 ```ts
-await db.migrate()
+await db.migrate();
 ```
 
 ### `db.generateMigrations(dir)`
@@ -124,9 +124,9 @@ Run a callback inside a transaction with implicit propagation via AsyncLocalStor
 
 ```ts
 await db.transaction(async (trx) => {
-  await User.query().insert({ name: "Alice" })
-  await Post.query().insert({ title: "Hello", authorId: 1 })
-})
+  await User.query().insert({ name: "Alice" });
+  await Post.query().insert({ title: "Hello", authorId: 1 });
+});
 // rolls back automatically if fn throws
 ```
 
@@ -137,12 +137,12 @@ Options: `{ isolationLevel?: "SERIALIZABLE" | ... }` and for SQLite: `{ sqliteMo
 Begin a transaction and return a `Trx` handle for explicit management.
 
 ```ts
-const trx = await db.beginTrx()
+const trx = await db.beginTrx();
 try {
-  await User.query(trx).insert({ name: "Alice" })
-  await trx.commit()
+  await User.query(trx).insert({ name: "Alice" });
+  await trx.commit();
 } catch {
-  await trx.rollback()
+  await trx.rollback();
 }
 ```
 
@@ -151,7 +151,7 @@ try {
 Execute raw SQL directly. Useful for DDL statements like creating junction tables.
 
 ```ts
-await db.run("CREATE TABLE post_tags (postId INTEGER NOT NULL, tagId INTEGER NOT NULL)")
+await db.run("CREATE TABLE post_tags (postId INTEGER NOT NULL, tagId INTEGER NOT NULL)");
 ```
 
 ### `db.query(sql, params?)`
@@ -163,7 +163,7 @@ Execute a raw SQL query and return rows.
 Closes the database connection / releases the connection pool.
 
 ```ts
-await db.close()
+await db.close();
 ```
 
 ## Query Builder
@@ -233,7 +233,7 @@ SELECT id AS userId, name AS name FROM users
 Execute and return all matching rows.
 
 ```ts
-const rows = await query.toArray()
+const rows = await query.toArray();
 ```
 
 ### `.first()`
@@ -241,7 +241,7 @@ const rows = await query.toArray()
 Execute and return the first matching row, or `undefined`.
 
 ```ts
-const row = await query.first()
+const row = await query.first();
 ```
 
 ### `.count()`
@@ -249,7 +249,7 @@ const row = await query.first()
 Execute and return the count of matching rows.
 
 ```ts
-const n = await query.count()
+const n = await query.count();
 ```
 
 ### `.insert(data)`
@@ -257,7 +257,7 @@ const n = await query.count()
 Insert a row and return the inserted entity (with auto-generated `id`).
 
 ```ts
-const row = await Entity.query().insert({ name: "Alice", age: 30 })
+const row = await Entity.query().insert({ name: "Alice", age: 30 });
 ```
 
 ### `.update(data)`
@@ -285,7 +285,9 @@ Returns the number of rows deleted.
 Update matching rows and return the updated row (or `null` if no match).
 
 ```ts
-const updated = await Entity.query().where((u) => u.name === "Bob").patch({ age: 26 })
+const updated = await Entity.query()
+  .where((u) => u.name === "Bob")
+  .patch({ age: 26 });
 // Returns: EntityInstance | null
 ```
 
@@ -294,7 +296,7 @@ const updated = await Entity.query().where((u) => u.name === "Bob").patch({ age:
 Find a single row by primary key.
 
 ```ts
-const row = await Entity.query().findById(1)
+const row = await Entity.query().findById(1);
 // Returns the row or null
 ```
 
@@ -306,7 +308,7 @@ Insert multiple rows in one SQL statement. Returns the inserted rows on PostgreS
 await Product.query().insertMany([
   { sku: "W-001", name: "Widget", price: 999, stock: 100 },
   { sku: "G-001", name: "Gadget", price: 1499, stock: 50 },
-])
+]);
 ```
 
 Chain `.onConflict(columns).doNothing()` or `.onConflict(columns).doUpdate(updateCols?)` for upsert behaviour.
@@ -318,9 +320,9 @@ Insert a nested object graph — parents before children, children with wired fo
 ```ts
 await Post.query().insertGraph({
   title: "Hello",
-  author: { name: "Alice" },                       // manyToOne parent
+  author: { name: "Alice" }, // manyToOne parent
   tags: [{ name: "new-tag" }, { id: existingId }], // manyToMany: insert + link
-})
+});
 ```
 
 Accepts a single object or an array. Participates in an active transaction when one is passed via `Entity.query(trx)`.
@@ -350,7 +352,9 @@ Filter groups. Same arrow-function syntax as `.where()`.
 Override the join type for a specific relation (Typhex defaults to `LEFT JOIN` for relations used in `where()`).
 
 ```ts
-Contact.query().innerJoin((c) => c.company).where((c) => c.company.name === "Acme")
+Contact.query()
+  .innerJoin((c) => c.company)
+  .where((c) => c.company.name === "Acme");
 ```
 
 ```sql
@@ -363,22 +367,22 @@ WHERE companies.name = ?
 
 ```ts
 import { count, sum, avg, min, max, distinct } from "typhex";
-import { groupConcat } from "typhex/sqlite";                    // SQLite only
+import { groupConcat } from "typhex/sqlite"; // SQLite only
 import { stringAgg, arrayAgg, jsonAgg } from "typhex/postgres"; // PostgreSQL only
 ```
 
-| Function | SQL | Notes |
-|----------|-----|-------|
-| `count(col?)` | `COUNT(col)` | Omit arg for `COUNT(*)` |
-| `sum(col)` | `SUM(col)` | |
-| `avg(col)` | `AVG(col)` | |
-| `min(col)` | `MIN(col)` | |
-| `max(col)` | `MAX(col)` | |
-| `distinct(col)` | `DISTINCT col` | Wrap inside another aggregate |
-| `groupConcat(col, sep?)` | `GROUP_CONCAT` | SQLite only |
-| `stringAgg(col, sep)` | `STRING_AGG` | PostgreSQL only |
-| `arrayAgg(col)` | `ARRAY_AGG` | PostgreSQL only |
-| `jsonAgg(col)` | `JSON_AGG` | PostgreSQL only |
+| Function                 | SQL            | Notes                         |
+| ------------------------ | -------------- | ----------------------------- |
+| `count(col?)`            | `COUNT(col)`   | Omit arg for `COUNT(*)`       |
+| `sum(col)`               | `SUM(col)`     |                               |
+| `avg(col)`               | `AVG(col)`     |                               |
+| `min(col)`               | `MIN(col)`     |                               |
+| `max(col)`               | `MAX(col)`     |                               |
+| `distinct(col)`          | `DISTINCT col` | Wrap inside another aggregate |
+| `groupConcat(col, sep?)` | `GROUP_CONCAT` | SQLite only                   |
+| `stringAgg(col, sep)`    | `STRING_AGG`   | PostgreSQL only               |
+| `arrayAgg(col)`          | `ARRAY_AGG`    | PostgreSQL only               |
+| `jsonAgg(col)`           | `JSON_AGG`     | PostgreSQL only               |
 
 Used inside `.select()` and `.having()` lambdas.
 
@@ -387,11 +391,11 @@ Used inside `.select()` and `.having()` lambdas.
 ```ts
 import { createSqliteDriver } from "typhex";
 
-createSqliteDriver({ path: string })
+createSqliteDriver({ path: string });
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option | Description                         |
+| ------ | ----------------------------------- |
 | `path` | Path to `.db` file, or `":memory:"` |
 
 ## `createPostgresDriver(options)`
@@ -399,29 +403,29 @@ createSqliteDriver({ path: string })
 ```ts
 import { createPostgresDriver } from "typhex";
 
-createPostgresDriver({ connectionString: string })
+createPostgresDriver({ connectionString: string });
 ```
 
-| Option | Description |
-|--------|-------------|
+| Option             | Description               |
+| ------------------ | ------------------------- |
 | `connectionString` | PostgreSQL connection URI |
 
 ## Supported Predicate Syntax
 
-| Expression | SQL equivalent | Notes |
-|------------|----------------|-------|
-| `u.age > 18` | `age > ?` | `>`, `>=`, `<`, `<=`, `===`, `!==`, `==`, `!=` |
-| `u.active` | `active = 1` | boolean truthy |
-| `!u.active` | `NOT active = 1` | unary negation |
-| `u.a && u.b` | `a AND b` | |
-| `u.a \|\| u.b` | `a OR b` | |
-| `u.name.startsWith("A")` | `name LIKE 'A%'` | |
-| `u.name.endsWith("z")` | `name LIKE '%z'` | |
-| `u.name.includes("al")` | `name LIKE '%al%'` | |
-| `u.id in [1, 2, 3]` | `id IN (?, ?, ?)` | literal array |
-| `u.id in ids` | `id IN (?, …)` | variable array (pass as closure) |
-| `!(u.id in [2])` | `id NOT IN (?)` | negated `in` |
-| `u.company.name === "Acme"` | `JOIN … WHERE …` | manyToOne: generates JOIN |
-| `d.employees.some(e => …)` | `EXISTS (SELECT 1 …)` | oneToMany: generates EXISTS |
+| Expression                  | SQL equivalent        | Notes                                          |
+| --------------------------- | --------------------- | ---------------------------------------------- |
+| `u.age > 18`                | `age > ?`             | `>`, `>=`, `<`, `<=`, `===`, `!==`, `==`, `!=` |
+| `u.active`                  | `active = 1`          | boolean truthy                                 |
+| `!u.active`                 | `NOT active = 1`      | unary negation                                 |
+| `u.a && u.b`                | `a AND b`             |                                                |
+| `u.a \|\| u.b`              | `a OR b`              |                                                |
+| `u.name.startsWith("A")`    | `name LIKE 'A%'`      |                                                |
+| `u.name.endsWith("z")`      | `name LIKE '%z'`      |                                                |
+| `u.name.includes("al")`     | `name LIKE '%al%'`    |                                                |
+| `u.id in [1, 2, 3]`         | `id IN (?, ?, ?)`     | literal array                                  |
+| `u.id in ids`               | `id IN (?, …)`        | variable array (pass as closure)               |
+| `!(u.id in [2])`            | `id NOT IN (?)`       | negated `in`                                   |
+| `u.company.name === "Acme"` | `JOIN … WHERE …`      | manyToOne: generates JOIN                      |
+| `d.employees.some(e => …)`  | `EXISTS (SELECT 1 …)` | oneToMany: generates EXISTS                    |
 
 **Not supported in runtime mode:** ternary expressions, function calls (except string methods), `await`, `new`, `instanceof`, loops.

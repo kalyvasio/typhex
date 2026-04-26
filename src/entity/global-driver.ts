@@ -65,11 +65,12 @@ class JunctionRegistry {
   assertAllResolved(): void {
     if (this.pending.length === 0) return;
     const lines = this.pending.map(
-      (p) => `  - junction "${p.options.junction}" for ${p.sourceTable}.${asKey(p.options.foreignKey)} ↔ ${asKey(p.options.referenceKey)} (target entity not registered)`
+      (p) =>
+        `  - junction "${p.options.junction}" for ${p.sourceTable}.${asKey(p.options.foreignKey)} ↔ ${asKey(p.options.referenceKey)} (target entity not registered)`,
     );
     throw new Error(
       `manyToMany: cannot finalize ${this.pending.length} junction table(s):\n${lines.join("\n")}\n` +
-        `Register the target entity before calling migrate()/validate(), or define the junction entity explicitly.`
+        `Register the target entity before calling migrate()/validate(), or define the junction entity explicitly.`,
     );
   }
 
@@ -94,7 +95,7 @@ function asKey(k: string | string[]): string {
 
 function buildJunctionSchema(
   p: PendingJunction,
-  target: { table: string; pk: string[]; schema: Record<string, string> }
+  target: { table: string; pk: string[]; schema: Record<string, string> },
 ): Record<string, string> {
   const fkCols = toArray(p.options.foreignKey);
   const refCols = toArray(p.options.referenceKey);
@@ -116,13 +117,13 @@ function assertColumnCount(
   refPkCols: string[],
   refTable: string,
   junctionName: string,
-  side: "foreignKey" | "referenceKey"
+  side: "foreignKey" | "referenceKey",
 ): void {
   if (junctionCols.length === refPkCols.length) return;
   throw new Error(
     `manyToMany: junction "${junctionName}" ${side} has ${junctionCols.length} column(s) ` +
       `but referenced entity "${refTable}" has ${refPkCols.length} primary key column(s). ` +
-      `They must match positionally.`
+      `They must match positionally.`,
   );
 }
 

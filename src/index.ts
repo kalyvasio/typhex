@@ -60,7 +60,12 @@ export type {
   ManyToMany,
 } from "./entity/index.js";
 export type { DiffAction, Dialect, MigrationFile, MigrationRecord } from "./migration/index.js";
-export { diffSchema, generateMigrationFiles, runMigrations, migrationStatus } from "./migration/index.js";
+export {
+  diffSchema,
+  generateMigrationFiles,
+  runMigrations,
+  migrationStatus,
+} from "./migration/index.js";
 export type { TyphexConfig } from "./config/types.js";
 export { loadConfig } from "./config/load-config.js";
 export type { LoadConfigOptions } from "./config/load-config.js";

@@ -55,9 +55,7 @@ export default defineConfig({
       text: "Edit this page on GitHub",
     },
 
-    socialLinks: [
-      { icon: "github", link: "https://github.com/kalyvasio/typhex" },
-    ],
+    socialLinks: [{ icon: "github", link: "https://github.com/kalyvasio/typhex" }],
 
     footer: {
       message: "Released under the MIT License.",

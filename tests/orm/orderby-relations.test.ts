@@ -15,14 +15,17 @@ class MockCompanyE extends Entity("mock_companies", {
   name: "text",
 }) {}
 
-class MockContactE extends Entity("mock_contacts", {
-  id: "integer primary key",
-  name: "text",
-  companyId: "integer",
-}, {
-  company: rel.manyToOne(() => MockCompanyE, { foreignKey: "companyId" }),
-}) {}
-
+class MockContactE extends Entity(
+  "mock_contacts",
+  {
+    id: "integer primary key",
+    name: "text",
+    companyId: "integer",
+  },
+  {
+    company: rel.manyToOne(() => MockCompanyE, { foreignKey: "companyId" }),
+  },
+) {}
 
 function newBuilder(db: MockDb) {
   return new QueryBuilder<typeof MockContactE, InstanceType<typeof MockContactE>>({
@@ -54,13 +57,13 @@ describe("orderBy — lambda and dot-notation support", () => {
   describe("lambda parsing", () => {
     it("parses u => u.name as single-segment path", () => {
       const q = newBuilder(db);
-      q.orderBy(u => u.name);
+      q.orderBy((u) => u.name);
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
     it("parses u => u.company.name as two-segment path", () => {
       const q = newBuilder(db);
-      q.orderBy(u => u.company.name);
+      q.orderBy((u) => u.company.name);
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
@@ -71,19 +74,19 @@ describe("orderBy — lambda and dot-notation support", () => {
         return [];
       });
       const q = newBuilder(db);
-      q.orderBy(u => u.name);
+      q.orderBy((u) => u.name);
       await q.toArray();
       expect(capturedSql).toContain('"name"');
     });
 
     it("throws on non-member-expression lambda", () => {
       const q = newBuilder(db);
-      expect(() => q.orderBy(u => (u.name as any) > 5)).toThrow();
+      expect(() => q.orderBy((u) => (u.name as any) > 5)).toThrow();
     });
 
     it("chains and returns this (same reference)", () => {
       const q = newBuilder(db);
-      const result = q.orderBy(u => u.name);
+      const result = q.orderBy((u) => u.name);
       expect(result).toBe(q);
     });
   });
@@ -116,9 +119,7 @@ describe("orderBy — lambda and dot-notation support", () => {
 
 describe("compileOrderBy — relation path resolution", () => {
   it("resolves relation alias for path ['company', 'name']", () => {
-    const orders: IrOrderBy[] = [
-      { param: "u", path: ["company", "name"], direction: "asc" },
-    ];
+    const orders: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
@@ -128,9 +129,7 @@ describe("compileOrderBy — relation path resolution", () => {
   });
 
   it("resolves relation alias for desc direction", () => {
-    const orders: IrOrderBy[] = [
-      { param: "u", path: ["company", "name"], direction: "desc" },
-    ];
+    const orders: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "desc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
@@ -140,9 +139,7 @@ describe("compileOrderBy — relation path resolution", () => {
   });
 
   it("falls back to table alias when no relation path alias matches", () => {
-    const orders: IrOrderBy[] = [
-      { param: "u", path: ["name"], direction: "asc" },
-    ];
+    const orders: IrOrderBy[] = [{ param: "u", path: ["name"], direction: "asc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
@@ -151,9 +148,7 @@ describe("compileOrderBy — relation path resolution", () => {
   });
 
   it("does not resolve single-segment paths (non-relation columns)", () => {
-    const orders: IrOrderBy[] = [
-      { param: "u", path: ["company"], direction: "asc" },
-    ];
+    const orders: IrOrderBy[] = [{ param: "u", path: ["company"], direction: "asc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
@@ -186,13 +181,17 @@ class CompanyE extends Entity("companies_ob", {
   name: "text not null",
 }) {}
 
-class ContactE extends Entity("contacts_ob", {
-  id: "integer primary key autoincrement",
-  name: "text not null",
-  companyId: "integer not null",
-}, {
-  company: rel.manyToOne(() => CompanyE, { foreignKey: "companyId" }),
-}) {}
+class ContactE extends Entity(
+  "contacts_ob",
+  {
+    id: "integer primary key autoincrement",
+    name: "text not null",
+    companyId: "integer not null",
+  },
+  {
+    company: rel.manyToOne(() => CompanyE, { foreignKey: "companyId" }),
+  },
+) {}
 
 describe("orderBy relation columns — integration", () => {
   let db: Db;
@@ -215,10 +214,10 @@ describe("orderBy relation columns — integration", () => {
   it("orderBy string 'company.name' asc sorts by joined relation column", async () => {
     const rows = await ContactE.query()
       .orderBy("company.name", "asc")
-      .select(c => ({ id: c.id, name: c.name }))
+      .select((c) => ({ id: c.id, name: c.name }))
       .toArray();
     // Acme contacts first, then Globex
-    const names = rows.map(r => r.name);
+    const names = rows.map((r) => r.name);
     const aliceIdx = names.indexOf("Alice");
     const bobIdx = names.indexOf("Bob");
     const charlieIdx = names.indexOf("Charlie");
@@ -229,10 +228,10 @@ describe("orderBy relation columns — integration", () => {
 
   it("orderBy lambda (u => u.company.name) asc sorts by joined relation column", async () => {
     const rows = await ContactE.query()
-      .orderBy(u => u.company.name, "asc")
-      .select(c => ({ id: c.id, name: c.name }))
+      .orderBy((u) => u.company.name, "asc")
+      .select((c) => ({ id: c.id, name: c.name }))
       .toArray();
-    const names = rows.map(r => r.name);
+    const names = rows.map((r) => r.name);
     const aliceIdx = names.indexOf("Alice");
     const bobIdx = names.indexOf("Bob");
     const charlieIdx = names.indexOf("Charlie");
@@ -242,10 +241,10 @@ describe("orderBy relation columns — integration", () => {
 
   it("orderBy lambda desc sorts in reverse", async () => {
     const rows = await ContactE.query()
-      .orderBy(u => u.company.name, "desc")
-      .select(c => ({ id: c.id, name: c.name }))
+      .orderBy((u) => u.company.name, "desc")
+      .select((c) => ({ id: c.id, name: c.name }))
       .toArray();
-    const names = rows.map(r => r.name);
+    const names = rows.map((r) => r.name);
     const aliceIdx = names.indexOf("Alice");
     const bobIdx = names.indexOf("Bob");
     // Globex first in desc, Alice (Acme) should be last

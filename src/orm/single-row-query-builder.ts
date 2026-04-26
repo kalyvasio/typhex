@@ -7,7 +7,6 @@ import type { QueryState } from "./query-builder.js";
 import { QueryBuilder } from "./query-builder.js";
 import { buildFindByIdIr } from "./query-helpers.js";
 
-
 export class SingleRowQueryBuilder<T = unknown> {
   constructor(
     private readonly instance: Record<string, unknown>,
@@ -29,7 +28,10 @@ export class SingleRowQueryBuilder<T = unknown> {
       for (const c of this.columnNames) {
         if (this.instance[c] !== undefined) row[c] = this.instance[c];
       }
-      const inserted = (await new QueryBuilder({ ...this.state }).insert(row)) as unknown as Record<string, unknown>;
+      const inserted = (await new QueryBuilder({ ...this.state }).insert(row)) as unknown as Record<
+        string,
+        unknown
+      >;
       for (const c of this.columnNames) {
         if (inserted[c] !== undefined) this.instance[c] = inserted[c];
       }
@@ -39,7 +41,8 @@ export class SingleRowQueryBuilder<T = unknown> {
       await this.runHook(self, "beforeUpdate");
       const set: Record<string, unknown> = {};
       for (const c of this.columnNames) {
-        if (!this.pkColumns.includes(c) && this.instance[c] !== undefined) set[c] = this.instance[c];
+        if (!this.pkColumns.includes(c) && this.instance[c] !== undefined)
+          set[c] = this.instance[c];
       }
       if (Object.keys(set).length > 0) {
         await new QueryBuilder({

@@ -96,9 +96,11 @@ const User = Entity("users", {
   email: "VARCHAR(255)",
 });
 
-const db = new Db(createPostgresDriver({
-  connectionString: process.env.TYPHEX_POSTGRES_URL!,
-}));
+const db = new Db(
+  createPostgresDriver({
+    connectionString: process.env.TYPHEX_POSTGRES_URL!,
+  }),
+);
 
 await db.generateMigrations("./migrations");
 await db.runMigrations("./migrations");

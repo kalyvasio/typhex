@@ -16,7 +16,7 @@ export async function resolveRelations(
   ctx: RelationContext,
   selectIr: IrSelect | null,
   qe: QueryExecutor,
-  rows: Record<string, unknown>[]
+  rows: Record<string, unknown>[],
 ): Promise<void> {
   const fetched = await fetchRelations(qe, rows, ctx.relationFetches, ctx.skipLoadFor);
   if (ctx.hasReusableRelationInSelect) assembleJoined(rows, ctx.reusableJoinKeys, selectIr!);

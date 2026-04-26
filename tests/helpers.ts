@@ -24,7 +24,9 @@ export function createMockDb(): Db {
       release: vi.fn().mockResolvedValue(undefined),
     }),
     close: vi.fn(),
-    transaction: vi.fn().mockImplementation(async (fn: (trx: unknown) => Promise<unknown>) => fn({})),
+    transaction: vi
+      .fn()
+      .mockImplementation(async (fn: (trx: unknown) => Promise<unknown>) => fn({})),
     getDriver: vi.fn().mockReturnValue({ dialect: "sqlite" }),
   } as unknown as Db;
 }

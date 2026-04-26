@@ -11,7 +11,7 @@ const User = Entity(
   },
   {
     posts: rel.oneToMany(() => Post, { foreignKey: "authorId" }),
-  }
+  },
 );
 
 const Post = Entity(
@@ -25,7 +25,7 @@ const Post = Entity(
   },
   {
     author: rel.manyToOne(() => User, { foreignKey: "authorId" }),
-  }
+  },
 );
 
 describe("relation loading", () => {
@@ -94,9 +94,24 @@ describe("relation loading", () => {
     it("batches author loading for multiple posts", async () => {
       const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
       const bob = await User.query().insert({ name: "Bob", email: "bob@example.com" });
-      await Post.query().insert({ title: "P1", body: "x", authorId: (alice as any).id, published: true });
-      await Post.query().insert({ title: "P2", body: "y", authorId: (bob as any).id, published: true });
-      await Post.query().insert({ title: "P3", body: "z", authorId: (alice as any).id, published: true });
+      await Post.query().insert({
+        title: "P1",
+        body: "x",
+        authorId: (alice as any).id,
+        published: true,
+      });
+      await Post.query().insert({
+        title: "P2",
+        body: "y",
+        authorId: (bob as any).id,
+        published: true,
+      });
+      await Post.query().insert({
+        title: "P3",
+        body: "z",
+        authorId: (alice as any).id,
+        published: true,
+      });
 
       const results = await Post.query()
         .select((p: any) => ({ id: p.id, title: p.title, author: p.author }))
@@ -149,9 +164,24 @@ describe("relation loading", () => {
 
     it("loads posts with query chain: where, orderBy, select", async () => {
       const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
-      await Post.query().insert({ title: "B-post", body: "x", authorId: (alice as any).id, published: false });
-      await Post.query().insert({ title: "A-post", body: "y", authorId: (alice as any).id, published: true });
-      await Post.query().insert({ title: "C-post", body: "z", authorId: (alice as any).id, published: true });
+      await Post.query().insert({
+        title: "B-post",
+        body: "x",
+        authorId: (alice as any).id,
+        published: false,
+      });
+      await Post.query().insert({
+        title: "A-post",
+        body: "y",
+        authorId: (alice as any).id,
+        published: true,
+      });
+      await Post.query().insert({
+        title: "C-post",
+        body: "z",
+        authorId: (alice as any).id,
+        published: true,
+      });
 
       const results = await User.query()
         .select((u: any) => ({

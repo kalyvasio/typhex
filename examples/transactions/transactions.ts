@@ -36,10 +36,12 @@ console.log("Post count:", await Post.query().count()); // 1
 // ── 2. Callback API — automatic rollback on error ─────────────────────────────
 
 console.log("\n── 2. Rollback on error ──");
-await db.transaction(async () => {
-  await User.query().insert({ name: "Bob" });
-  throw new Error("something went wrong");
-}).catch((e) => console.log("Caught:", e.message));
+await db
+  .transaction(async () => {
+    await User.query().insert({ name: "Bob" });
+    throw new Error("something went wrong");
+  })
+  .catch((e) => console.log("Caught:", e.message));
 console.log("User count after rollback:", await User.query().count()); // still 1
 
 // ── 3. Explicit API — pass trx into service functions ────────────────────────
@@ -64,7 +66,7 @@ try {
   await trx.rollback();
 }
 console.log("User count:", await User.query().count()); // 2
-console.log("Post count:", await Post.query().count());  // 2
+console.log("Post count:", await Post.query().count()); // 2
 
 // ── 4. Nested transactions (savepoints) ───────────────────────────────────────
 //
@@ -77,26 +79,31 @@ await db.transaction(async (outer) => {
   console.log("Inserted Dave in outer trx");
 
   // Try to insert a post inside a nested savepoint — then discard it
-  await outer.transaction(async (inner) => {
-    await Post.query(inner).insert({ title: "Draft (will be discarded)", authorId: dave.id });
-    throw new Error("discard draft");
-  }).catch(() => console.log("Inner savepoint rolled back"));
+  await outer
+    .transaction(async (inner) => {
+      await Post.query(inner).insert({ title: "Draft (will be discarded)", authorId: dave.id });
+      throw new Error("discard draft");
+    })
+    .catch(() => console.log("Inner savepoint rolled back"));
 
   // Dave still exists; only the draft post was rolled back
   await Post.query(outer).insert({ title: "Dave's published post", authorId: dave.id });
 });
 console.log("User count:", await User.query().count()); // 3
-console.log("Post count:", await Post.query().count());  // 3 (draft discarded, published kept)
+console.log("Post count:", await Post.query().count()); // 3 (draft discarded, published kept)
 
 // ── 5. TransactionOptions ─────────────────────────────────────────────────────
 
 console.log("\n── 5. TransactionOptions ──");
 
 // SQLite SERIALIZABLE → BEGIN IMMEDIATE
-await db.transaction(async () => {
-  await User.query().insert({ name: "Eve" });
-  console.log("SERIALIZABLE transaction committed");
-}, { isolationLevel: "SERIALIZABLE" });
+await db.transaction(
+  async () => {
+    await User.query().insert({ name: "Eve" });
+    console.log("SERIALIZABLE transaction committed");
+  },
+  { isolationLevel: "SERIALIZABLE" },
+);
 
 // SQLite native EXCLUSIVE mode
 const exclTrx = await db.beginTrx({ sqliteMode: "exclusive" });

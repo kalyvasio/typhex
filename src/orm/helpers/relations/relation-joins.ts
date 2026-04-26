@@ -35,7 +35,7 @@ export function buildOneToManyExists(
   rootParam: string,
   mainPk: string[],
   resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null,
-  aliasPrefix = "ex"
+  aliasPrefix = "ex",
 ): Record<string, OneToManyExistsInfo> {
   const keys = new Set<string>();
   collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
@@ -74,7 +74,7 @@ function collectRelationKeysFromNode(
   node: IrNode | null,
   relations: RelationsMap,
   rootParam: string,
-  out: Set<string>
+  out: Set<string>,
 ): void {
   if (!node) return;
   if (node.kind === "member") {
@@ -105,7 +105,10 @@ function collectRelationKeysFromNode(
 
 /** Collect relation keys referenced in a select IR — from dotted paths (e.g. ["company","name"])
  *  and from explicit relation entries in `select.relations`. */
-function collectRelationKeysFromSelect(select: IrSelect | null, relations: RelationsMap): Set<string> {
+function collectRelationKeysFromSelect(
+  select: IrSelect | null,
+  relations: RelationsMap,
+): Set<string> {
   const out = new Set<string>();
   if (!select) return out;
   for (const path of select.paths) {
@@ -128,10 +131,15 @@ export function getReusableJoinKeys(
   whereNode: IrNode | null,
   selectNode: IrSelect | null,
   relations: RelationsMap,
-  rootParam: string
+  rootParam: string,
 ): Set<string> {
   const whereKeys = new Set<string>();
-  collectRelationKeysFromNode(whereNode ?? { kind: "const", value: null }, relations, rootParam, whereKeys);
+  collectRelationKeysFromNode(
+    whereNode ?? { kind: "const", value: null },
+    relations,
+    rootParam,
+    whereKeys,
+  );
   const selectKeys = collectRelationKeysFromSelect(selectNode, relations);
   const reusable = new Set<string>();
   for (const k of whereKeys) {
@@ -143,7 +151,11 @@ export function getReusableJoinKeys(
   return reusable;
 }
 
-function collectRelationKeysFromOrderBy(orderBy: IrOrderBy[], relations: RelationsMap, out: Set<string>): void {
+function collectRelationKeysFromOrderBy(
+  orderBy: IrOrderBy[],
+  relations: RelationsMap,
+  out: Set<string>,
+): void {
   for (const order of orderBy) {
     if (order.path.length > 1) {
       const key = order.path[0];
@@ -157,7 +169,7 @@ function collectJoinableRelationKeys(
   relations: RelationsMap,
   rootParam: string,
   orderBy?: IrOrderBy[],
-  joinHints?: JoinHint[]
+  joinHints?: JoinHint[],
 ): Set<string> {
   const keys = new Set<string>();
   collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
@@ -179,7 +191,7 @@ export function buildRelationJoins(
   whereNode: IrNode | null,
   rootParam: string,
   orderBy?: IrOrderBy[],
-  joinHints?: JoinHint[]
+  joinHints?: JoinHint[],
 ): RelationJoinInfo[] {
   const { relations } = ctx;
   const keys = collectJoinableRelationKeys(whereNode, relations, rootParam, orderBy, joinHints);
@@ -201,10 +213,13 @@ export function buildRelationJoins(
     if (!target) continue;
 
     const fkRaw = opts.foreignKey ? opts.foreignKey : "";
-    const fkCols = Array.isArray(fkRaw) ? fkRaw : (fkRaw ? [fkRaw] : []);
+    const fkCols = Array.isArray(fkRaw) ? fkRaw : fkRaw ? [fkRaw] : [];
     if (fkCols.length === 0) continue;
 
-    const hint = joinHints?.slice().reverse().find(h => h.relationKey === relKey);
+    const hint = joinHints
+      ?.slice()
+      .reverse()
+      .find((h) => h.relationKey === relKey);
     const joinType: JoinType = hint?.joinType ?? "left";
     result.push({
       relationKey: relKey,
@@ -225,7 +240,7 @@ export function buildRelationJoins(
  *  references in WHERE and SELECT clauses. */
 export function buildRelationPathToAlias(
   joins: RelationJoinInfo[],
-  params: string[]
+  params: string[],
 ): Record<string, string> {
   const map: Record<string, string> = {};
   for (const j of joins) {

@@ -10,7 +10,9 @@ import type { Connection, TransactionOptions } from "../driver/types.js";
 import type { Dialect } from "../dialect.js";
 
 const _txStorage = new AsyncLocalStorage<Trx>();
-export function getActiveTrx(): Trx | undefined { return _txStorage.getStore(); }
+export function getActiveTrx(): Trx | undefined {
+  return _txStorage.getStore();
+}
 export function runInTrxStorage<T>(trx: Trx, fn: () => Promise<T>): Promise<T> {
   return _txStorage.run(trx, fn);
 }
@@ -47,14 +49,16 @@ export abstract class Trx {
 
   // ── QueryExecutor ──────────────────────────────────────────────────────────
 
-  get dialect(): Dialect { return this._conn.dialect; }
+  get dialect(): Dialect {
+    return this._conn.dialect;
+  }
 
   query(sql: string, params?: unknown[]): Promise<unknown[]> {
-    return this._conn.execute(sql, params).then(r => r.rows);
+    return this._conn.execute(sql, params).then((r) => r.rows);
   }
 
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }> {
-    return this._conn.execute(sql, params).then(r => ({ lastID: r.lastID, changes: r.changes }));
+    return this._conn.execute(sql, params).then((r) => ({ lastID: r.lastID, changes: r.changes }));
   }
 
   // ── Callback API ───────────────────────────────────────────────────────────
@@ -72,7 +76,11 @@ export abstract class Trx {
       await this.commit();
       return result;
     } catch (e) {
-      try { await this.rollback(); } catch { /* ignore */ }
+      try {
+        await this.rollback();
+      } catch {
+        /* ignore */
+      }
       throw e;
     } finally {
       this._depth = 0;
@@ -95,7 +103,11 @@ export abstract class Trx {
 
   /** Create a savepoint-scoped child Trx and begin it. */
   async beginTrx(): Promise<Trx> {
-    const Ctor = this.constructor as new (conn: Connection, options?: TransactionOptions, ctx?: TrxContext) => Trx;
+    const Ctor = this.constructor as new (
+      conn: Connection,
+      options?: TransactionOptions,
+      ctx?: TrxContext,
+    ) => Trx;
     const nested = new Ctor(this._conn, this._options, { spRoot: this._spRoot, isNested: true });
     await nested.begin();
     return nested;

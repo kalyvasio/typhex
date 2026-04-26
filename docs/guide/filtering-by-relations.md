@@ -111,6 +111,7 @@ const deptsWithAlice = await Department.query()
 ```
 
 Typhex emits:
+
 ```sql
 SELECT departments.id, departments.name
 FROM departments

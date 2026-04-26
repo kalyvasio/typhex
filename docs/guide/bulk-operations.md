@@ -6,9 +6,9 @@ Insert multiple rows in a single SQL statement:
 
 ```ts
 await Product.query().insertMany([
-  { sku: "W-001", name: "Widget",    price: 999,  stock: 100 },
-  { sku: "G-001", name: "Gadget",    price: 1499, stock: 50  },
-  { sku: "D-001", name: "Doohickey", price: 249,  stock: 200 },
+  { sku: "W-001", name: "Widget", price: 999, stock: 100 },
+  { sku: "G-001", name: "Gadget", price: 1499, stock: 50 },
+  { sku: "D-001", name: "Doohickey", price: 249, stock: 200 },
 ]);
 ```
 
@@ -85,8 +85,8 @@ Combine `insertMany` with `onConflict` for price-list style updates:
 ```ts
 await Product.query()
   .insertMany([
-    { sku: "W-001", name: "irrelevant", price: 500,  stock: 0  },
-    { sku: "Z-001", name: "Zapper",     price: 3999, stock: 10 },
+    { sku: "W-001", name: "irrelevant", price: 500, stock: 0 },
+    { sku: "Z-001", name: "Zapper", price: 3999, stock: 10 },
   ])
   .onConflict(["sku"])
   .doUpdate(["price"]);
@@ -128,10 +128,7 @@ Provide children as an array — Typhex inserts the root first and back-fills th
 ```ts
 const user = await User.query().insertGraph({
   name: "Alice",
-  posts: [
-    { title: "First post" },
-    { title: "Second post" },
-  ],
+  posts: [{ title: "First post" }, { title: "Second post" }],
 });
 ```
 
@@ -156,7 +153,7 @@ const post = await Post.query().insertGraph({
   author: { name: "Alice" },
   tags: [
     { id: existingTag.id }, // link existing tag
-    { name: "new-tag" },    // insert new tag
+    { name: "new-tag" }, // insert new tag
   ],
 });
 ```
@@ -177,7 +174,7 @@ Pass an array to insert multiple graphs at once:
 ```ts
 const users = await User.query().insertGraph([
   { name: "Alice", posts: [{ title: "A-1" }, { title: "A-2" }] },
-  { name: "Bob",   posts: [{ title: "B-1" }] },
+  { name: "Bob", posts: [{ title: "B-1" }] },
 ]);
 ```
 

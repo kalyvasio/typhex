@@ -9,9 +9,14 @@ When you select a `manyToOne` relation, Typhex fetches the related rows using a 
 ```ts
 const Post = Entity(
   "posts",
-  { id: "integer primary key autoincrement", title: "text not null",
-    body: "text", authorId: "integer not null", published: "boolean" },
-  { author: rel.manyToOne(() => User, { foreignKey: "authorId" }) }
+  {
+    id: "integer primary key autoincrement",
+    title: "text not null",
+    body: "text",
+    authorId: "integer not null",
+    published: "boolean",
+  },
+  { author: rel.manyToOne(() => User, { foreignKey: "authorId" }) },
 );
 
 const postsWithAuthor = await Post.query()
@@ -54,9 +59,10 @@ This keeps the result shape small when you don't need all columns from the relat
 For `oneToMany` relations, call `.query()` on the relation to get a sub-query builder:
 
 ```ts
-const User = Entity("users",
+const User = Entity(
+  "users",
   { id: "integer primary key autoincrement", name: "text not null", email: "text" },
-  { posts: rel.oneToMany(() => Post, { foreignKey: "authorId" }) }
+  { posts: rel.oneToMany(() => Post, { foreignKey: "authorId" }) },
 );
 
 const usersWithPosts = await User.query()
@@ -115,9 +121,10 @@ import type { Post } from "./post.js";
 
 const _require = createRequire(import.meta.url);
 
-export class User extends Entity("users",
+export class User extends Entity(
+  "users",
   { id: "integer primary key autoincrement", name: "text not null" },
-  { posts: rel.oneToMany(() => _require("./post.js").Post, { foreignKey: "authorId" }) }
+  { posts: rel.oneToMany(() => _require("./post.js").Post, { foreignKey: "authorId" }) },
 ) {
   declare posts: OneToMany<Post>;
 }

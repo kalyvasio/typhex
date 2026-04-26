@@ -42,22 +42,22 @@ describe("parity: runtime parser vs compile-time transformer", () => {
   }> = [
     {
       name: "simple comparison: u.age > 18",
-      source: 'users.where((u) => u.age > 18);',
+      source: "users.where((u) => u.age > 18);",
       fn: (u: { age: number }) => u.age > 18,
     },
     {
-      name: "equality: u.country === \"US\"",
+      name: 'equality: u.country === "US"',
       source: 'users.where((u) => u.country === "US");',
       fn: (u: { country: string }) => u.country === "US",
     },
     {
       name: "logical and: u.age >= 18 && u.active",
-      source: 'users.where((u) => u.age >= 18 && u.active);',
+      source: "users.where((u) => u.age >= 18 && u.active);",
       fn: (u: { age: number; active: boolean }) => u.age >= 18 && u.active,
     },
     {
       name: "negation: !u.active",
-      source: 'users.where((u) => !u.active);',
+      source: "users.where((u) => !u.active);",
       fn: (u: { active: boolean }) => !u.active,
     },
     {
@@ -67,17 +67,17 @@ describe("parity: runtime parser vs compile-time transformer", () => {
     },
     {
       name: "in operator: u.id in [1, 2]",
-      source: 'users.where((u) => u.id in [1, 2]);',
+      source: "users.where((u) => u.id in [1, 2]);",
       fn: (u: { id: number }) => u.id in [1, 2],
     },
     {
       name: "equality with number: u.id === 1",
-      source: 'users.where((u) => u.id === 1);',
+      source: "users.where((u) => u.id === 1);",
       fn: (u: { id: number }) => u.id === 1,
     },
     {
       name: "or expression: u.a || u.b",
-      source: 'users.where((u) => u.a || u.b);',
+      source: "users.where((u) => u.a || u.b);",
       fn: (u: { a: boolean; b: boolean }) => u.a || u.b,
     },
     {

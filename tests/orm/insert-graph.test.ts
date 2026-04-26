@@ -15,13 +15,10 @@ const User = Entity(
   },
 );
 
-const Tag = Entity(
-  "insert_graph_tags",
-  {
-    id: "integer primary key autoincrement",
-    name: "text not null",
-  },
-);
+const Tag = Entity("insert_graph_tags", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+});
 
 const Post = Entity(
   "insert_graph_posts",
@@ -94,18 +91,18 @@ describe("insertGraph", () => {
       tags: [{ id: existingTag.id }, { name: "new" }],
     });
 
-    const rawJunctionRows = await db.query(
+    const rawJunctionRows = (await db.query(
       'SELECT "postId", "tagId" FROM "insert_graph_post_tags" ORDER BY "tagId"',
-    ) as Array<{ postId: number; tagId: number }>;
+    )) as Array<{ postId: number; tagId: number }>;
     expect(rawJunctionRows).toEqual([
       { postId: post.id, tagId: existingTag.id },
       { postId: post.id, tagId: 2 },
     ]);
 
-    const loaded = await Post.query()
+    const loaded = (await Post.query()
       .where(whereColumnEq("id", (post as { id: number }).id))
       .select((p: any) => ({ id: p.id, tags: p.tags.query().orderBy("name", "asc") }))
-      .first() as { id: number; tags: Array<{ id: number; name: string }> } | undefined;
+      .first()) as { id: number; tags: Array<{ id: number; name: string }> } | undefined;
 
     expect(loaded?.tags.map((tag) => tag.name)).toEqual(["existing", "new"]);
   });
@@ -118,9 +115,7 @@ describe("insertGraph", () => {
 
     expect(users.map((user) => user.name)).toEqual(["Alice", "Bob"]);
 
-    const posts = await Post.query()
-      .orderBy("title", "asc")
-      .toArray();
+    const posts = await Post.query().orderBy("title", "asc").toArray();
 
     expect(posts.map((post) => post.title)).toEqual(["A-1", "A-2", "B-1"]);
     expect(posts.map((post) => post.authorId)).toEqual([users[0].id, users[0].id, users[1].id]);
@@ -152,13 +147,12 @@ describe("insertGraph", () => {
 
       expect(users.map((user) => user.name)).toEqual(["Alice", "Bob"]);
 
-      const posts = await Post.query()
-        .orderBy("title", "asc")
-        .toArray();
+      const posts = await Post.query().orderBy("title", "asc").toArray();
 
       expect(posts.map((post) => post.title)).toEqual(["A-1", "B-1"]);
     } finally {
-      (sqliteDialect.insertCapabilities as { supportsReturning: boolean }).supportsReturning = original;
+      (sqliteDialect.insertCapabilities as { supportsReturning: boolean }).supportsReturning =
+        original;
     }
   });
 });

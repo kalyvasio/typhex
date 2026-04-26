@@ -47,7 +47,9 @@ describe("diffSchema", () => {
   });
 
   it("detects dropped column", async () => {
-    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text, "legacy" text)`);
+    await driver.execute(
+      `CREATE TABLE "users" ("id" integer primary key, "name" text, "legacy" text)`,
+    );
     const entities = [entity("users", { id: "integer primary key", name: "text" })];
     const actions = await diffSchema(driver, entities);
     expect(actions).toHaveLength(1);
@@ -85,7 +87,9 @@ describe("diffSchema", () => {
   });
 
   it("ignores _typhex_migrations table", async () => {
-    await driver.execute(`CREATE TABLE "_typhex_migrations" ("id" integer primary key, "name" text)`);
+    await driver.execute(
+      `CREATE TABLE "_typhex_migrations" ("id" integer primary key, "name" text)`,
+    );
     const actions = await diffSchema(driver, []);
     expect(actions).toHaveLength(0);
   });

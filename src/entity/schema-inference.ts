@@ -32,29 +32,34 @@ export type SQLTypeMap = {
 };
 
 /** Remove parenthesized part e.g. varchar(255) → varchar */
-export type StripParens<S extends string> =
-  S extends `${infer Base}(${string})${infer Rest}` ? `${Base}${Rest}` : S;
+export type StripParens<S extends string> = S extends `${infer Base}(${string})${infer Rest}`
+  ? `${Base}${Rest}`
+  : S;
 
 /** First token (base type) of schema string, lowercased */
 export type ExtractSQLBase<S extends string> =
-  StripParens<S> extends `${infer Base} ${string}`
-    ? Lowercase<Base>
-    : Lowercase<StripParens<S>>;
+  StripParens<S> extends `${infer Base} ${string}` ? Lowercase<Base> : Lowercase<StripParens<S>>;
 
 export type SQLToTS<S extends string> =
   ExtractSQLBase<S> extends keyof SQLTypeMap ? SQLTypeMap[ExtractSQLBase<S>] : unknown;
 
 export type IsNotNull<S extends string> =
-  Lowercase<S> extends `${string}not null${string}` ? true
-  : Lowercase<S> extends `${string}primary key${string}` ? true
-  : false;
+  Lowercase<S> extends `${string}not null${string}`
+    ? true
+    : Lowercase<S> extends `${string}primary key${string}`
+      ? true
+      : false;
 
 export type IsGenerated<S extends string> =
-  Lowercase<S> extends `${string}autoincrement${string}` ? true
-  : Lowercase<S> extends `${string}auto_increment${string}` ? true
-  : Lowercase<S> extends `${string}generated${string}` ? true
-  : Lowercase<ExtractSQLBase<S>> extends "serial" | "bigserial" ? true
-  : false;
+  Lowercase<S> extends `${string}autoincrement${string}`
+    ? true
+    : Lowercase<S> extends `${string}auto_increment${string}`
+      ? true
+      : Lowercase<S> extends `${string}generated${string}`
+        ? true
+        : Lowercase<ExtractSQLBase<S>> extends "serial" | "bigserial"
+          ? true
+          : false;
 
 /** Column has DEFAULT in schema → can be omitted on INSERT */
 export type HasDefault<S extends string> =
@@ -87,15 +92,25 @@ export type InferTable<T extends Record<string, string>> = Flatten<{
 
 /** Column can be omitted on INSERT (generated, nullable, or has default). */
 type OptionalOnInsert<S extends string> =
-  IsGenerated<S> extends true ? true
-  : IsNotNull<S> extends false ? true
-  : HasDefault<S> extends true ? true
-  : false;
+  IsGenerated<S> extends true
+    ? true
+    : IsNotNull<S> extends false
+      ? true
+      : HasDefault<S> extends true
+        ? true
+        : false;
 
 /**
  * Shape for INSERT / create(): generated, nullable, and default columns are optional.
  */
 export type InferInsert<T extends Record<string, string>> = Flatten<
-  { -readonly [K in keyof T as OptionalOnInsert<T[K]> extends true ? K : never]?: InferColumnType<T[K]> } &
-  { -readonly [K in keyof T as OptionalOnInsert<T[K]> extends true ? never : K]: InferColumnType<T[K]> }
+  {
+    -readonly [K in keyof T as OptionalOnInsert<T[K]> extends true ? K : never]?: InferColumnType<
+      T[K]
+    >;
+  } & {
+    -readonly [K in keyof T as OptionalOnInsert<T[K]> extends true ? never : K]: InferColumnType<
+      T[K]
+    >;
+  }
 >;

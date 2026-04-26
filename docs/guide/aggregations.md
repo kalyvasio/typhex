@@ -4,7 +4,7 @@ Typhex supports `GROUP BY`, `HAVING`, and all standard aggregate functions. Impo
 
 ```ts
 import { Db, Entity, createSqliteDriver, count, sum, avg, min, max, distinct } from "typhex";
-import { groupConcat } from "typhex/sqlite";  // SQLite-specific
+import { groupConcat } from "typhex/sqlite"; // SQLite-specific
 import { stringAgg, arrayAgg, jsonAgg } from "typhex/postgres"; // PostgreSQL-specific
 ```
 
@@ -34,7 +34,7 @@ SELECT COUNT(id) AS total FROM orders
 // Multiple aggregates
 const stats = await Order.query()
   .select((o) => ({
-    total:    count(o.id),
+    total: count(o.id),
     minPrice: min(o.price),
     maxPrice: max(o.price),
     avgPrice: avg(o.price),
@@ -48,13 +48,13 @@ SELECT COUNT(id) AS total, MIN(price) AS minPrice,
 FROM orders
 ```
 
-| Function | SQL | Notes |
-|----------|-----|-------|
-| `count(col?)` | `COUNT(col)` | Omit arg for `COUNT(*)` |
-| `sum(col)` | `SUM(col)` | |
-| `avg(col)` | `AVG(col)` | |
-| `min(col)` | `MIN(col)` | |
-| `max(col)` | `MAX(col)` | |
+| Function        | SQL            | Notes                         |
+| --------------- | -------------- | ----------------------------- |
+| `count(col?)`   | `COUNT(col)`   | Omit arg for `COUNT(*)`       |
+| `sum(col)`      | `SUM(col)`     |                               |
+| `avg(col)`      | `AVG(col)`     |                               |
+| `min(col)`      | `MIN(col)`     |                               |
+| `max(col)`      | `MAX(col)`     |                               |
 | `distinct(col)` | `DISTINCT col` | Wrap inside another aggregate |
 
 ## GROUP BY

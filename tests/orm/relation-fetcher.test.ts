@@ -17,7 +17,7 @@ function makeChain(rows: Record<string, unknown>[]) {
 
 function makeMeta(
   rows: Record<string, unknown>[],
-  overrides: Partial<RelationFetchMetadata & { relation: any }> = {}
+  overrides: Partial<RelationFetchMetadata & { relation: any }> = {},
 ): { meta: RelationFetchMetadata; chain: ReturnType<typeof makeChain> } {
   const chain = makeChain(rows);
   const meta: RelationFetchMetadata = {
@@ -60,8 +60,14 @@ describe("fetchRelations", () => {
   });
 
   it("fetches to-one relations and indexes by targetPk", async () => {
-    const rows = [{ id: 1, companyId: 10 }, { id: 2, companyId: 20 }];
-    const relatedRows = [{ id: 10, name: "Acme" }, { id: 20, name: "Globex" }];
+    const rows = [
+      { id: 1, companyId: 10 },
+      { id: 2, companyId: 20 },
+    ];
+    const relatedRows = [
+      { id: 10, name: "Acme" },
+      { id: 20, name: "Globex" },
+    ];
     const { meta } = makeMeta(relatedRows);
 
     const result = await fetchRelations(null as any, rows, [meta], new Set());
@@ -72,7 +78,11 @@ describe("fetchRelations", () => {
 
   it("fetches to-many relations and groups by fkColumn", async () => {
     const rows = [{ id: 5 }, { id: 6 }];
-    const relatedRows = [{ id: 1, userId: 5 }, { id: 2, userId: 5 }, { id: 3, userId: 6 }];
+    const relatedRows = [
+      { id: 1, userId: 5 },
+      { id: 2, userId: 5 },
+      { id: 3, userId: 6 },
+    ];
     const { meta } = makeMeta(relatedRows, {
       relationType: "one-to-many",
       relation: { name: "posts", outputKey: "posts" },
@@ -177,7 +187,10 @@ describe("fetchRelations", () => {
       { userId: 1, tagId: 20 },
       { userId: 2, tagId: 20 },
     ];
-    const tagRows = [{ id: 10, name: "ts" }, { id: 20, name: "js" }];
+    const tagRows = [
+      { id: 10, name: "ts" },
+      { id: 20, name: "js" },
+    ];
     const chain = makeChain(tagRows);
     const junctionChain = makeChain(junctionRows);
     const qe = {
@@ -188,7 +201,10 @@ describe("fetchRelations", () => {
 
     clearRegistry();
     registerEntity({
-      table: { _table: "user_tags", _schema: { userId: "integer not null", tagId: "integer not null" } },
+      table: {
+        _table: "user_tags",
+        _schema: { userId: "integer not null", tagId: "integer not null" },
+      },
       query: () => junctionChain,
     } as any);
 

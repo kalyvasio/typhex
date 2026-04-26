@@ -19,21 +19,23 @@ function transform(source: string): string {
 }
 
 describe("where transformer", () => {
-  it("transforms (u) => u.country === \"US\"", () => {
+  it('transforms (u) => u.country === "US"', () => {
     expect(transform('users.where((u) => u.country === "US");')).toMatchSnapshot();
   });
 
   it("transforms (u) => u.age >= minAge && u.age <= maxAge with closure vars", () => {
     expect(
-      transform("const minAge = 25; const maxAge = 35; users.where((u) => u.age >= minAge && u.age <= maxAge);")
+      transform(
+        "const minAge = 25; const maxAge = 35; users.where((u) => u.age >= minAge && u.age <= maxAge);",
+      ),
     ).toMatchSnapshot();
   });
 
-  it("transforms (u) => u.name.startsWith(\"A\")", () => {
+  it('transforms (u) => u.name.startsWith("A")', () => {
     expect(transform('users.where((u) => u.name.startsWith("A"));')).toMatchSnapshot();
   });
 
-  it("transforms (u) => u.name.includes(\"al\")", () => {
+  it('transforms (u) => u.name.includes("al")', () => {
     expect(transform('users.where((u) => u.name.includes("al"));')).toMatchSnapshot();
   });
 
@@ -50,7 +52,9 @@ describe("where transformer", () => {
   });
 
   it("transforms (d) => d.employees.some((e) => e.name === 'Alice')", () => {
-    expect(transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));")).toMatchSnapshot();
+    expect(
+      transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));"),
+    ).toMatchSnapshot();
   });
 });
 
@@ -60,11 +64,15 @@ describe("having transformer", () => {
   });
 
   it("transforms (p) => sum(p.price) >= minAmount with closure var", () => {
-    expect(transform("const minAmount = 100; orders.having((p) => sum(p.price) >= minAmount);")).toMatchSnapshot();
+    expect(
+      transform("const minAmount = 100; orders.having((p) => sum(p.price) >= minAmount);"),
+    ).toMatchSnapshot();
   });
 
   it("transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10", () => {
-    expect(transform("employees.having((p) => avg(p.salary) > 50000 && count(p.id) > 10);")).toMatchSnapshot();
+    expect(
+      transform("employees.having((p) => avg(p.salary) > 50000 && count(p.id) > 10);"),
+    ).toMatchSnapshot();
   });
 
   it("transforms (p) => count(distinct(p.category)) > 3 with distinct", () => {

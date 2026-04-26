@@ -37,11 +37,11 @@ Or: `npx tsx examples/entity/entity-usage.ts`
 
 Loads related entities via `select()`: `select(p => ({ id: p.id, author: p.author }))`. Split by case:
 
-| Case | Path | Run |
-|------|------|-----|
-| **Circular refs** (User ↔ Post ↔ Comment, declare + createRequire) | `circular-refs/` | `npm run relations` |
-| **Non-circular oneToMany** (Department → Employee, no declare) | `non-circular-one-to-many/` | `npm run relations:one-to-many` |
-| **Non-circular manyToOne** (Contact → Company, no declare) | `non-circular-many-to-one/` | `npm run relations:many-to-one` |
+| Case                                                               | Path                        | Run                             |
+| ------------------------------------------------------------------ | --------------------------- | ------------------------------- |
+| **Circular refs** (User ↔ Post ↔ Comment, declare + createRequire) | `circular-refs/`            | `npm run relations`             |
+| **Non-circular oneToMany** (Department → Employee, no declare)     | `non-circular-one-to-many/` | `npm run relations:one-to-many` |
+| **Non-circular manyToOne** (Contact → Company, no declare)         | `non-circular-many-to-one/` | `npm run relations:many-to-one` |
 
 ---
 

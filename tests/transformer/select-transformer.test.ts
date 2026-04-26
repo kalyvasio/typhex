@@ -37,9 +37,7 @@ describe("select transformer", () => {
 
   it("transforms (u) => ({ userId: u.id, fullName: u.name, country: u.country }) with aliases", () => {
     expect(
-      transform(
-        "users.select((u) => ({ userId: u.id, fullName: u.name, country: u.country }));"
-      )
+      transform("users.select((u) => ({ userId: u.id, fullName: u.name, country: u.country }));"),
     ).toMatchSnapshot();
   });
 
@@ -64,11 +62,15 @@ describe("select transformer", () => {
   });
 
   it("transforms (p) => ({ category: p.category, total: sum(p.price) }) with aggregate", () => {
-    expect(transform("products.select((p) => ({ category: p.category, total: sum(p.price) }));")).toMatchSnapshot();
+    expect(
+      transform("products.select((p) => ({ category: p.category, total: sum(p.price) }));"),
+    ).toMatchSnapshot();
   });
 
   it("transforms (p) => ({ cnt: count(p.id), maxSalary: max(p.salary) }) with multiple aggregates", () => {
-    expect(transform("employees.select((p) => ({ cnt: count(p.id), maxSalary: max(p.salary) }));")).toMatchSnapshot();
+    expect(
+      transform("employees.select((p) => ({ cnt: count(p.id), maxSalary: max(p.salary) }));"),
+    ).toMatchSnapshot();
   });
 
   it("transforms count(distinct(p.category)) single aggregate shorthand", () => {
@@ -76,7 +78,9 @@ describe("select transformer", () => {
   });
 
   it("transforms ({ unique: count(distinct(p.id)) }) object with distinct aggregate", () => {
-    expect(transform("users.select((p) => ({ unique: count(distinct(p.id)) }));")).toMatchSnapshot();
+    expect(
+      transform("users.select((p) => ({ unique: count(distinct(p.id)) }));"),
+    ).toMatchSnapshot();
   });
 
   it("transforms groupConcat(p.name, ', ') single aggregate shorthand", () => {
@@ -84,6 +88,8 @@ describe("select transformer", () => {
   });
 
   it("transforms ({ names: groupConcat(p.name, ', ') }) object with groupConcat", () => {
-    expect(transform("users.select((p) => ({ names: groupConcat(p.name, ', ') }));")).toMatchSnapshot();
+    expect(
+      transform("users.select((p) => ({ names: groupConcat(p.name, ', ') }));"),
+    ).toMatchSnapshot();
   });
 });

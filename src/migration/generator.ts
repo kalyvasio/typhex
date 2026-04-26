@@ -54,7 +54,7 @@ function groupByTable(actions: DiffAction[]): GroupedActions[] {
 
 export async function generateMigrationFiles(
   driver: Driver,
-  entities: readonly RegisteredEntity[]
+  entities: readonly RegisteredEntity[],
 ): Promise<MigrationFile[]> {
   const migrations = getDbMigrations(driver.dialect);
   const actions = await migrations.diffSchema(driver, entities);

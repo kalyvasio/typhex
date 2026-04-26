@@ -15,9 +15,7 @@ npm install --save-dev ts-patch
 ```json
 {
   "compilerOptions": {
-    "plugins": [
-      { "transform": "typhex/transformer" }
-    ]
+    "plugins": [{ "transform": "typhex/transformer" }]
   }
 }
 ```
@@ -47,11 +45,11 @@ With the transformer, you **never need a second argument** to `.where()` or `.se
 ```ts
 // Without transformer — runtime mode
 const country = "US";
-users.where((u) => u.country === country, { country })  // [!code --]
+users.where((u) => u.country === country, { country }); // [!code --]
 
 // With transformer — compiler handles it
 const country = "US";
-users.where((u) => u.country === country)               // [!code ++]
+users.where((u) => u.country === country); // [!code ++]
 ```
 
 Multiple variables are all captured at once:
@@ -96,7 +94,9 @@ If you run files directly with `tsx` (no build step), or work in a plain JavaScr
 
 ```ts
 const country = "US";
-await User.query().where((u) => u.country === country, { country }).toArray();
+await User.query()
+  .where((u) => u.country === country, { country })
+  .toArray();
 ```
 
 SQL output is identical either way; only the call site differs.

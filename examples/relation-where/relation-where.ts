@@ -17,9 +17,24 @@ const acme = await Company.query().insert({ name: "Acme Corp" });
 const globex = await Company.query().insert({ name: "Globex" });
 const sales = await Category.query().insert({ name: "Sales" });
 const eng = await Category.query().insert({ name: "Engineering" });
-await Contact.query().insert({ name: "John Doe", email: "john@acme.com", companyId: acme.id, categoryId: sales.id });
-await Contact.query().insert({ name: "Jane Smith", email: "jane@acme.com", companyId: acme.id, categoryId: eng.id });
-await Contact.query().insert({ name: "Bob Wilson", email: "bob@globex.com", companyId: globex.id, categoryId: sales.id });
+await Contact.query().insert({
+  name: "John Doe",
+  email: "john@acme.com",
+  companyId: acme.id,
+  categoryId: sales.id,
+});
+await Contact.query().insert({
+  name: "Jane Smith",
+  email: "jane@acme.com",
+  companyId: acme.id,
+  categoryId: eng.id,
+});
+await Contact.query().insert({
+  name: "Bob Wilson",
+  email: "bob@globex.com",
+  companyId: globex.id,
+  categoryId: sales.id,
+});
 
 const engineering = await Department.query().insert({ name: "Engineering" });
 const salesDept = await Department.query().insert({ name: "Sales" });
@@ -29,8 +44,8 @@ await Employee.query().insert({ name: "Carol", departmentId: salesDept.id });
 
 console.log("=== where with relation: contacts at Acme Corp ===");
 const acmeContacts = await Contact.query()
-  .where(c => c.company.name === "Acme Corp")
-  .select(c => ({ id: c.id, name: c.name }))
+  .where((c) => c.company.name === "Acme Corp")
+  .select((c) => ({ id: c.id, name: c.name }))
   .orderBy("id", "asc")
   .toArray();
 for (const c of acmeContacts) {
@@ -39,8 +54,8 @@ for (const c of acmeContacts) {
 
 console.log("\n=== where + select same relation (JOIN reuse) ===");
 const acmeContactsWithCompany = await Contact.query()
-  .where(c => c.company.name === "Acme Corp")
-  .select(c => ({
+  .where((c) => c.company.name === "Acme Corp")
+  .select((c) => ({
     id: c.id,
     name: c.name,
     company: { id: c.company.id, name: c.company.name },
@@ -53,7 +68,7 @@ for (const c of acmeContactsWithCompany) {
 
 console.log("\n=== all columns + one relation: (c) => ({ ...c, company: c.company }) ===");
 const contactsAllColsWithCompany = await Contact.query()
-  .select(c => ({ ...c, company: c.company }))
+  .select((c) => ({ ...c, company: c.company }))
   .orderBy("id", "asc")
   .toArray();
 for (const c of contactsAllColsWithCompany) {
@@ -62,8 +77,8 @@ for (const c of contactsAllColsWithCompany) {
 
 console.log("\n=== where uses company, select uses category (different relations) ===");
 const acmeContactsWithCategory = await Contact.query()
-  .where(c => c.company.name === "Acme Corp")
-  .select(c => ({
+  .where((c) => c.company.name === "Acme Corp")
+  .select((c) => ({
     id: c.id,
     name: c.name,
     category: { id: c.category.id, name: c.category.name },
@@ -76,8 +91,8 @@ for (const c of acmeContactsWithCategory) {
 
 console.log("\n=== where with one-to-many: departments that have an employee named Alice ===");
 const deptsWithAlice = await Department.query()
-  .where(d => d.employees.some((e) => e.name === "Alice"))
-  .select(d => ({ id: d.id, name: d.name }))
+  .where((d) => d.employees.some((e) => e.name === "Alice"))
+  .select((d) => ({ id: d.id, name: d.name }))
   .orderBy("id", "asc")
   .toArray();
 for (const d of deptsWithAlice) {
@@ -86,7 +101,7 @@ for (const d of deptsWithAlice) {
 
 console.log("\n=== count with relation where ===");
 const acmeCount = await Contact.query()
-  .where(c => c.company.name === "Acme Corp")
+  .where((c) => c.company.name === "Acme Corp")
   .count();
 console.log(`  Acme contacts: ${acmeCount}`);
 

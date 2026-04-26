@@ -12,27 +12,26 @@ export const sqliteMigrations: DbMigrations = {
   dialect: "sqlite",
 
   async getDbTables(driver: Driver): Promise<string[]> {
-    const rows = await driver.execute(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_typhex_migrations'`
-    ).then(r => r.rows);
+    const rows = await driver
+      .execute(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_typhex_migrations'`,
+      )
+      .then((r) => r.rows);
     return (rows as Array<{ name: string }>).map((r) => r.name);
   },
 
   async getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]> {
     const esc = sqliteDialect.escapeIdentifier(table);
-    const rows = await driver.execute(`PRAGMA table_info(${esc})`).then(r => r.rows);
+    const rows = await driver.execute(`PRAGMA table_info(${esc})`).then((r) => r.rows);
     return rows as DbColumnInfo[];
   },
 
-  async diffSchema(
-    driver: Driver,
-    entities: readonly RegisteredEntity[]
-  ): Promise<DiffAction[]> {
+  async diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]> {
     return diffSchemaBase(
       "sqlite",
       () => this.getDbTables(driver),
       (table) => this.getDbColumns(driver, table),
-      entities
+      entities,
     );
   },
 

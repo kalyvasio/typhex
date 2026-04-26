@@ -32,7 +32,7 @@ await Post.query().insert({
 
 console.log("=== manyToOne: posts with author ===");
 const postsWithAuthor = await Post.query()
-  .select(p => ({ id: p.id, title: p.title, author: p.author }))
+  .select((p) => ({ id: p.id, title: p.title, author: p.author }))
   .orderBy("id", "asc")
   .toArray();
 for (const p of postsWithAuthor) {
@@ -41,7 +41,7 @@ for (const p of postsWithAuthor) {
 
 console.log("\n=== Partial relation select: author id and name only ===");
 const postsPartialAuthor = await Post.query()
-  .select(p => ({
+  .select((p) => ({
     id: p.id,
     title: p.title,
     author: { id: p.author.id, name: p.author.name },
@@ -51,7 +51,11 @@ console.log("  Sample:", JSON.stringify(postsPartialAuthor[0], null, 2));
 
 console.log("\n=== oneToMany: users with their posts ===");
 const usersWithPosts = await User.query()
-  .select(u => ({ id: u.id, name: u.name, posts: u.posts.query().select(p => ({ id: p.id, title: p.title })) }))
+  .select((u) => ({
+    id: u.id,
+    name: u.name,
+    posts: u.posts.query().select((p) => ({ id: p.id, title: p.title })),
+  }))
   .orderBy("id", "asc")
   .toArray();
 for (const u of usersWithPosts) {
@@ -61,8 +65,8 @@ for (const u of usersWithPosts) {
 
 console.log("\n=== Filtered query with relations ===");
 const publishedWithAuthor = await Post.query()
-  .where(p => p.published === true)
-  .select(p => ({ id: p.id, title: p.title, author: p.author }))
+  .where((p) => p.published === true)
+  .select((p) => ({ id: p.id, title: p.title, author: p.author }))
   .toArray();
 console.log(`  Published posts: ${publishedWithAuthor.length}`);
 

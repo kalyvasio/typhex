@@ -5,11 +5,7 @@
 import type { AnyEntityClass, EntityClassOf, EntityInstance, SelectRow } from "./entity.js";
 import type { EntityBase } from "./types.js";
 
-export type RelationType =
-  | "one-to-one"
-  | "many-to-one"
-  | "one-to-many"
-  | "many-to-many";
+export type RelationType = "one-to-one" | "many-to-one" | "one-to-many" | "many-to-many";
 
 export interface RelationOptions {
   foreignKey: string | string[];
@@ -52,14 +48,17 @@ export interface RelationQueryBuilder<T> {
 }
 
 /** "one" = single instance + .query(), "many" = array + .query() */
-export type RelationKind<TType extends RelationType> =
-  TType extends "one-to-many" | "many-to-many" ? "many" : "one";
+export type RelationKind<TType extends RelationType> = TType extends "one-to-many" | "many-to-many"
+  ? "many"
+  : "one";
 
 /** Relation property type: .query() returns RelationQueryBuilder; value is single instance or array. Row type is SelectRow so nested relations (e.g. p.comments) have .query(). */
-export type RelatedEntityInstance<E extends AnyEntityClass, Kind extends "one" | "many"> =
-  Kind extends "many"
-    ? RelationQueryBuilder<SelectRow<E>> & EntityInstance<E>[]
-    : SingleRelation<EntityInstance<E>>;
+export type RelatedEntityInstance<
+  E extends AnyEntityClass,
+  Kind extends "one" | "many",
+> = Kind extends "many"
+  ? RelationQueryBuilder<SelectRow<E>> & EntityInstance<E>[]
+  : SingleRelation<EntityInstance<E>>;
 
 /** Instance-type relation aliases: cleaner display than RelationQueryBuilder<E> & E[]. Use when E extends EntityBase. */
 export type ManyRelation<E extends EntityBase> = RelationQueryBuilder<E> & E[];
@@ -71,12 +70,14 @@ type ToEntityInstance<E> = E extends EntityBase ? E : EntityInstance<EntityClass
 
 /** Relation property types for declare on subclass. E can be entity class (typeof Post) or instance type (Post) when using import type. */
 /** When E extends EntityBase (instance type): use ManyRelation/SingleRelation so .query() yields RelationQueryBuilder<E>. EntityClassOf can resolve to AnyEntityClass in circular refs. */
-export type OneToMany<E extends AnyEntityClass | EntityBase> =
-  E extends EntityBase ? ManyRelation<E> : RelatedEntityInstance<EntityClassOf<E>, "many">;
+export type OneToMany<E extends AnyEntityClass | EntityBase> = E extends EntityBase
+  ? ManyRelation<E>
+  : RelatedEntityInstance<EntityClassOf<E>, "many">;
 export type ManyToOne<E extends AnyEntityClass | EntityBase> = SingleRelation<ToEntityInstance<E>>;
 export type OneToOne<E extends AnyEntityClass | EntityBase> = SingleRelation<ToEntityInstance<E>>;
-export type ManyToMany<E extends AnyEntityClass | EntityBase> =
-  E extends EntityBase ? ManyRelation<E> : RelatedEntityInstance<EntityClassOf<E>, "many">;
+export type ManyToMany<E extends AnyEntityClass | EntityBase> = E extends EntityBase
+  ? ManyRelation<E>
+  : RelatedEntityInstance<EntityClassOf<E>, "many">;
 
 /** @deprecated Prefer OneToMany<Post> with import type + EntityClassOf. Kept for backward compatibility. */
 export type UntypedOneToMany = RelationQueryBuilder<SelectRow<any>> & EntityInstance<any>[];
@@ -96,7 +97,7 @@ export type RelationQueryable<R> =
 function makeRelation<E, TType extends RelationType>(
   type: TType,
   target: () => unknown,
-  options: RelationOptions | JunctionOptions
+  options: RelationOptions | JunctionOptions,
 ): RelationDef<E, TType> {
   return { _relType: type, _target: target, _options: options } as RelationDef<E, TType>;
 }
@@ -104,20 +105,20 @@ function makeRelation<E, TType extends RelationType>(
 /** oneToOne: FK on this table; target is the other entity */
 export function oneToOne<E extends AnyEntityClass>(
   target: () => E,
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<E, "one-to-one">;
 export function oneToOne<TTarget>(
   target: () => { _selectType: TTarget },
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<TTarget, "one-to-one">;
 /** Manual typing: pass E explicitly when thunk is () => unknown (e.g. createRequire). Use with import type. */
 export function oneToOne<E extends AnyEntityClass>(
   target: () => unknown,
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<E, "one-to-one">;
 export function oneToOne(
   target: () => unknown,
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<unknown, "one-to-one"> {
   return makeRelation("one-to-one", target, options);
 }
@@ -125,20 +126,20 @@ export function oneToOne(
 /** manyToOne: FK on this table. Pass a thunk (() => EntityClass) to handle circular imports. */
 export function manyToOne<E extends AnyEntityClass>(
   target: () => E,
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<E, "many-to-one">;
 export function manyToOne<TTarget>(
   target: () => { _selectType: TTarget },
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<TTarget, "many-to-one">;
 /** Manual typing: pass E explicitly when thunk is () => unknown (e.g. createRequire). Use with import type. */
 export function manyToOne<E extends AnyEntityClass>(
   target: () => unknown,
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<E, "many-to-one">;
 export function manyToOne(
   target: () => unknown,
-  options: RelationOptions
+  options: RelationOptions,
 ): RelationDef<unknown, "many-to-one"> {
   return makeRelation("many-to-one", target, options);
 }
@@ -146,20 +147,20 @@ export function manyToOne(
 /** oneToMany: FK on target table. Pass a thunk (() => EntityClass) to handle circular imports. */
 export function oneToMany<E extends AnyEntityClass>(
   target: () => E,
-  options: { foreignKey: string | string[] }
+  options: { foreignKey: string | string[] },
 ): RelationDef<E, "one-to-many">;
 export function oneToMany<TTarget>(
   target: () => { _selectType: TTarget },
-  options: { foreignKey: string | string[] }
+  options: { foreignKey: string | string[] },
 ): RelationDef<TTarget, "one-to-many">;
 /** Manual typing: pass E explicitly when thunk is () => unknown (e.g. createRequire). Use with import type. */
 export function oneToMany<E extends AnyEntityClass>(
   target: () => unknown,
-  options: { foreignKey: string | string[] }
+  options: { foreignKey: string | string[] },
 ): RelationDef<E, "one-to-many">;
 export function oneToMany(
   target: () => unknown,
-  options: { foreignKey: string | string[] }
+  options: { foreignKey: string | string[] },
 ): RelationDef<unknown, "one-to-many"> {
   return makeRelation("one-to-many", target, options);
 }
@@ -167,20 +168,20 @@ export function oneToMany(
 /** manyToMany: junction table with foreignKey and referenceKey */
 export function manyToMany<E extends AnyEntityClass>(
   target: () => E,
-  options: JunctionOptions
+  options: JunctionOptions,
 ): RelationDef<E, "many-to-many">;
 export function manyToMany<TTarget>(
   target: () => { _selectType: TTarget },
-  options: JunctionOptions
+  options: JunctionOptions,
 ): RelationDef<TTarget, "many-to-many">;
 /** Manual typing: pass E explicitly when thunk is () => unknown (e.g. createRequire). Use with import type. */
 export function manyToMany<E extends AnyEntityClass>(
   target: () => unknown,
-  options: JunctionOptions
+  options: JunctionOptions,
 ): RelationDef<E, "many-to-many">;
 export function manyToMany(
   target: () => unknown,
-  options: JunctionOptions
+  options: JunctionOptions,
 ): RelationDef<unknown, "many-to-many"> {
   return makeRelation("many-to-many", target, options);
 }
