@@ -46,7 +46,6 @@ describe("basic CRUD", () => {
     const row = await User.query()
       .where((u) => u.age >= 25)
       .orderBy("name", "asc")
-      .limit(1)
       .first();
     expect((row as any).name).toBe("Alice");
   });

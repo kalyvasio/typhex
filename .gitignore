@@ -6,3 +6,5 @@ examples/out/
 coverage/
 /.idea/
 /examples/test.db
+docs/.vitepress/dist
+docs/.vitepress/cache
