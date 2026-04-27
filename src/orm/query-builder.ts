@@ -44,6 +44,7 @@ import {
 } from "./compile-context.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 
+/** @internal — internal builder state */
 export interface QueryState<T = unknown> {
   tableName: string;
   columnNames: string[];
@@ -69,12 +70,18 @@ export interface QueryState<T = unknown> {
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
 export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityInstance<C>> {
+  /** @internal */
   protected static readonly isDebugSqlEnabled = ((): boolean => {
     const debugFlag = process?.env?.TYPHEX_DEBUG;
     return debugFlag === "1" || debugFlag === "true" || debugFlag === "yes";
   })();
 
-  constructor(protected state: QueryState<T>) {}
+  /** @internal */
+  protected state: QueryState<T>;
+  /** @internal */
+  constructor(state: QueryState<T>) {
+    this.state = state;
+  }
 
   /** Return a shallow copy of this builder with mutable state (params, orderBy) deep-copied,
    *  so chained calls do not mutate the original. */
@@ -87,14 +94,16 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     });
   }
 
-  /** Print the SQL and parameters to stdout when TYPHEX_DEBUG is enabled. */
+  /** @internal — Print the SQL and parameters to stdout when TYPHEX_DEBUG is enabled. */
   protected logSql(sql: string, params: unknown[]): void {
     console.log("[typhex]", sql);
     if (params.length > 0) console.log("[typhex] params:", params);
   }
 
-  /** Set or replace the WHERE predicate. Accepts either a pre-built IR node
-   *  or an arrow function that is parsed to IR at runtime. */
+  /** @internal — used by the TypeScript transformer */
+  where(predicate: IrNode, params?: Record<string, unknown>): this;
+  /** Set or replace the WHERE predicate. Accepts an arrow function that is parsed to IR at runtime. */
+  where(predicate: (entity: T) => boolean, params?: Record<string, unknown>): this;
   where(predicate: IrNode | ((entity: T) => boolean), params?: Record<string, unknown>): this {
     if (params) Object.assign(this.state.whereParams, params);
     this.state.whereIr = resolveWhereIr(
@@ -104,9 +113,10 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
-  /** Append an ORDER BY clause. Accepts a pre-built IrOrderBy, a dot-separated
-   *  column string, or an arrow function parsed to a member path at runtime. */
+  /** @internal — used by the TypeScript transformer */
   orderBy(ir: IrOrderBy): this;
+  /** Append an ORDER BY clause. Accepts a dot-separated column string or
+   *  an arrow function parsed to a member path at runtime. */
   orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
   orderBy(
     colOrIr: IrOrderBy | string | ((row: T) => unknown),
@@ -118,22 +128,27 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
+  /** Adds an INNER JOIN for the given relation keys or accessor function. */
   innerJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
     return this.addJoinHints(keysOrFn, "inner");
   }
 
+  /** Adds a LEFT JOIN for the given relation keys or accessor function. */
   leftJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
     return this.addJoinHints(keysOrFn, "left");
   }
 
+  /** Adds a RIGHT JOIN for the given relation keys or accessor function. */
   rightJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
     return this.addJoinHints(keysOrFn, "right");
   }
 
+  /** Adds a CROSS JOIN for the given relation keys or accessor function. */
   crossJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
     return this.addJoinHints(keysOrFn, "cross");
   }
 
+  /** Adds a FULL OUTER JOIN for the given relation keys or accessor function. */
   fullJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
     return this.addJoinHints(keysOrFn, "full");
   }
@@ -157,10 +172,12 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
-  /** Set the SELECT projection. Accepts an arrow function (parsed to IrSelect at runtime),
-   *  a plain column-name array, or a raw IrSelect node. */
+  /** Sets the SELECT projection using an arrow function parsed at runtime or by the TypeScript transformer. */
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U>;
-  select(columnsOrIr: string[] | IrSelect): QueryBuilder<C, T>;
+  /** Sets the SELECT projection using an explicit list of column names. */
+  select(columns: string[]): QueryBuilder<C, T>;
+  /** @internal — used by the TypeScript transformer */
+  select(ir: IrSelect): QueryBuilder<C, T>;
   select(
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>),
   ): QueryBuilder<C, unknown> {
@@ -170,6 +187,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
+  /** Adds a GROUP BY clause. Accepts column names, index numbers, or an arrow function selecting group-by fields. */
   groupBy(
     columnOrFn: string | string[] | number | number[] | ((row: EntityInstance<C>) => unknown),
     ...rest: (string | number)[]
@@ -188,6 +206,10 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
+  /** @internal — used by the TypeScript transformer */
+  having(predicate: IrNode, params?: Record<string, unknown>): this;
+  /** Adds a HAVING clause to filter aggregated groups (use together with `groupBy`). */
+  having(predicate: (row: EntityInstance<C>) => boolean, params?: Record<string, unknown>): this;
   having(
     predicate: IrNode | ((row: EntityInstance<C>) => boolean),
     params?: Record<string, unknown>,
@@ -230,7 +252,9 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     );
   }
 
+  /** Inserts an entity and its nested related entities in a single transactional operation. */
   async insertGraph(graph: Record<string, unknown>): Promise<EntityInstance<C>>;
+  /** Inserts multiple entities and their nested related entities in a single transactional operation. */
   async insertGraph(graphs: Record<string, unknown>[]): Promise<EntityInstance<C>[]>;
   async insertGraph(
     input: Record<string, unknown> | Record<string, unknown>[],
@@ -428,6 +452,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return qe.query(sql, params) as Promise<Record<string, unknown>[]>;
   }
 
+  /** @internal */
   protected expandWithSentinels(
     dialect: DialectImpl,
     sql: string,
@@ -454,12 +479,15 @@ export class InsertBuilder<C extends AnyEntityClass, R>
   implements PromiseLike<R>
 {
   private _conflictCols?: string[];
+  private readonly _payload: Record<string, unknown> | Record<string, unknown>[];
 
+  /** @internal */
   constructor(
     state: QueryState<EntityInstance<C>>,
-    private readonly _payload: Record<string, unknown> | Record<string, unknown>[],
+    payload: Record<string, unknown> | Record<string, unknown>[],
   ) {
     super(state);
+    this._payload = payload;
   }
 
   /** Store the conflict target columns; returns `this` for chaining. */

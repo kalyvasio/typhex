@@ -89,6 +89,7 @@ export interface IrAggregate {
   separator?: string; // for GROUP_CONCAT / STRING_AGG
 }
 
+/** Sort direction for `orderBy`: `'asc'` (ascending) or `'desc'` (descending). */
 export type OrderDirection = "asc" | "desc";
 
 export interface IrOrderBy {

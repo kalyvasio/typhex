@@ -1,6 +1,7 @@
 import type { Dialect } from "../dialect.js";
 import type { Trx } from "../orm/trx.js";
 
+/** Options forwarded to the underlying driver when beginning a transaction. */
 export interface TransactionOptions {
   /** ANSI isolation level. SQLite only supports "SERIALIZABLE" (mapped to BEGIN IMMEDIATE). */
   isolationLevel?: "READ_UNCOMMITTED" | "READ_COMMITTED" | "REPEATABLE_READ" | "SERIALIZABLE";
@@ -39,17 +40,20 @@ export interface ExecuteResult {
 
 /** A dedicated connection acquired from the pool — used inside transactions. */
 export interface Connection {
+  /** The SQL dialect this connection speaks. */
   readonly dialect: Dialect;
   /**
    * Execute any SQL statement on this dedicated connection.
    * See Driver.execute() for the implementer mapping guide.
    */
   execute(sql: string, params?: unknown[]): Promise<ExecuteResult>;
+  /** Returns this connection to the pool. */
   release(): Promise<void>;
 }
 
 /** Thin adapter — raw DB operations only. Transaction logic lives in Db. */
 export interface Driver {
+  /** The SQL dialect this driver targets. */
   readonly dialect: Dialect;
   /**
    * Execute any SQL statement. Returns rows (for SELECT) and mutation
@@ -65,5 +69,6 @@ export interface Driver {
   connect(): Promise<Connection>;
   /** Create a dialect-specific transaction scope for the given connection. */
   createTrx(conn: Connection, options?: TransactionOptions): Trx;
+  /** Closes all pooled connections and tears down the driver. */
   close(): Promise<void>;
 }

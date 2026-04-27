@@ -26,25 +26,43 @@ function toBindable(value: unknown): unknown {
   return value;
 }
 
+/** Options for `createPostgresDriver`: `connectionString` (or alias `url`) and optional pool sizing. */
 export interface PostgresDriverOptions {
+  /** Full PostgreSQL connection string (e.g. `postgres://user:pass@host/db`). */
   connectionString?: string;
+  /** Alias for `connectionString`. Useful when reading from a config file. */
+  url?: string;
+  /** PostgreSQL server hostname (used when `connectionString` is not provided). */
   host?: string;
+  /** PostgreSQL server port (default: `5432`). */
   port?: number;
+  /** Database name (default: `'postgres'`). */
   database?: string;
+  /** Database user. */
   user?: string;
+  /** Database password. */
   password?: string;
+  /** SSL configuration forwarded to `pg`. */
   ssl?: pg.ConnectionConfig["ssl"];
+  /** Minimum pool connections to keep open (default: `2`). */
   poolMin?: number;
+  /** Maximum pool size (default: `10`). */
   poolMax?: number;
+  /** Milliseconds before an idle connection is released (default: `30000`). */
   idleTimeoutMs?: number;
+  /** Milliseconds to wait for a connection from the pool (default: `5000`). */
   connectionTimeoutMs?: number;
+  /** PostgreSQL `statement_timeout` in milliseconds (not set by default). */
   statementTimeoutMs?: number;
+  /** Custom error logger for pool errors (defaults to `console.error`). */
   logger?: { error: (msg: string, err: Error) => void };
 }
 
+/** Creates a PostgreSQL driver backed by `pg`. */
 export function createPostgresDriver(options: PostgresDriverOptions): Driver {
-  const baseConfig = options.connectionString
-    ? { connectionString: options.connectionString }
+  const connectionString = options.connectionString ?? options.url;
+  const baseConfig = connectionString
+    ? { connectionString }
     : {
         host: options.host ?? "localhost",
         port: options.port ?? 5432,

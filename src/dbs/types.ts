@@ -6,8 +6,9 @@ import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
 import type { Connection, ExecuteResult, Driver } from "../driver/types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import type { RelationJoinInfo } from "../orm/helpers/relations/relation-joins.js";
+import type { Dialect } from "../dialect.js";
 
-export type Dialect = "sqlite" | "postgres";
+export type { Dialect };
 
 /** Column definition: string (all dialects) or per-dialect map. */
 export type ColumnDef = string | { [K in Dialect]?: string };
@@ -46,6 +47,7 @@ export interface DbColumnInfo {
   pk: number;
 }
 
+/** A single schema change action produced by `diffSchema` (add/drop table or column, alter column). */
 export type DiffAction =
   | { kind: "add_table"; table: string; schema: Record<string, ColumnDef> }
   | { kind: "drop_table"; table: string }

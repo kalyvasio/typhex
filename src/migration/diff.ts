@@ -8,6 +8,7 @@ import type { DiffAction } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import { getDbMigrations } from "../dbs/index.js";
 
+/** Compares entity definitions against the live database schema and returns the list of pending `DiffAction` items. */
 export async function diffSchema(
   driver: Driver,
   entities: readonly RegisteredEntity[],

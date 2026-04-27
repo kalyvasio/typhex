@@ -29,11 +29,11 @@ describe("Db", () => {
     });
   });
 
-  describe("getDriver()", () => {
+  describe("driver", () => {
     it("returns the underlying driver", async () => {
       const driver = freshDriver();
       const db = new Db(driver);
-      expect(db.getDriver()).toBe(driver);
+      expect(db.driver).toBe(driver);
       await db.close();
     });
   });

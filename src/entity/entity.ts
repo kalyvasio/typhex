@@ -28,8 +28,7 @@ import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
 import { getActiveTrx } from "../orm/db.js";
 
-/** Loaded value for a relation (data only when E is a concrete entity class; when E is unknown or any, use queryable type so subclass declare can narrow). */
-/** When E is concrete: use EntityInstance<E>[]/E so type flows from rel.oneToMany(() => Employee) without declare. When E is unknown (circular refs): use broad type so declare provides. */
+/** Resolved relation value type for a `RelationDef` R: an array for to-many, a single instance for to-one. */
 export type RelationLoadedValue<R> =
   R extends RelationDef<infer E, infer TType>
     ? E extends AnyEntityClass
@@ -45,40 +44,44 @@ export type RelationLoadedValue<R> =
         : EntityBase
     : never;
 
-/** Unified row type: materialized columns + loaded relation data + EntityBase. */
+/** Base row type: materialized columns merged with loaded relation values and `EntityBase`. */
 export type Row<TShape extends Record<string, unknown>, TRels extends RelationsMap = {}> = Flatten<
   MaterializeShape<TShape> & { [K in keyof TRels]: RelationLoadedValue<TRels[K]> }
 > &
   EntityBase;
 
-/** Canonical static entity contract used across entity/query/relation type layers. */
+/** Structural interface satisfied by every entity class returned by `Entity()`. */
 export interface AnyEntityClass {
+  /** The table descriptor: name, schema, and relations. */
   table: TableDef<Record<string, string>, RelationsMap>;
+  /** Returns a `QueryBuilder` scoped to this entity, optionally within a transaction or `Db` instance. */
   query<C extends AnyEntityClass>(
     this: C,
     executor?: QueryExecutor,
   ): QueryBuilder<C, EntityInstance<C>>;
+  /** Runs `fn` inside a transaction on the default (or entity-scoped) database. */
   transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T>;
 }
 
-/** Extract schema/relations from an entity class. */
+/** The raw schema record declared on entity E. */
 export type EntitySchema<E extends AnyEntityClass> =
   E["table"] extends TableDef<infer S, any> ? S : never;
+/** The `RelationsMap` declared on entity E. */
 export type EntityRelations<E extends AnyEntityClass> =
   E["table"] extends TableDef<any, infer R> ? R : never;
 
-/** Canonical materialized fields and relation targets. */
+/** Materialized column types of entity E (e.g. `{ id: number; name: string }`). */
 export type EntityFields<E extends AnyEntityClass> = Materialized<EntitySchema<E>>;
-/** Instance type of the related entity. When relation target is entity class E, yields EntityInstance<E>. */
+/** Resolved type for a `RelationDef` R: the related entity instance, or the raw target type. */
 export type RelationTarget<R> =
   R extends RelationDef<infer E, any> ? (E extends AnyEntityClass ? EntityInstance<E> : E) : never;
 
-/** Relation properties with .query() — use only as select callback parameter (SelectRow). */
+/** Relation properties of E typed as lazy query builders (`RelationQueryable`). */
 export type EntityRelationProps<E extends AnyEntityClass> = {
   [K in keyof EntityRelations<E>]: RelationQueryable<EntityRelations<E>[K]>;
 };
 
-/** Loaded relation properties (data only, no .query()) for entity instances. */
+/** Relation properties of E typed as loaded values (arrays or single instances). */
 export type EntityRelationPropsLoaded<E extends AnyEntityClass> = {
   [K in keyof EntityRelations<E>]: RelationLoadedValue<EntityRelations<E>[K]>;
 };
@@ -109,10 +112,10 @@ export type SelectRow<E extends AnyEntityClass> = E extends new (...args: any[])
     : SelectRowFromTable<E>
   : SelectRowFromTable<E>;
 
-/** Backward-compatible alias for entity instance extraction. */
+/** Alias for `EntityInstance<E>`; resolves to `never` when E is not an entity class. */
 export type EntityRow<E> = E extends AnyEntityClass ? EntityInstance<E> : never;
 
-/** Resolve entity class from instance type (e.g. Post) or pass-through if already a class. Use for OneToMany<Post> with import type. */
+/** Extracts the entity class from an entity instance type. */
 export type EntityClassOf<T> =
   T extends EntityInstance<infer E> ? E : T extends AnyEntityClass ? T : never;
 
@@ -146,13 +149,15 @@ function createTableDef<
   };
 }
 
-/** Entity class type: 3 params only (table, schema def, relations). Use .query() for insert, findById, where, etc. */
+/** Typed entity class returned by `Entity()`. Extends `AnyEntityClass` with schema-specific types. */
 export interface EntityClass<
   _TTable extends string,
   TSchema extends Record<string, string>,
   TRels extends RelationsMap = {},
 > extends AnyEntityClass {
+  /** Construct a new (unsaved) entity instance with optional partial data. */
   new (data?: Partial<InferTable<TSchema>>): Row<Materialized<TSchema>, TRels>;
+  /** Typed table descriptor for this entity. */
   table: TableDef<TSchema, TRels>;
 }
 

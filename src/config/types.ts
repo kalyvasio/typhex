@@ -5,6 +5,7 @@
 
 import type { Dialect } from "../dialect.js";
 
+/** Typhex configuration: dialect, connection details, and paths. */
 export interface TyphexConfig {
   /** Database dialect */
   dialect: Dialect;
