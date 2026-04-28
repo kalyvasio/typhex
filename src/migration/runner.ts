@@ -26,11 +26,15 @@ async function getApplied(driver: Driver): Promise<Set<string>> {
   return new Set(rows.map((r) => r.name));
 }
 
+/** Result returned by `runMigrations`: lists of applied and skipped migration file names. */
 export interface MigrationResult {
+  /** Names of migration files that were applied in this run. */
   applied: string[];
+  /** Names of migration files that were already applied and skipped. */
   skipped: string[];
 }
 
+/** Applies all pending migration files from `dir` in chronological order. */
 export async function runMigrations(driver: Driver, dir: string): Promise<MigrationResult> {
   const applied = await getApplied(driver);
   const files = readdirSync(dir)
@@ -79,6 +83,7 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
   return result;
 }
 
+/** Returns which migration files have been applied and which are pending. */
 export async function migrationStatus(
   driver: Driver,
   dir: string,

@@ -43,6 +43,7 @@ async function loadConfigFile(filePath: string): Promise<Partial<TyphexConfig>> 
   };
 }
 
+/** Options for `loadConfig`. All fields are optional; omit to use auto-discovery. */
 export interface LoadConfigOptions {
   /** Explicit config file path */
   configPath?: string;

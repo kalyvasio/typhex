@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { Db, createSqliteDriver, Entity, rel, IrNode } from "../../src/index.js";
+import { Db, createSqliteDriver, Entity, rel } from "../../src/index.js";
+import type { IrNode } from "../../src/ir/types.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 
 // Entities for multi-relation JOIN tests

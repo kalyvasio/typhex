@@ -52,6 +52,7 @@ function groupByTable(actions: DiffAction[]): GroupedActions[] {
   return [...groupBy(actions, (a) => a.table)].map(([table, actions]) => ({ table, actions }));
 }
 
+/** Generates SQL migration files from entity definitions compared to the live database schema. */
 export async function generateMigrationFiles(
   driver: Driver,
   entities: readonly RegisteredEntity[],

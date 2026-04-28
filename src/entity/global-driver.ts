@@ -18,8 +18,11 @@ export function setDefaultDb(db: Db | null): void {
   defaultDb = db;
 }
 
+/** Minimal view of an entity class as held in the global registry. */
 export interface RegisteredEntity {
+  /** Table name and schema, used for migrations and validation. */
   table: { _table: string; _schema: Record<string, string> };
+  /** Called once after registration to wire up many-to-many junction relations. */
   _registerJunctions?: () => void;
 }
 

@@ -17,13 +17,17 @@ import { loadConfig } from "../config/load-config.js";
 import { Trx, getActiveTrx, runInTrxStorage } from "./trx.js";
 export { Trx, getActiveTrx };
 
-/** Minimal interface satisfied by both Db and Trx — used as QueryState.qe. */
+/** Minimal interface satisfied by both `Db` and `Trx` — pass either as the executor for query builders. */
 export interface QueryExecutor {
+  /** The SQL dialect in use. */
   readonly dialect: Dialect;
+  /** Runs a SQL query and returns all result rows. */
   query(sql: string, params?: unknown[]): Promise<unknown[]>;
+  /** Executes a SQL statement and returns affected-row metadata. */
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }>;
 }
 
+/** Options passed to the `Db` constructor: either a pre-built driver or dialect + connection details. */
 export type DbOptions =
   | { driver: Driver; migrationsFolder?: string }
   | {
@@ -40,7 +44,9 @@ function isDriver(v: unknown): v is Driver {
 /** Internal symbol: only used for the Db internal constructor overload. */
 const INTERNAL = Symbol("db-internal");
 
+/** Root database class. Create via `new Db(options)` or `Db.fromConfig()`. */
 export class Db implements QueryExecutor {
+  /** @internal */
   protected _driver: Driver;
   private _migrationsFolder: string;
 
@@ -67,20 +73,29 @@ export class Db implements QueryExecutor {
     return new Db(config);
   }
 
+  /** The SQL dialect used by this `Db` instance. */
   get dialect(): Dialect {
     return this._driver.dialect;
   }
 
+  /** The underlying database driver. */
+  get driver(): Driver {
+    return this._driver;
+  }
+
+  /** Runs a SQL query and returns all result rows. */
   query(sql: string, params?: unknown[]): Promise<unknown[]> {
     return this._driver.execute(sql, params).then((r) => r.rows);
   }
 
+  /** Executes a SQL statement and returns affected-row metadata. */
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }> {
     return this._driver
       .execute(sql, params)
       .then((r) => ({ lastID: r.lastID, changes: r.changes }));
   }
 
+  /** Runs `fn` inside a transaction; commits on success, rolls back on error. */
   async transaction<T>(fn: (trx: Trx) => Promise<T>, options?: TransactionOptions): Promise<T> {
     const conn = await this._driver.connect();
     const trx = this._driver.createTrx(conn, options);
@@ -112,11 +127,6 @@ export class Db implements QueryExecutor {
     const trx = this._driver.createTrx(conn, options);
     await trx._initRoot(() => conn.release());
     return trx;
-  }
-
-  /** @deprecated Use the driver field directly. */
-  getDriver(): Driver {
-    return this._driver;
   }
 
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
@@ -186,6 +196,7 @@ export class Db implements QueryExecutor {
     return migStatus(this._driver, dir);
   }
 
+  /** Closes the underlying database connection pool. */
   async close(): Promise<void> {
     setDefaultDb(null);
     await this._driver.close();

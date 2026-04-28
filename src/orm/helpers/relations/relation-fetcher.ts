@@ -8,7 +8,7 @@ import type { RelationFetchMetadata } from "./relation-context-builder.js";
 import type { IrSelectRelation } from "../../../ir/types.js";
 import { whereAnd, makeCompositeKey, buildFetchByIdIr } from "../../query-helpers.js";
 import { getEntityByTableName } from "../../../entity/global-driver.js";
-import { AnyEntityClass } from "../../../entity/index.js";
+import type { AnyEntityClass } from "../../../entity/entity.js";
 import { groupBy } from "../../../utils.js";
 
 /** Run one WHERE IN query per pending relation fetch and collect results into keyed maps.

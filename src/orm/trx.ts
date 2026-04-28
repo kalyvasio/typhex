@@ -23,19 +23,27 @@ interface TrxContext {
   isNested: boolean;
 }
 
+/** Base transaction class. Use `Db.transaction()` or `Db.beginTrx()` to obtain a `Trx` instance. */
 export abstract class Trx {
   /** Dialect-level defaults merged with user-provided options. Override in subclasses. */
   static readonly defaultOptions: TransactionOptions = {};
 
+  /** @internal */
   protected _depth = 0;
+  /** @internal */
   protected readonly _spRoot: { n: number };
+  /** @internal */
   protected readonly _savepointName?: string;
+  /** @internal */
   protected _cleanup?: () => Promise<void>;
+  /** @internal */
   protected readonly _isNested: boolean;
-  /** Effective options: dialect defaults merged with caller-provided options. */
+  /** @internal */
   protected readonly _options: TransactionOptions;
 
+  /** @internal — Trx instances are created by `Db.transaction()` */
   constructor(
+    /** @internal */
     protected readonly _conn: Connection,
     options?: TransactionOptions,
     ctx?: TrxContext,
@@ -49,26 +57,31 @@ export abstract class Trx {
 
   // ── QueryExecutor ──────────────────────────────────────────────────────────
 
+  /** The SQL dialect in use. */
   get dialect(): Dialect {
     return this._conn.dialect;
   }
 
+  /** Runs a SQL query within this transaction. */
   query(sql: string, params?: unknown[]): Promise<unknown[]> {
     return this._conn.execute(sql, params).then((r) => r.rows);
   }
 
+  /** Executes a SQL statement within this transaction. */
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }> {
     return this._conn.execute(sql, params).then((r) => ({ lastID: r.lastID, changes: r.changes }));
   }
 
   // ── Callback API ───────────────────────────────────────────────────────────
 
+  /** Opens a nested savepoint transaction if already inside a transaction, otherwise begins a root transaction. */
   async transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T> {
     return !this._isNested && this._depth === 0
       ? this._beginTransaction(fn)
       : this._nestedTransaction(fn);
   }
 
+  /** @internal */
   protected async _beginTransaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T> {
     await this.begin();
     try {
@@ -87,6 +100,7 @@ export abstract class Trx {
     }
   }
 
+  /** @internal */
   protected async _nestedTransaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T> {
     const nested = await this.beginTrx();
     try {

@@ -39,6 +39,8 @@
     "format:check": "prettier --check .",
     "check": "pnpm run lint && pnpm run format:check && pnpm run build",
     "bench": "tsx benchmarks/performance.ts",
+    "api:check": "pnpm run build && api-extractor run",
+    "api:update": "pnpm run build && api-extractor run --local",
     "test": "vitest run",
     "test:sqlite": "vitest run --exclude 'tests/integration/scenarios-postgres.test.ts'",
     "sqlite:version": "node -e \"const Database = require('better-sqlite3'); const db = new Database(':memory:'); console.log('SQLite ' + db.prepare('select sqlite_version() as version').get().version); db.close();\"",
@@ -68,6 +70,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@microsoft/api-extractor": "^7.58.7",
     "@types/acorn": "^4.0.6",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.10.1",

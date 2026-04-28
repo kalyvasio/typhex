@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src";
 import { whereColumnEq } from "../../src/orm/query-helpers.js";
-import type { IrNode, IrSelect } from "../../src";
-import { isIrSelect } from "../../src";
+import { isIrSelect, type IrNode, type IrSelect } from "../../src/ir/types.js";
 import { Entity } from "../../src";
 import { type MockDb, createMockDb } from "../helpers.js";
 

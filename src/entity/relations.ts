@@ -5,54 +5,77 @@
 import type { AnyEntityClass, EntityClassOf, EntityInstance, SelectRow } from "./entity.js";
 import type { EntityBase } from "./types.js";
 
+/** Union of the four relation kinds. */
 export type RelationType = "one-to-one" | "many-to-one" | "one-to-many" | "many-to-many";
 
+/** FK options for to-one and to-many relations. */
 export interface RelationOptions {
+  /** Column(s) on the owning table that hold the foreign key. */
   foreignKey: string | string[];
+  /** Column(s) on the referenced table (defaults to primary key). */
   references?: string | string[];
 }
 
+/** Options for a many-to-many relation through a junction table. */
 export interface JunctionOptions {
+  /** Name of the junction (join) table. */
   junction: string;
+  /** Column(s) in the junction table that reference the owning entity. */
   foreignKey: string | string[];
+  /** Column(s) in the junction table that reference the related entity. */
   referenceKey: string | string[];
 }
 
-/** E is the target entity class (for display as RelatedEntityInstance<E>) or legacy instance type. */
+/** Internal descriptor created by the relation factory functions (`oneToOne`, `manyToOne`, etc.). */
 export interface RelationDef<_E = unknown, TType extends RelationType = RelationType> {
+  /** The relation kind string. */
   readonly _relType: TType;
+  /** Thunk returning the related entity class (deferred to handle circular imports). */
   readonly _target: () => unknown;
+  /** FK or junction options provided when defining the relation. */
   readonly _options: RelationOptions | JunctionOptions;
 }
 
-/** Type aliases for manual relation typing when inference fails (e.g. circular refs). Use with import type + generic: rel.oneToMany<Post>(() => _require("./post.js").Post, opts). */
+/** Definition type for one-to-one relations (result of `oneToOne()`). */
 export type OneToOneDef<E> = RelationDef<E, "one-to-one">;
+/** Definition type for many-to-one relations (result of `manyToOne()`). */
 export type ManyToOneDef<E> = RelationDef<E, "many-to-one">;
+/** Definition type for one-to-many relations (result of `oneToMany()`). */
 export type OneToManyDef<E> = RelationDef<E, "one-to-many">;
+/** Definition type for many-to-many relations (result of `manyToMany()`). */
 export type ManyToManyDef<E> = RelationDef<E, "many-to-many">;
 
+/** Record mapping relation property names to their `RelationDef` descriptors. */
 export type RelationsMap = Record<string, RelationDef<any, RelationType>>;
 
-/** Read-only query builder type for relations (no insert/update/delete/patch/save). */
+/** Fluent builder returned by a loaded relation's `.query()` call. */
 export interface RelationQueryBuilder<T> {
+  /** Returns a fresh query builder for this relation (resets any applied filters). */
   query(): RelationQueryBuilder<T>;
+  /** Filters the relation results using a predicate. */
   where(fn: (row: T) => boolean): RelationQueryBuilder<T>;
+  /** Adds an ORDER BY clause. */
   orderBy(col: string, dir?: string): RelationQueryBuilder<T>;
+  /** Limits the number of results returned. */
   limit(n: number): RelationQueryBuilder<T>;
+  /** Skips the first `n` results. */
   offset(n: number): RelationQueryBuilder<T>;
-  /** Return type preserves projected shape U so select().toArray() result types u.posts as U[]. */
+  /** Projects each row to a new shape; return type preserves U so `select().toArray()` is typed as `U[]`. */
   select<U>(fn: (row: T) => U): RelationQueryBuilder<U>;
+  /** Executes the query and returns all matching rows. */
   toArray(): Promise<T[]>;
+  /** Executes the query and returns the first matching row, or `undefined`. */
   first(): Promise<T | undefined>;
+  /** Executes the query and returns the row count. */
   count(): Promise<number>;
 }
 
-/** "one" = single instance + .query(), "many" = array + .query() */
+/** `'many'` for to-many relation types; `'one'` for to-one. */
 export type RelationKind<TType extends RelationType> = TType extends "one-to-many" | "many-to-many"
   ? "many"
   : "one";
 
-/** Relation property type: .query() returns RelationQueryBuilder; value is single instance or array. Row type is SelectRow so nested relations (e.g. p.comments) have .query(). */
+/** Resolved relation property type given entity class E and cardinality Kind. */
 export type RelatedEntityInstance<
   E extends AnyEntityClass,
   Kind extends "one" | "many",
@@ -60,21 +83,23 @@ export type RelatedEntityInstance<
   ? RelationQueryBuilder<SelectRow<E>> & EntityInstance<E>[]
   : SingleRelation<EntityInstance<E>>;
 
-/** Instance-type relation aliases: cleaner display than RelationQueryBuilder<E> & E[]. Use when E extends EntityBase. */
+/** Array-shaped relation property that also exposes a `.query()` builder. */
 export type ManyRelation<E extends EntityBase> = RelationQueryBuilder<E> & E[];
-/** Single relation: entity instance; author.query() returns SingleRowQueryBuilder (has patch). */
+/** Singular relation property: the related entity instance directly (not wrapped in an array). */
 export type SingleRelation<E extends EntityBase> = E;
 
-/** Normalize E (class or instance) to instance type for relation props. */
-type ToEntityInstance<E> = E extends EntityBase ? E : EntityInstance<EntityClassOf<E>>;
+/** Normalises E (entity class or instance type) to its instance type. */
+export type ToEntityInstance<E> = E extends EntityBase ? E : EntityInstance<EntityClassOf<E>>;
 
-/** Relation property types for declare on subclass. E can be entity class (typeof Post) or instance type (Post) when using import type. */
-/** When E extends EntityBase (instance type): use ManyRelation/SingleRelation so .query() yields RelationQueryBuilder<E>. EntityClassOf can resolve to AnyEntityClass in circular refs. */
+/** Relation property type for one-to-many associations. Declare on entity subclasses. */
 export type OneToMany<E extends AnyEntityClass | EntityBase> = E extends EntityBase
   ? ManyRelation<E>
   : RelatedEntityInstance<EntityClassOf<E>, "many">;
+/** Relation property type for many-to-one associations. Declare on entity subclasses. */
 export type ManyToOne<E extends AnyEntityClass | EntityBase> = SingleRelation<ToEntityInstance<E>>;
+/** Relation property type for one-to-one associations. Declare on entity subclasses. */
 export type OneToOne<E extends AnyEntityClass | EntityBase> = SingleRelation<ToEntityInstance<E>>;
+/** Relation property type for many-to-many associations. Declare on entity subclasses. */
 export type ManyToMany<E extends AnyEntityClass | EntityBase> = E extends EntityBase
   ? ManyRelation<E>
   : RelatedEntityInstance<EntityClassOf<E>, "many">;
@@ -84,7 +109,7 @@ export type UntypedOneToMany = RelationQueryBuilder<SelectRow<any>> & EntityInst
 /** @deprecated Prefer ManyToOne<Post> with import type + EntityClassOf. Kept for backward compatibility. */
 export type UntypedManyToOne = RelationQueryBuilder<SelectRow<any>> & EntityInstance<any>;
 
-/** Resolve the queryable type for a relation. Uses RelatedEntityInstance when target is entity class. */
+/** Converts a `RelationDef` to its runtime queryable shape (array builder or single instance). */
 export type RelationQueryable<R> =
   R extends RelationDef<infer E, infer TType>
     ? E extends AnyEntityClass
@@ -107,6 +132,7 @@ export function oneToOne<E extends AnyEntityClass>(
   target: () => E,
   options: RelationOptions,
 ): RelationDef<E, "one-to-one">;
+/** oneToOne overload for generic target types (use with `import type` thunks). */
 export function oneToOne<TTarget>(
   target: () => { _selectType: TTarget },
   options: RelationOptions,
@@ -128,6 +154,7 @@ export function manyToOne<E extends AnyEntityClass>(
   target: () => E,
   options: RelationOptions,
 ): RelationDef<E, "many-to-one">;
+/** manyToOne overload for generic target types (use with `import type` thunks). */
 export function manyToOne<TTarget>(
   target: () => { _selectType: TTarget },
   options: RelationOptions,
@@ -149,6 +176,7 @@ export function oneToMany<E extends AnyEntityClass>(
   target: () => E,
   options: { foreignKey: string | string[] },
 ): RelationDef<E, "one-to-many">;
+/** oneToMany overload for generic target types (use with `import type` thunks). */
 export function oneToMany<TTarget>(
   target: () => { _selectType: TTarget },
   options: { foreignKey: string | string[] },
@@ -170,6 +198,7 @@ export function manyToMany<E extends AnyEntityClass>(
   target: () => E,
   options: JunctionOptions,
 ): RelationDef<E, "many-to-many">;
+/** manyToMany overload for generic target types (use with `import type` thunks). */
 export function manyToMany<TTarget>(
   target: () => { _selectType: TTarget },
   options: JunctionOptions,
@@ -186,6 +215,7 @@ export function manyToMany(
   return makeRelation("many-to-many", target, options);
 }
 
+/** Namespace object grouping all relation factory functions (`rel.oneToMany(…)`, etc.). */
 export const rel = {
   oneToOne,
   manyToOne,

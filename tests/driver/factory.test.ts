@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createDriver } from "../../src/driver/factory.js";
 
 describe("driver/factory", () => {
@@ -14,6 +17,19 @@ describe("driver/factory", () => {
     const driver = createDriver({ dialect: "sqlite", database: ":memory:" });
     expect(driver.dialect).toBe("sqlite");
     await driver.close();
+  });
+
+  it("uses sqlite database option as the file path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "typhex-driver-"));
+    const database = join(await realpath(dir), "test.sqlite");
+    const driver = createDriver({ dialect: "sqlite", database });
+    try {
+      const rows = await driver.execute("PRAGMA database_list").then((r) => r.rows);
+      expect(rows).toContainEqual(expect.objectContaining({ file: database }));
+    } finally {
+      await driver.close();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("creates postgres driver with connectionString", async () => {

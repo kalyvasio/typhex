@@ -8,3 +8,4 @@ coverage/
 /examples/test.db
 docs/.vitepress/dist
 docs/.vitepress/cache
+/temp/

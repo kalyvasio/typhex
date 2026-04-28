@@ -8,13 +8,26 @@ import { QueryBuilder } from "./query-builder.js";
 import { buildFindByIdIr } from "./query-helpers.js";
 
 export class SingleRowQueryBuilder<T = unknown> {
+  private readonly instance: Record<string, unknown>;
+  private readonly state: QueryState<unknown>;
+  private readonly runHook: (instance: unknown, name: string) => Promise<void>;
+  private readonly pkColumns: string[];
+  private readonly columnNames: string[];
+
+  /** @internal */
   constructor(
-    private readonly instance: Record<string, unknown>,
-    private readonly state: QueryState<unknown>,
-    private readonly runHook: (instance: unknown, name: string) => Promise<void>,
-    private readonly pkColumns: string[],
-    private readonly columnNames: string[],
-  ) {}
+    instance: Record<string, unknown>,
+    state: QueryState<unknown>,
+    runHook: (instance: unknown, name: string) => Promise<void>,
+    pkColumns: string[],
+    columnNames: string[],
+  ) {
+    this.instance = instance;
+    this.state = state;
+    this.runHook = runHook;
+    this.pkColumns = pkColumns;
+    this.columnNames = columnNames;
+  }
 
   /** Insert if instance has no complete pk, else update all column values. No _dirty; uses current instance state. */
   async save(): Promise<void> {

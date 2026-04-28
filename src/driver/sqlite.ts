@@ -44,14 +44,22 @@ function executeSql(
   return { rows: [], lastID: info.lastInsertRowid, changes: info.changes };
 }
 
+/** Options for `createSqliteDriver`: `path` (or alias `database`) to the SQLite file. */
 export interface SqliteDriverOptions {
-  /** Path to database file or ":memory:" */
-  path: string;
+  /** Path to database file or ":memory:". Either `path` or `database` is required. */
+  path?: string;
+  /** Alias for `path`. Useful when reading from a config file. */
+  database?: string;
 }
 
+/** Creates a SQLite driver backed by `better-sqlite3`. */
 export function createSqliteDriver(options: SqliteDriverOptions): Driver {
+  const path = options.path ?? options.database;
+  if (!path) {
+    throw new Error("createSqliteDriver: `path` (or `database`) is required");
+  }
   const Database = require("better-sqlite3") as typeof import("better-sqlite3");
-  const db = new Database(options.path);
+  const db = new Database(path);
 
   function makeConnection(): Connection {
     return {

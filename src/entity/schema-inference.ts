@@ -3,6 +3,7 @@
  * Used by Entity(table, schema, relations) for InferTable and InferInsert.
  */
 
+/** Lookup table from SQL type names to their TypeScript primitive equivalents. */
 export type SQLTypeMap = {
   integer: number;
   int: number;
@@ -31,18 +32,20 @@ export type SQLTypeMap = {
   bigserial: bigint;
 };
 
-/** Remove parenthesized part e.g. varchar(255) → varchar */
+/** Removes parenthesised precision suffixes (e.g. `varchar(255)` → `varchar`). */
 export type StripParens<S extends string> = S extends `${infer Base}(${string})${infer Rest}`
   ? `${Base}${Rest}`
   : S;
 
-/** First token (base type) of schema string, lowercased */
+/** Extracts the lowercased base SQL type from a column string (strips modifiers and precision). */
 export type ExtractSQLBase<S extends string> =
   StripParens<S> extends `${infer Base} ${string}` ? Lowercase<Base> : Lowercase<StripParens<S>>;
 
+/** Maps a SQL base type string to its TypeScript equivalent (e.g. `'integer'` → `number`). */
 export type SQLToTS<S extends string> =
   ExtractSQLBase<S> extends keyof SQLTypeMap ? SQLTypeMap[ExtractSQLBase<S>] : unknown;
 
+/** `true` when column string S is NOT NULL or PRIMARY KEY. */
 export type IsNotNull<S extends string> =
   Lowercase<S> extends `${string}not null${string}`
     ? true
@@ -50,6 +53,7 @@ export type IsNotNull<S extends string> =
       ? true
       : false;
 
+/** `true` when column string S is autoincrement, serial, or generated. */
 export type IsGenerated<S extends string> =
   Lowercase<S> extends `${string}autoincrement${string}`
     ? true
@@ -61,17 +65,18 @@ export type IsGenerated<S extends string> =
           ? true
           : false;
 
-/** Column has DEFAULT in schema → can be omitted on INSERT */
+/** `true` when column string S contains a DEFAULT clause. */
 export type HasDefault<S extends string> =
   Lowercase<S> extends `${string}default${string}` ? true : false;
 
+/** TypeScript type for a single schema column string S; includes `| null` when nullable. */
 export type InferColumnType<S extends string> =
   IsNotNull<S> extends true ? SQLToTS<S> : SQLToTS<S> | null;
 
-/** Force TypeScript to expand an intersection/mapped type into a flat object for readable tooltips. */
+/** Forces TypeScript to expand an intersection/mapped type into a flat object for readable tooltips. */
 export type Flatten<T> = { [K in keyof T]: T[K] } & {};
 
-/** Mutable view of T; used so instance/row types display as writable property types (e.g. id: number) not schema strings. */
+/** Removes `readonly` from all properties of T. */
 export type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 /** Materialized field types from schema strings (id: number, name: string, etc.). */
@@ -79,7 +84,7 @@ export type Materialized<T extends Record<string, string>> = Mutable<{
   readonly [K in keyof T]: InferColumnType<T[K]>;
 }>;
 
-/** Accept either schema literals or already-materialized shapes. */
+/** Accepts either schema literal strings or an already-materialized shape; returns the materialized form. */
 export type MaterializeShape<T extends Record<string, unknown>> =
   T extends Record<string, string> ? Materialized<T> : Mutable<T>;
 
@@ -90,8 +95,8 @@ export type InferTable<T extends Record<string, string>> = Flatten<{
   -readonly [K in keyof T]: InferColumnType<T[K]>;
 }>;
 
-/** Column can be omitted on INSERT (generated, nullable, or has default). */
-type OptionalOnInsert<S extends string> =
+/** `true` when a column may be omitted on INSERT (generated, nullable, or has DEFAULT). */
+export type OptionalOnInsert<S extends string> =
   IsGenerated<S> extends true
     ? true
     : IsNotNull<S> extends false
