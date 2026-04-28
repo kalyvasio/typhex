@@ -21,7 +21,7 @@ describe("Db migration API (integration)", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("generateMigrations creates ordered .sql files for new entities", async () => {
+  it("generateMigrations creates ordered .js files for new entities", async () => {
     Entity("users", {
       id: "integer primary key autoincrement",
       name: "text not null",
@@ -44,8 +44,8 @@ describe("Db migration API (integration)", () => {
 
     const written = readdirSync(tmpDir).sort();
     expect(written).toHaveLength(2);
-    expect(written[0]).toMatch(/users_table\.sql$/);
-    expect(written[1]).toMatch(/posts_table\.sql$/);
+    expect(written[0]).toMatch(/users_table\.js$/);
+    expect(written[1]).toMatch(/posts_table\.js$/);
   });
 
   it("runMigrations applies generated scripts", async () => {
@@ -92,7 +92,7 @@ describe("Db migration API (integration)", () => {
     const files = await db.generateMigrations(tmpDir);
     expect(files).toHaveLength(1);
     expect(files[0].name).toMatch(/add_age_column_on_users$/);
-    expect(files[0].sql).toContain("ADD COLUMN");
+    expect(files[0].upSql).toContain("ADD COLUMN");
 
     await db.close();
   });

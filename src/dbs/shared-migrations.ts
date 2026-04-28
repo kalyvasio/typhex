@@ -49,18 +49,28 @@ export async function diffSchemaBase(
 
     for (const dbCol of dbCols) {
       if (!entityCols.has(dbCol.name)) {
-        actions.push({ kind: "drop_column", table, column: dbCol.name });
+        actions.push({ kind: "drop_column", table, column: dbCol.name, columnInfo: dbCol });
       }
     }
   }
 
   for (const dbTable of dbTables) {
     if (!entityTables.has(dbTable)) {
-      actions.push({ kind: "drop_table", table: dbTable });
+      const columnInfos = await getDbColumns(dbTable);
+      actions.push({ kind: "drop_table", table: dbTable, columnInfos });
     }
   }
 
   return actions;
+}
+
+/** Reconstruct a column definition string from DbColumnInfo (best-effort, dialect-agnostic). */
+export function reconstructColDef(col: DbColumnInfo): string {
+  let def = col.type;
+  if (col.pk) def += " PRIMARY KEY";
+  else if (col.notnull) def += " NOT NULL";
+  if (col.dflt_value !== null) def += ` DEFAULT ${col.dflt_value}`;
+  return def;
 }
 
 /** Generate SQL for the common DiffAction kinds (all except alter_column).
@@ -80,6 +90,28 @@ export function generateCommonSql(action: DiffAction, dialect: DialectImpl): str
       return `ALTER TABLE ${esc(action.table)} ADD COLUMN ${esc(action.column)} ${dialect.toColumnDef(action.definition)};`;
     case "drop_column":
       return `ALTER TABLE ${esc(action.table)} DROP COLUMN ${esc(action.column)};`;
+    default:
+      return null;
+  }
+}
+
+/** Generate reverse (down) SQL for the common DiffAction kinds.
+ *  Returns null for alter_column — each dialect handles that case differently. */
+export function generateCommonDownSql(action: DiffAction, dialect: DialectImpl): string | null {
+  const esc = dialect.escapeIdentifier.bind(dialect);
+  switch (action.kind) {
+    case "add_table":
+      return `DROP TABLE IF EXISTS ${esc(action.table)};`;
+    case "drop_table": {
+      const cols = action.columnInfos.map(
+        (c) => `  ${esc(c.name)} ${reconstructColDef(c)}`
+      );
+      return `CREATE TABLE IF NOT EXISTS ${esc(action.table)} (\n${cols.join(",\n")}\n);`;
+    }
+    case "add_column":
+      return `ALTER TABLE ${esc(action.table)} DROP COLUMN ${esc(action.column)};`;
+    case "drop_column":
+      return `ALTER TABLE ${esc(action.table)} ADD COLUMN ${esc(action.column)} ${reconstructColDef(action.columnInfo)};`;
     default:
       return null;
   }

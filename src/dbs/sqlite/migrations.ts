@@ -6,7 +6,7 @@ import type { Driver, DbMigrations, DiffAction, DbColumnInfo } from "../types.js
 import { getColumnDef } from "../types.js";
 import { sqliteDialect } from "./dialect.js";
 import type { RegisteredEntity } from "../../entity/global-driver.js";
-import { diffSchemaBase, generateCommonSql } from "../shared-migrations.js";
+import { diffSchemaBase, generateCommonSql, generateCommonDownSql } from "../shared-migrations.js";
 
 export const sqliteMigrations: DbMigrations = {
   dialect: "sqlite",
@@ -58,5 +58,21 @@ export const sqliteMigrations: DbMigrations = {
   getRecordMigrationSql(): string {
     const esc = sqliteDialect.escapeIdentifier.bind(sqliteDialect);
     return `INSERT INTO ${esc("_typhex_migrations")} (${esc("name")}) VALUES (?)`;
+  },
+
+  getDeleteMigrationSql(): string {
+    const esc = sqliteDialect.escapeIdentifier.bind(sqliteDialect);
+    return `DELETE FROM ${esc("_typhex_migrations")} WHERE ${esc("name")} = ?`;
+  },
+
+  generateDownSql(action: DiffAction): string {
+    const shared = generateCommonDownSql(action, sqliteDialect);
+    if (shared !== null) return shared;
+    // alter_column: SQLite does not support it natively
+    const a = action as Extract<DiffAction, { kind: "alter_column" }>;
+    return (
+      `-- SQLite does not support ALTER COLUMN. Recreate the table to change column type.\n` +
+      `-- Column "${a.column}" on "${a.table}": ${getColumnDef(a.newDef, "sqlite")} → ${a.oldDef}`
+    );
   },
 };

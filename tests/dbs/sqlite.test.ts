@@ -320,6 +320,69 @@ describe("dbs/sqlite", () => {
       expect(sql).toContain("autoincrement");
     });
 
+    it("generateSql explains SQLite alter_column limitation", () => {
+      const action = {
+        kind: "alter_column" as const,
+        table: "users",
+        column: "age",
+        oldDef: "TEXT",
+        newDef: "integer",
+      };
+      const sql = sqliteMigrations.generateSql(action);
+      expect(sql).toContain("SQLite does not support ALTER COLUMN");
+      expect(sql).toContain('Column "age" on "users": TEXT');
+    });
+
+    it("generateDownSql produces reverse SQLite DDL", () => {
+      const addTable = sqliteMigrations.generateDownSql({
+        kind: "add_table",
+        table: "users",
+        schema: { id: "integer primary key" },
+      });
+      expect(addTable).toContain('DROP TABLE IF EXISTS "users"');
+
+      const dropTable = sqliteMigrations.generateDownSql({
+        kind: "drop_table",
+        table: "users",
+        columnInfos: [
+          { name: "id", type: "INTEGER", notnull: 0, dflt_value: null, pk: 1 },
+          { name: "name", type: "TEXT", notnull: 1, dflt_value: "'anon'", pk: 0 },
+        ],
+      });
+      expect(dropTable).toContain('CREATE TABLE IF NOT EXISTS "users"');
+      expect(dropTable).toContain('"id" INTEGER PRIMARY KEY');
+      expect(dropTable).toContain('"name" TEXT NOT NULL DEFAULT \'anon\'');
+
+      const addColumn = sqliteMigrations.generateDownSql({
+        kind: "add_column",
+        table: "users",
+        column: "age",
+        definition: "integer",
+      });
+      expect(addColumn).toContain('DROP COLUMN "age"');
+
+      const dropColumn = sqliteMigrations.generateDownSql({
+        kind: "drop_column",
+        table: "users",
+        column: "age",
+        columnInfo: { name: "age", type: "INTEGER", notnull: 0, dflt_value: null, pk: 0 },
+      });
+      expect(dropColumn).toContain('ADD COLUMN "age" INTEGER');
+    });
+
+    it("generateDownSql explains SQLite alter_column rollback limitation", () => {
+      const action = {
+        kind: "alter_column" as const,
+        table: "users",
+        column: "age",
+        oldDef: "TEXT",
+        newDef: "integer",
+      };
+      const sql = sqliteMigrations.generateDownSql(action);
+      expect(sql).toContain("SQLite does not support ALTER COLUMN");
+      expect(sql).toContain('Column "age" on "users": integer');
+    });
+
     it("getTrackingTableDdl produces SQLite DDL", () => {
       const ddl = sqliteMigrations.getTrackingTableDdl();
       expect(ddl).toContain("_typhex_migrations");
@@ -330,6 +393,12 @@ describe("dbs/sqlite", () => {
     it("getRecordMigrationSql uses ? placeholder", () => {
       const sql = sqliteMigrations.getRecordMigrationSql();
       expect(sql).toContain("INSERT INTO");
+      expect(sql).toContain("?");
+    });
+
+    it("getDeleteMigrationSql uses ? placeholder", () => {
+      const sql = sqliteMigrations.getDeleteMigrationSql();
+      expect(sql).toContain("DELETE FROM");
       expect(sql).toContain("?");
     });
   });

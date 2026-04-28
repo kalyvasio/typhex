@@ -9,6 +9,7 @@ import { Entity } from "../../src/entity/entity.js";
 import { Db } from "../../src/orm/db.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
+import type { Driver } from "../../src/driver/types.js";
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
@@ -62,7 +63,7 @@ describe("dbs/postgres", () => {
           ["Alice", 30],
           ["Bob", 25],
         ],
-        "id",
+        ["id"],
       );
       expect(sql).toContain('INSERT INTO "users"');
       expect(sql).toContain('"name"');
@@ -78,7 +79,7 @@ describe("dbs/postgres", () => {
     });
 
     it("compileInsertMany with empty rows returns empty sql", () => {
-      const { sql } = postgresDialect.compileInsertMany("users", ["name"], [], "id");
+      const { sql } = postgresDialect.compileInsertMany("users", ["name"], [], ["id"]);
       expect(sql).toBe("");
     });
 
@@ -90,7 +91,7 @@ describe("dbs/postgres", () => {
           ["Alice", SQL_DEFAULT],
           [SQL_DEFAULT, 25],
         ],
-        "id",
+        ["id"],
       );
       expect(sql).toContain("DEFAULT");
       expect(sql).toContain("$1");
@@ -104,7 +105,7 @@ describe("dbs/postgres", () => {
         "users",
         ["name", "age"],
         ["Alice", 30],
-        "id",
+        ["id"],
       );
       expect(sql).toBe('INSERT INTO "users" ("name", "age") VALUES ($1, $2) RETURNING *');
       expect(params).toEqual(["Alice", 30]);
@@ -112,7 +113,7 @@ describe("dbs/postgres", () => {
     });
 
     it("compileInsert with no columns emits DEFAULT VALUES with RETURNING *", () => {
-      const { sql, returningRow } = postgresDialect.compileInsert("users", [], [], "id");
+      const { sql, returningRow } = postgresDialect.compileInsert("users", [], [], ["id"]);
       expect(sql).toBe('INSERT INTO "users" DEFAULT VALUES RETURNING *');
       expect(returningRow).toBe(true);
     });
@@ -128,7 +129,7 @@ describe("dbs/postgres", () => {
         "users",
         ["name", "slug"],
         ["Alice", "alice"],
-        "id",
+        ["id"],
         { conflictColumns: ["slug"], action: "nothing" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
@@ -141,7 +142,7 @@ describe("dbs/postgres", () => {
         "users",
         ["name", "slug"],
         ["Alice", "alice"],
-        "id",
+        ["id"],
         { conflictColumns: ["slug"], action: "update" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "name" = EXCLUDED."name"');
@@ -154,7 +155,7 @@ describe("dbs/postgres", () => {
         "products",
         ["sku", "name", "price"],
         ["X1", "Widget", 10],
-        "id",
+        ["id"],
         { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] },
       );
       expect(sql).toContain('ON CONFLICT ("sku") DO UPDATE SET "price" = EXCLUDED."price"');
@@ -166,7 +167,7 @@ describe("dbs/postgres", () => {
         "tags",
         ["slug", "label"],
         [["ts", "TypeScript"]],
-        "id",
+        ["id"],
         { conflictColumns: ["slug"], action: "nothing" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
@@ -179,7 +180,7 @@ describe("dbs/postgres", () => {
         "tags",
         ["slug", "label"],
         [["ts", "TypeScript"]],
-        "id",
+        ["id"],
         { conflictColumns: ["slug"], action: "update" },
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
@@ -302,6 +303,62 @@ describe("dbs/postgres", () => {
   });
 
   describe("postgresMigrations", () => {
+    function metadataDriver(): Driver {
+      return {
+        dialect: "postgres",
+        async execute(sql: string, params: unknown[] = []) {
+          if (sql.includes("information_schema.tables")) {
+            return { rows: [{ table_name: "pg_test_users" }], changes: 0 };
+          }
+          if (sql.includes("information_schema.columns")) {
+            expect(params).toEqual(["pg_test_users"]);
+            return {
+              rows: [
+                { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 },
+              ],
+              changes: 0,
+            };
+          }
+          throw new Error(`Unexpected SQL: ${sql}`);
+        },
+      } as unknown as Driver;
+    }
+
+    it("getDbTables returns Postgres table names", async () => {
+      const tables = await postgresMigrations.getDbTables(metadataDriver());
+      expect(tables).toEqual(["pg_test_users"]);
+    });
+
+    it("getDbColumns returns Postgres column info", async () => {
+      const columns = await postgresMigrations.getDbColumns(metadataDriver(), "pg_test_users");
+      expect(columns).toEqual([
+        { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 },
+      ]);
+    });
+
+    it("diffSchema uses Postgres metadata", async () => {
+      const actions = await postgresMigrations.diffSchema(metadataDriver(), [
+        {
+          table: {
+            _table: "pg_test_users",
+            _schema: {
+              id: "integer",
+              name: "text",
+            },
+          },
+        },
+      ]);
+
+      expect(actions).toEqual([
+        {
+          kind: "add_column",
+          table: "pg_test_users",
+          column: "name",
+          definition: "text",
+        },
+      ]);
+    });
+
     it("generateSql produces valid DDL for add_table", () => {
       const action = {
         kind: "add_table" as const,
@@ -317,6 +374,65 @@ describe("dbs/postgres", () => {
       expect(sql).toContain("SERIAL");
     });
 
+    it("generateSql produces Postgres ALTER COLUMN DDL", () => {
+      const sql = postgresMigrations.generateSql({
+        kind: "alter_column",
+        table: "pg_test_users",
+        column: "age",
+        oldDef: "text",
+        newDef: "INTEGER",
+      });
+      expect(sql).toBe('ALTER TABLE "pg_test_users" ALTER COLUMN "age" TYPE INTEGER;');
+    });
+
+    it("generateDownSql produces reverse Postgres DDL", () => {
+      const addTable = postgresMigrations.generateDownSql({
+        kind: "add_table",
+        table: "pg_test_users",
+        schema: { id: "SERIAL PRIMARY KEY" },
+      });
+      expect(addTable).toContain('DROP TABLE IF EXISTS "pg_test_users"');
+
+      const dropTable = postgresMigrations.generateDownSql({
+        kind: "drop_table",
+        table: "pg_test_users",
+        columnInfos: [
+          { name: "id", type: "integer", notnull: 0, dflt_value: null, pk: 1 },
+          { name: "name", type: "text", notnull: 1, dflt_value: "'anon'", pk: 0 },
+        ],
+      });
+      expect(dropTable).toContain('CREATE TABLE IF NOT EXISTS "pg_test_users"');
+      expect(dropTable).toContain('"id" integer PRIMARY KEY');
+      expect(dropTable).toContain('"name" text NOT NULL DEFAULT \'anon\'');
+
+      const addColumn = postgresMigrations.generateDownSql({
+        kind: "add_column",
+        table: "pg_test_users",
+        column: "age",
+        definition: "INTEGER",
+      });
+      expect(addColumn).toContain('DROP COLUMN "age"');
+
+      const dropColumn = postgresMigrations.generateDownSql({
+        kind: "drop_column",
+        table: "pg_test_users",
+        column: "age",
+        columnInfo: { name: "age", type: "integer", notnull: 0, dflt_value: null, pk: 0 },
+      });
+      expect(dropColumn).toContain('ADD COLUMN "age" integer');
+    });
+
+    it("generateDownSql restores old Postgres alter_column type", () => {
+      const sql = postgresMigrations.generateDownSql({
+        kind: "alter_column",
+        table: "pg_test_users",
+        column: "age",
+        oldDef: "text",
+        newDef: "INTEGER",
+      });
+      expect(sql).toBe('ALTER TABLE "pg_test_users" ALTER COLUMN "age" TYPE text;');
+    });
+
     it("getTrackingTableDdl produces Postgres DDL", () => {
       const ddl = postgresMigrations.getTrackingTableDdl();
       expect(ddl).toContain("_typhex_migrations");
@@ -327,6 +443,12 @@ describe("dbs/postgres", () => {
     it("getRecordMigrationSql uses $1 placeholder", () => {
       const sql = postgresMigrations.getRecordMigrationSql();
       expect(sql).toContain("INSERT INTO");
+      expect(sql).toContain("$1");
+    });
+
+    it("getDeleteMigrationSql uses $1 placeholder", () => {
+      const sql = postgresMigrations.getDeleteMigrationSql();
+      expect(sql).toContain("DELETE FROM");
       expect(sql).toContain("$1");
     });
   });
