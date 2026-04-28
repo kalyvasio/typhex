@@ -17,10 +17,15 @@ export {
 export { createSqliteDriver, createDriver } from "./driver/index.js";
 export { createPostgresDriver } from "./dbs/index.js";
 export {
+  appliedMigrations,
   diffSchema,
+  dryRunMigrations,
   generateMigrationFiles,
-  runMigrations,
   migrationStatus,
+  pendingMigrations,
+  runMigrations,
+  upMigration,
+  downMigration,
 } from "./migration/index.js";
 export { loadConfig } from "./config/load-config.js";
 
@@ -106,6 +111,9 @@ export type {
   MigrationFile,
   MigrationRecord,
   MigrationResult,
+  PendingMigration,
+  MigrationDryRun,
+  MigrationDb,
 } from "./migration/index.js";
 
 // Config

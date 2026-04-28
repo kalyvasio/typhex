@@ -36,8 +36,8 @@ describe("generateMigrationFiles", () => {
     ]);
     expect(files).toHaveLength(1);
     expect(files[0].name).toMatch(/add_users_table$/);
-    expect(files[0].sql).toContain("CREATE TABLE");
-    expect(files[0].sql).toContain('"users"');
+    expect(files[0].upSql).toContain("CREATE TABLE");
+    expect(files[0].upSql).toContain('"users"');
   });
 
   it("generates add_column script", async () => {
@@ -47,7 +47,44 @@ describe("generateMigrationFiles", () => {
     ]);
     expect(files).toHaveLength(1);
     expect(files[0].name).toMatch(/add_email_column_on_users$/);
-    expect(files[0].sql).toContain("ADD COLUMN");
+    expect(files[0].upSql).toContain("ADD COLUMN");
+  });
+
+  it("generates drop_table script for database tables removed from entities", async () => {
+    await driver.execute(`CREATE TABLE "legacy" ("id" integer primary key)`);
+
+    const files = await generateMigrationFiles(driver, []);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toMatch(/drop_legacy_table$/);
+    expect(files[0].upSql).toContain('DROP TABLE IF EXISTS "legacy"');
+    expect(files[0].downSql).toContain('CREATE TABLE IF NOT EXISTS "legacy"');
+  });
+
+  it("generates drop_column script for columns removed from entities", async () => {
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "legacy" text)`);
+
+    const files = await generateMigrationFiles(driver, [
+      entity("users", { id: "integer primary key" }),
+    ]);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toMatch(/drop_legacy_column_on_users$/);
+    expect(files[0].upSql).toContain('DROP COLUMN "legacy"');
+    expect(files[0].downSql).toContain('ADD COLUMN "legacy" TEXT');
+  });
+
+  it("generates alter_column script for changed column types", async () => {
+    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "age" text)`);
+
+    const files = await generateMigrationFiles(driver, [
+      entity("users", { id: "integer primary key", age: "integer" }),
+    ]);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toMatch(/alter_age_column_on_users$/);
+    expect(files[0].upSql).toContain('Column "age" on "users": TEXT');
+    expect(files[0].downSql).toContain('Column "age" on "users": integer');
   });
 
   it("orders tables by FK dependencies", async () => {
@@ -74,6 +111,14 @@ describe("generateMigrationFiles", () => {
     expect(files[0].name).toMatch(/^\d{14}01_add_users_table$/);
     expect(files[1].name).toMatch(/^\d{14}02_add_posts_table$/);
   });
+
+  it("escapes template interpolation in generated modules", async () => {
+    const files = await generateMigrationFiles(driver, [
+      entity("users", { id: "integer primary key", name: "text default '${name}'" }),
+    ]);
+
+    expect(files[0].content).toContain("\\${name}");
+  });
 });
 
 describe("writeMigrationFiles", () => {
@@ -87,21 +132,38 @@ describe("writeMigrationFiles", () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("writes .sql files to the directory", () => {
+  it("writes .js files to the directory", () => {
     const files = [
-      { name: "2026_add_users_table", sql: "CREATE TABLE users (id int);" },
-      { name: "2026_add_posts_table", sql: "CREATE TABLE posts (id int);" },
+      {
+        name: "2026_add_users_table",
+        upSql: "CREATE TABLE users (id int);",
+        downSql: "",
+        content: "export const upSql = `CREATE TABLE users (id int);`;",
+      },
+      {
+        name: "2026_add_posts_table",
+        upSql: "CREATE TABLE posts (id int);",
+        downSql: "",
+        content: "export const upSql = `CREATE TABLE posts (id int);`;",
+      },
     ];
     const paths = writeMigrationFiles(tmpDir, files);
     expect(paths).toHaveLength(2);
     const written = readdirSync(tmpDir).sort();
-    expect(written).toEqual(["2026_add_posts_table.sql", "2026_add_users_table.sql"]);
+    expect(written).toEqual(["2026_add_posts_table.js", "2026_add_users_table.js"]);
     expect(readFileSync(paths[0], "utf-8")).toContain("CREATE TABLE users");
   });
 
   it("creates the directory if it does not exist", () => {
     const nested = join(tmpDir, "deep", "dir");
-    writeMigrationFiles(nested, [{ name: "test", sql: "SELECT 1;" }]);
-    expect(readdirSync(nested)).toEqual(["test.sql"]);
+    writeMigrationFiles(nested, [
+      {
+        name: "test",
+        upSql: "SELECT 1;",
+        downSql: "",
+        content: "export const upSql = `SELECT 1;`;",
+      },
+    ]);
+    expect(readdirSync(nested)).toEqual(["test.js"]);
   });
 });

@@ -1,6 +1,6 @@
 /**
  * Migration generator: takes DiffActions, groups them by table, orders them
- * topologically, and writes timestamped .sql files.
+ * topologically, and writes timestamped .js files with up() and down() functions.
  * Uses dialect's DbMigrations for diff and SQL generation.
  */
 
@@ -43,6 +43,25 @@ function scriptName(ts: string, seq: number, action: DiffAction): string {
   }
 }
 
+function escapeTemplateLiteralContent(value: string): string {
+  return value.replaceAll("`", "\\`").replaceAll("${", "\\${");
+}
+
+function renderMigrationFile(upSql: string, downSql: string): string {
+  return `export const upSql = \`${escapeTemplateLiteralContent(upSql)}\`;
+
+export const downSql = \`${escapeTemplateLiteralContent(downSql)}\`;
+
+export async function up(db) {
+  await db.run(upSql);
+}
+
+export async function down(db) {
+  await db.run(downSql);
+}
+`;
+}
+
 interface GroupedActions {
   table: string;
   actions: DiffAction[];
@@ -77,16 +96,24 @@ export async function generateMigrationFiles(
   for (const group of sortedGroups) {
     if (group.actions.length === 1 && group.actions[0].kind === "add_table") {
       const action = group.actions[0];
+      const upSql = migrations.generateSql(action);
+      const downSql = migrations.generateDownSql(action);
       files.push({
         name: scriptName(ts, seq, action),
-        sql: migrations.generateSql(action),
+        upSql,
+        downSql,
+        content: renderMigrationFile(upSql, downSql),
       });
       seq++;
     } else {
       for (const action of group.actions) {
+        const upSql = migrations.generateSql(action);
+        const downSql = migrations.generateDownSql(action);
         files.push({
           name: scriptName(ts, seq, action),
-          sql: migrations.generateSql(action),
+          upSql,
+          downSql,
+          content: renderMigrationFile(upSql, downSql),
         });
         seq++;
       }
@@ -100,8 +127,8 @@ export function writeMigrationFiles(dir: string, files: MigrationFile[]): string
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const paths: string[] = [];
   for (const f of files) {
-    const filePath = join(dir, `${f.name}.sql`);
-    writeFileSync(filePath, f.sql + "\n", "utf-8");
+    const filePath = join(dir, `${f.name}.js`);
+    writeFileSync(filePath, f.content, "utf-8");
     paths.push(filePath);
   }
   return paths;

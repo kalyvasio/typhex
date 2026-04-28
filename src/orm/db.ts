@@ -10,7 +10,15 @@ import { createDriver, CreateDriverOptions } from "../driver/factory.js";
 import { getDbMigrations, getDialect } from "../dbs/index.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
-import { migrationStatus as migStatus, runMigrations as runMig } from "../migration/runner.js";
+import {
+  appliedMigrations as appliedMig,
+  downMigration as downMig,
+  dryRunMigrations as dryRunMig,
+  migrationStatus as migStatus,
+  pendingMigrations as pendingMig,
+  runMigrations as runMig,
+  upMigration as upMig,
+} from "../migration/runner.js";
 import { parseFkDependencies, topoSort } from "../migration/topo-sort.js";
 import type { MigrationFile } from "../migration/types.js";
 import { loadConfig } from "../config/load-config.js";
@@ -194,6 +202,31 @@ export class Db implements QueryExecutor {
   /** Show applied and pending migration status. */
   async migrationStatus(dir = this._migrationsFolder) {
     return migStatus(this._driver, dir);
+  }
+
+  /** Return applied migration records without inspecting pending files. */
+  async appliedMigrations() {
+    return appliedMig(this._driver);
+  }
+
+  /** Return pending executable migration files without applying them. */
+  async pendingMigrations(dir = this._migrationsFolder) {
+    return pendingMig(this._driver, dir);
+  }
+
+  /** Preview migration execution without applying any SQL. */
+  async dryRunMigrations(dir = this._migrationsFolder) {
+    return dryRunMig(this._driver, dir);
+  }
+
+  /** Apply a specific migration by name. Throws if already applied or file not found. */
+  async upMigration(name: string, dir = this._migrationsFolder) {
+    return upMig(this._driver, dir, name);
+  }
+
+  /** Roll back a specific migration by name. Throws if not applied or file not found. */
+  async downMigration(name: string, dir = this._migrationsFolder) {
+    return downMig(this._driver, dir, name);
   }
 
   /** Closes the underlying database connection pool. */

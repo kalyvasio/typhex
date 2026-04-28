@@ -50,9 +50,9 @@ export interface DbColumnInfo {
 /** A single schema change action produced by `diffSchema` (add/drop table or column, alter column). */
 export type DiffAction =
   | { kind: "add_table"; table: string; schema: Record<string, ColumnDef> }
-  | { kind: "drop_table"; table: string }
+  | { kind: "drop_table"; table: string; columnInfos: DbColumnInfo[] }
   | { kind: "add_column"; table: string; column: string; definition: ColumnDef }
-  | { kind: "drop_column"; table: string; column: string }
+  | { kind: "drop_column"; table: string; column: string; columnInfo: DbColumnInfo }
   | { kind: "alter_column"; table: string; column: string; oldDef: string; newDef: ColumnDef };
 
 export type { Connection, ExecuteResult };
@@ -195,6 +195,10 @@ export interface DbMigrations {
   getTrackingTableDdl(): string;
   /** INSERT SQL for recording a migration (single placeholder for name). */
   getRecordMigrationSql(): string;
+  /** DELETE SQL for removing a migration record (single placeholder for name). */
+  getDeleteMigrationSql(): string;
+  /** Generate the reverse (down) SQL for a DiffAction. */
+  generateDownSql(action: DiffAction): string;
 }
 
 /** Resolve column definition for a dialect. */

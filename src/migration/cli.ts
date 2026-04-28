@@ -7,6 +7,9 @@
  *   typhex migrate:generate [--config <path>] [--entities <path>] [--db <path>] [--dir <path>] [--dialect <name>]
  *   typhex migrate:run      [--config <path>] [--db <path>] [--dir <path>]
  *   typhex migrate:status   [--config <path>] [--db <path>] [--dir <path>]
+ *   typhex migrate:dry-run  [--config <path>] [--db <path>] [--dir <path>]
+ *   typhex migrate:pending  [--config <path>] [--db <path>] [--dir <path>]
+ *   typhex migrate:applied  [--config <path>] [--db <path>]
  *
  * Config is loaded from: --config path, or typhex.config.js/mjs/json in cwd, or .env (TYPHEX_*).
  * CLI args override config. --db can be omitted if TYPHEX_DATABASE or config.database is set.
@@ -17,7 +20,15 @@ import { resolve, relative } from "node:path";
 import { getRegisteredEntities } from "../entity/global-driver.js";
 import { createDriver } from "../driver/factory.js";
 import { generateMigrationFiles, writeMigrationFiles } from "./generator.js";
-import { runMigrations, migrationStatus } from "./runner.js";
+import {
+  appliedMigrations,
+  dryRunMigrations,
+  pendingMigrations,
+  runMigrations,
+  migrationStatus,
+  upMigration,
+  downMigration,
+} from "./runner.js";
 import type { TyphexConfig } from "../config/types.js";
 import { loadConfig } from "../config/load-config.js";
 
@@ -77,9 +88,14 @@ function usage(): never {
 typhex — migration CLI
 
 Commands:
-  migrate:generate  Diff entity definitions against the database and generate .sql scripts
-  migrate:run       Apply pending migration scripts to the database
+  migrate:generate  Diff entity definitions against the database and generate .js migration files
+  migrate:run       Apply pending migrations to the database
   migrate:status    Show applied and pending migrations
+  migrate:dry-run   Show executable pending SQL without applying it
+  migrate:pending   List executable pending migration files
+  migrate:applied   List applied migration records
+  migrate:up        Apply a specific migration by name (requires --name)
+  migrate:down      Rollback a specific migration by name using its down() function (requires --name)
 
 Options:
   --config <path>    Config file path (default: auto-detect typhex.config.js)
@@ -87,6 +103,7 @@ Options:
   --db <path>        Database path (or config.database / TYPHEX_DATABASE)
   --dir <path>       Migrations directory (default: ./migrations)
   --dialect <name>   Target dialect: sqlite (default) or postgres
+  --name <name>      Migration name, without extension (required for up/down)
 `);
   process.exit(1);
 }
@@ -162,6 +179,57 @@ async function main() {
       if (status.applied.length === 0 && status.pending.length === 0) {
         console.log("No migrations found.");
       }
+    });
+  } else if (command === "migrate:dry-run") {
+    await withDriver(config, dbPath, async (driver) => {
+      const plan = await dryRunMigrations(driver, dir);
+      if (plan.pending.length === 0) {
+        console.log("No executable pending migrations.");
+        return;
+      }
+      console.log(`Would apply ${plan.pending.length} migration(s):`);
+      for (const migration of plan.pending) {
+        console.log(`  ○ ${migration.name} (${migration.statements.length} statement(s))`);
+      }
+      if (plan.skipped.length > 0) {
+        console.log(`Skipped ${plan.skipped.length} migration(s).`);
+      }
+    });
+  } else if (command === "migrate:pending") {
+    await withDriver(config, dbPath, async (driver) => {
+      const pending = await pendingMigrations(driver, dir);
+      if (pending.length === 0) {
+        console.log("No executable pending migrations.");
+        return;
+      }
+      for (const migration of pending) console.log(migration.name);
+    });
+  } else if (command === "migrate:applied") {
+    await withDriver(config, dbPath, async (driver) => {
+      const applied = await appliedMigrations(driver);
+      if (applied.length === 0) {
+        console.log("No applied migrations.");
+        return;
+      }
+      for (const migration of applied) console.log(`${migration.name}\t${migration.applied_at}`);
+    });
+  } else if (command === "migrate:up") {
+    if (!args.name) {
+      console.error("migrate:up requires --name <migration-name>");
+      process.exit(1);
+    }
+    await withDriver(config, dbPath, async (driver) => {
+      await upMigration(driver, dir, args.name);
+      console.log(`Applied: ${args.name}`);
+    });
+  } else if (command === "migrate:down") {
+    if (!args.name) {
+      console.error("migrate:down requires --name <migration-name>");
+      process.exit(1);
+    }
+    await withDriver(config, dbPath, async (driver) => {
+      await downMigration(driver, dir, args.name);
+      console.log(`Rolled back: ${args.name}`);
     });
   } else {
     console.error(`Unknown command: ${command}`);

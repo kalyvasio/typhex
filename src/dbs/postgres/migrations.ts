@@ -6,7 +6,7 @@ import type { Driver, DbMigrations, DiffAction, DbColumnInfo } from "../types.js
 import { getColumnDef } from "../types.js";
 import { postgresDialect } from "./dialect.js";
 import type { RegisteredEntity } from "../../entity/global-driver.js";
-import { diffSchemaBase, generateCommonSql } from "../shared-migrations.js";
+import { diffSchemaBase, generateCommonSql, generateCommonDownSql } from "../shared-migrations.js";
 
 export const postgresMigrations: DbMigrations = {
   dialect: "postgres",
@@ -83,5 +83,19 @@ export const postgresMigrations: DbMigrations = {
   getRecordMigrationSql(): string {
     const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
     return `INSERT INTO ${esc("_typhex_migrations")} (${esc("name")}) VALUES ($1)`;
+  },
+
+  getDeleteMigrationSql(): string {
+    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
+    return `DELETE FROM ${esc("_typhex_migrations")} WHERE ${esc("name")} = $1`;
+  },
+
+  generateDownSql(action: DiffAction): string {
+    const shared = generateCommonDownSql(action, postgresDialect);
+    if (shared !== null) return shared;
+    // alter_column: reverse by restoring old type
+    const a = action as Extract<DiffAction, { kind: "alter_column" }>;
+    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
+    return `ALTER TABLE ${esc(a.table)} ALTER COLUMN ${esc(a.column)} TYPE ${a.oldDef};`;
   },
 };

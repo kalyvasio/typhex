@@ -6,11 +6,11 @@ Typhex includes a schema-diffing migration system. Define your entities, generat
 
 ### `db.generateMigrations(dir)`
 
-Diffs current entity definitions against existing migration files in `dir` and writes new `.sql` files for any schema changes.
+Diffs current entity definitions against the database and writes new `.js` migration modules for any schema changes.
 
 ```ts
 const files = await db.generateMigrations("./migrations");
-// Returns: { name: string }[] — list of newly generated files
+// Returns: { name: string, upSql: string, downSql: string, content: string }[]
 ```
 
 On first run (no existing migration files), generates `CREATE TABLE` statements for all registered entities. On subsequent runs, generates `ALTER TABLE` statements for any new columns detected.
@@ -61,23 +61,29 @@ The first run creates files like:
 
 ```
 migrations/
-  0001_create_users.sql
+  2026042823220001_add_users_table.js
 ```
 
-Each file contains the DDL:
+Each file exports SQL plus executable `up(db)` and `down(db)` functions:
 
-```sql
-CREATE TABLE IF NOT EXISTS users (
-  id integer primary key autoincrement,
-  name text not null,
-  email text
-);
+```js
+export const upSql = `CREATE TABLE IF NOT EXISTS "users" ("id" integer primary key autoincrement, "name" text not null, "email" text);`;
+
+export const downSql = `DROP TABLE IF EXISTS "users";`;
+
+export async function up(db) {
+  await db.run(upSql);
+}
+
+export async function down(db) {
+  await db.run(downSql);
+}
 ```
 
 When you add a column to your entity (e.g., `age: "integer"`), the next `generateMigrations()` call writes a new file:
 
 ```sql
--- 0002_alter_users.sql
+-- 2026042823230001_add_age_column_on_users.js
 ALTER TABLE users ADD COLUMN age integer;
 ```
 
@@ -111,6 +117,7 @@ await db.runMigrations("./migrations");
 Typhex ships a CLI that loads a `typhex.config.js` from your project root:
 
 ```bash
-npx typhex migrate --dir ./migrations
-npx typhex status --dir ./migrations
+npx typhex migrate:generate --entities ./dist/entities.js --db ./app.db --dir ./migrations
+npx typhex migrate:run --db ./app.db --dir ./migrations
+npx typhex migrate:status --db ./app.db --dir ./migrations
 ```
