@@ -320,17 +320,19 @@ describe("dbs/sqlite", () => {
       expect(sql).toContain("autoincrement");
     });
 
-    it("generateSql explains SQLite alter_column limitation", () => {
+    it("generateSql throws on alter_column (SQLite has no native ALTER COLUMN)", () => {
       const action = {
         kind: "alter_column" as const,
         table: "users",
         column: "age",
         oldDef: "TEXT",
         newDef: "integer",
+        columnInfo: { name: "age", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+        changes: [{ kind: "type" as const, from: "text", to: "integer" }],
       };
-      const sql = sqliteMigrations.generateSql(action);
-      expect(sql).toContain("SQLite does not support ALTER COLUMN");
-      expect(sql).toContain('Column "age" on "users": TEXT');
+      expect(() => sqliteMigrations.generateSql(action)).toThrow(
+        /SQLite cannot apply ALTER COLUMN on users\.age/,
+      );
     });
 
     it("generateDownSql produces reverse SQLite DDL", () => {
@@ -370,17 +372,19 @@ describe("dbs/sqlite", () => {
       expect(dropColumn).toContain('ADD COLUMN "age" INTEGER');
     });
 
-    it("generateDownSql explains SQLite alter_column rollback limitation", () => {
+    it("generateDownSql throws on alter_column rollback", () => {
       const action = {
         kind: "alter_column" as const,
         table: "users",
         column: "age",
         oldDef: "TEXT",
         newDef: "integer",
+        columnInfo: { name: "age", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
+        changes: [{ kind: "type" as const, from: "text", to: "integer" }],
       };
-      const sql = sqliteMigrations.generateDownSql(action);
-      expect(sql).toContain("SQLite does not support ALTER COLUMN");
-      expect(sql).toContain('Column "age" on "users": integer');
+      expect(() => sqliteMigrations.generateDownSql(action)).toThrow(
+        /SQLite cannot rollback ALTER COLUMN on users\.age/,
+      );
     });
 
     it("getTrackingTableDdl produces SQLite DDL", () => {

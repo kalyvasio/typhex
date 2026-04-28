@@ -1,7 +1,7 @@
 /**
  * Migration generator: takes DiffActions, groups them by table, orders them
  * topologically, and writes timestamped .js files with up() and down() functions.
- * Uses dialect's DbMigrations for diff and SQL generation.
+ * Uses dialect's BaseMigrations subclass for diff and SQL generation.
  */
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -94,8 +94,7 @@ export async function generateMigrationFiles(
   let seq = 1;
 
   for (const group of sortedGroups) {
-    if (group.actions.length === 1 && group.actions[0].kind === "add_table") {
-      const action = group.actions[0];
+    for (const action of group.actions) {
       const upSql = migrations.generateSql(action);
       const downSql = migrations.generateDownSql(action);
       files.push({
@@ -105,18 +104,6 @@ export async function generateMigrationFiles(
         content: renderMigrationFile(upSql, downSql),
       });
       seq++;
-    } else {
-      for (const action of group.actions) {
-        const upSql = migrations.generateSql(action);
-        const downSql = migrations.generateDownSql(action);
-        files.push({
-          name: scriptName(ts, seq, action),
-          upSql,
-          downSql,
-          content: renderMigrationFile(upSql, downSql),
-        });
-        seq++;
-      }
     }
   }
 

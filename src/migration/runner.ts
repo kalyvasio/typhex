@@ -11,7 +11,7 @@ import { pathToFileURL } from "node:url";
 import * as acorn from "acorn";
 import type { Driver, Connection } from "../driver/types.js";
 import type { MigrationDb, MigrationRecord, PendingMigration } from "./types.js";
-import { getDbMigrations } from "../dbs/index.js";
+import { getDbMigrations, getDialect } from "../dbs/index.js";
 
 interface MigrationModule {
   upSql: string;
@@ -34,48 +34,43 @@ class ConnectionMigrationDb implements MigrationDb {
 }
 
 async function ensureTrackingTable(driver: Driver): Promise<void> {
-  const migrations = getDbMigrations(driver.dialect);
-  await driver.execute(migrations.getTrackingTableDdl());
-}
-
-async function getApplied(driver: Driver): Promise<Set<string>> {
-  await ensureTrackingTable(driver);
-  const esc = (n: string) => `"${n.replaceAll('"', '""')}"`;
-  const table = esc("_typhex_migrations");
-  const rows = (await driver
-    .execute(`SELECT ${esc("name")} FROM ${table} ORDER BY ${esc("id")}`)
-    .then((r) => r.rows)) as Array<{ name: string }>;
-  return new Set(rows.map((r) => r.name));
+  await driver.execute(getDbMigrations(driver.dialect).getTrackingTableDdl());
 }
 
 async function getAppliedRows(driver: Driver): Promise<MigrationRecord[]> {
   await ensureTrackingTable(driver);
-  const esc = (n: string) => `"${n.replaceAll('"', '""')}"`;
-  const table = esc("_typhex_migrations");
-  return (await driver
+  const esc = (n: string) => getDialect(driver.dialect).escapeIdentifier(n);
+  const rows = await driver
     .execute(
-      `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${table} ORDER BY ${esc("id")}`,
+      `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${esc("_typhex_migrations")} ORDER BY ${esc("id")}`,
     )
-    .then((r) => r.rows)) as MigrationRecord[];
+    .then((r) => r.rows);
+  return rows as MigrationRecord[];
+}
+
+async function getAppliedNames(driver: Driver): Promise<Set<string>> {
+  const rows = await getAppliedRows(driver);
+  return new Set(rows.map((r) => r.name));
 }
 
 function listMigrationFiles(dir: string): string[] {
+  let entries: string[];
   try {
-    const names = new Set<string>();
-    const files: string[] = [];
-    for (const file of readdirSync(dir).sort()) {
-      if (!file.endsWith(".js") && !file.endsWith(".mjs")) continue;
-      const name = stripExtension(file);
-      if (names.has(name)) continue;
-      names.add(name);
-      files.push(file);
-    }
-    return files;
+    entries = readdirSync(dir).sort();
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT") throw err;
-    return [];
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
   }
+  const seen = new Set<string>();
+  const files: string[] = [];
+  for (const file of entries) {
+    if (!file.endsWith(".js") && !file.endsWith(".mjs")) continue;
+    const name = stripExtension(file);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    files.push(file);
+  }
+  return files;
 }
 
 function stripExtension(file: string): string {
@@ -151,15 +146,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value != null && typeof value === "object";
 }
 
-async function runInTransaction(
+function buildPendingMigration(dir: string, file: string): PendingMigration {
+  const { upSql, downSql } = readMigrationSql(dir, file);
+  return {
+    name: stripExtension(file),
+    file,
+    upSql,
+    downSql,
+    statements: splitSqlStatements(upSql),
+    downStatements: splitSqlStatements(downSql),
+  };
+}
+
+async function withConnection<T>(driver: Driver, fn: (conn: Connection) => Promise<T>): Promise<T> {
+  const conn = await driver.connect();
+  try {
+    return await fn(conn);
+  } finally {
+    await conn.release();
+  }
+}
+
+async function withTransaction<T>(
   conn: Connection,
-  fn: (db: MigrationDb) => Promise<void>,
-): Promise<void> {
+  fn: (db: MigrationDb) => Promise<T>,
+): Promise<T> {
   const db = new ConnectionMigrationDb(conn);
   await conn.execute("BEGIN", []);
   try {
-    await fn(db);
+    const result = await fn(db);
     await conn.execute("COMMIT", []);
+    return result;
   } catch (e) {
     try {
       await conn.execute("ROLLBACK", []);
@@ -180,37 +197,27 @@ export interface MigrationResult {
 
 /** Applies all pending migration files from `dir` in chronological order. */
 export async function runMigrations(driver: Driver, dir: string): Promise<MigrationResult> {
-  const applied = await getApplied(driver);
+  const applied = await getAppliedNames(driver);
   const files = listMigrationFiles(dir);
+  const recordSql = getDbMigrations(driver.dialect).getRecordMigrationSql();
   const result: MigrationResult = { applied: [], skipped: [] };
 
-  const conn = await driver.connect();
-  try {
-    await conn.execute("BEGIN", []);
-    const db = new ConnectionMigrationDb(conn);
-    for (const file of files) {
-      const name = stripExtension(file);
-      if (applied.has(name)) {
-        result.skipped.push(name);
-        continue;
+  await withConnection(driver, (conn) =>
+    withTransaction(conn, async (db) => {
+      for (const file of files) {
+        const name = stripExtension(file);
+        if (applied.has(name)) {
+          result.skipped.push(name);
+          continue;
+        }
+        const mod = await loadModule(dir, file);
+        await mod.up(db);
+        await conn.execute(recordSql, [name]);
+        applied.add(name);
+        result.applied.push(name);
       }
-      const mod = await loadModule(dir, file);
-      await mod.up(db);
-      await conn.execute(getDbMigrations(driver.dialect).getRecordMigrationSql(), [name]);
-      applied.add(name);
-      result.applied.push(name);
-    }
-    await conn.execute("COMMIT", []);
-  } catch (e) {
-    try {
-      await conn.execute("ROLLBACK", []);
-    } catch {
-      /* ignore */
-    }
-    throw e;
-  } finally {
-    await conn.release();
-  }
+    }),
+  );
 
   return result;
 }
@@ -222,10 +229,9 @@ export async function migrationStatus(
 ): Promise<{ applied: MigrationRecord[]; pending: string[] }> {
   const appliedRows = await getAppliedRows(driver);
   const appliedNames = new Set(appliedRows.map((r) => r.name));
-  const files = listMigrationFiles(dir);
-
-  const pending = files.map(stripExtension).filter((n) => !appliedNames.has(n));
-
+  const pending = listMigrationFiles(dir)
+    .map(stripExtension)
+    .filter((n) => !appliedNames.has(n));
   return { applied: appliedRows, pending };
 }
 
@@ -234,23 +240,10 @@ export async function appliedMigrations(driver: Driver): Promise<MigrationRecord
 }
 
 export async function pendingMigrations(driver: Driver, dir: string): Promise<PendingMigration[]> {
-  const appliedRows = await getAppliedRows(driver);
-  const appliedNames = new Set(appliedRows.map((r) => r.name));
-  const pending: PendingMigration[] = [];
-  for (const file of listMigrationFiles(dir)) {
-    const name = stripExtension(file);
-    if (appliedNames.has(name)) continue;
-    const mod = readMigrationSql(dir, file);
-    pending.push({
-      name,
-      file,
-      upSql: mod.upSql,
-      downSql: mod.downSql,
-      statements: splitSqlStatements(mod.upSql),
-      downStatements: splitSqlStatements(mod.downSql),
-    });
-  }
-  return pending;
+  const appliedNames = await getAppliedNames(driver);
+  return listMigrationFiles(dir)
+    .filter((file) => !appliedNames.has(stripExtension(file)))
+    .map((file) => buildPendingMigration(dir, file));
 }
 
 export async function dryRunMigrations(
@@ -266,73 +259,66 @@ export async function dryRunMigrations(
     const name = stripExtension(file);
     if (appliedNames.has(name)) {
       skipped.push(name);
-      continue;
+    } else {
+      pending.push(buildPendingMigration(dir, file));
     }
-    const mod = readMigrationSql(dir, file);
-    pending.push({
-      name,
-      file,
-      upSql: mod.upSql,
-      downSql: mod.downSql,
-      statements: splitSqlStatements(mod.upSql),
-      downStatements: splitSqlStatements(mod.downSql),
-    });
   }
 
   return { applied, pending, skipped };
 }
 
 export async function upMigration(driver: Driver, dir: string, name: string): Promise<void> {
-  const applied = await getApplied(driver);
-  if (applied.has(name)) {
-    throw new Error(`Migration "${name}" is already applied.`);
-  }
-  const file = findMigrationFile(dir, name);
-  if (!file) {
-    throw new Error(`Migration file for "${name}" not found in "${dir}".`);
-  }
-  const mod = await loadModule(dir, file);
-  const conn = await driver.connect();
-  try {
-    await runInTransaction(conn, async (db) => {
-      await mod.up(db);
-      await conn.execute(getDbMigrations(driver.dialect).getRecordMigrationSql(), [name]);
-    });
-  } finally {
-    await conn.release();
-  }
+  await runSingleMigration(driver, dir, name, "up");
 }
 
 export async function downMigration(driver: Driver, dir: string, name: string): Promise<void> {
-  const applied = await getApplied(driver);
-  if (!applied.has(name)) {
+  await runSingleMigration(driver, dir, name, "down");
+}
+
+async function runSingleMigration(
+  driver: Driver,
+  dir: string,
+  name: string,
+  direction: "up" | "down",
+): Promise<void> {
+  const applied = await getAppliedNames(driver);
+  const isApplied = applied.has(name);
+  if (direction === "up" && isApplied) {
+    throw new Error(`Migration "${name}" is already applied.`);
+  }
+  if (direction === "down" && !isApplied) {
     throw new Error(`Migration "${name}" is not applied.`);
   }
+
   const file = findMigrationFile(dir, name);
   if (!file) {
     throw new Error(`Migration file for "${name}" not found in "${dir}".`);
   }
+
   const mod = await loadModule(dir, file);
-  const conn = await driver.connect();
-  try {
-    await runInTransaction(conn, async (db) => {
-      await mod.down(db);
-      await conn.execute(getDbMigrations(driver.dialect).getDeleteMigrationSql(), [name]);
-    });
-  } finally {
-    await conn.release();
-  }
+  const migrations = getDbMigrations(driver.dialect);
+  const trackingSql = direction === "up"
+    ? migrations.getRecordMigrationSql()
+    : migrations.getDeleteMigrationSql();
+
+  await withConnection(driver, (conn) =>
+    withTransaction(conn, async (db) => {
+      await mod[direction](db);
+      await conn.execute(trackingSql, [name]);
+    }),
+  );
 }
 
 function findMigrationFile(dir: string, name: string): string | null {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return null;
+  }
   for (const ext of [".js", ".mjs"]) {
     const file = `${name}${ext}`;
-    try {
-      const files = readdirSync(dir);
-      if (files.includes(file)) return file;
-    } catch {
-      return null;
-    }
+    if (entries.includes(file)) return file;
   }
   return null;
 }

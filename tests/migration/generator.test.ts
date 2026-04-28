@@ -74,17 +74,14 @@ describe("generateMigrationFiles", () => {
     expect(files[0].downSql).toContain('ADD COLUMN "legacy" TEXT');
   });
 
-  it("generates alter_column script for changed column types", async () => {
+  it("throws on alter_column for SQLite (no native ALTER COLUMN support)", async () => {
     await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "age" text)`);
 
-    const files = await generateMigrationFiles(driver, [
-      entity("users", { id: "integer primary key", age: "integer" }),
-    ]);
-
-    expect(files).toHaveLength(1);
-    expect(files[0].name).toMatch(/alter_age_column_on_users$/);
-    expect(files[0].upSql).toContain('Column "age" on "users": TEXT');
-    expect(files[0].downSql).toContain('Column "age" on "users": integer');
+    await expect(
+      generateMigrationFiles(driver, [
+        entity("users", { id: "integer primary key", age: "integer" }),
+      ]),
+    ).rejects.toThrow(/SQLite cannot apply ALTER COLUMN on users\.age/);
   });
 
   it("orders tables by FK dependencies", async () => {

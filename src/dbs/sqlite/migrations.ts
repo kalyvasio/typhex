@@ -2,14 +2,15 @@
  * SQLite migrations: diff and DDL generation.
  */
 
-import type { Driver, DbMigrations, DiffAction, DbColumnInfo } from "../types.js";
-import { getColumnDef } from "../types.js";
+import type { Driver, DiffAction, DbColumnInfo, DialectImpl } from "../types.js";
 import { sqliteDialect } from "./dialect.js";
-import type { RegisteredEntity } from "../../entity/global-driver.js";
-import { diffSchemaBase, generateCommonSql, generateCommonDownSql } from "../shared-migrations.js";
+import { BaseMigrations } from "../base-migrations.js";
 
-export const sqliteMigrations: DbMigrations = {
-  dialect: "sqlite",
+type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
+
+export class SqliteMigrations extends BaseMigrations {
+  readonly dialect = "sqlite" as const;
+  protected readonly dialectImpl: DialectImpl = sqliteDialect;
 
   async getDbTables(driver: Driver): Promise<string[]> {
     const rows = await driver
@@ -18,61 +19,41 @@ export const sqliteMigrations: DbMigrations = {
       )
       .then((r) => r.rows);
     return (rows as Array<{ name: string }>).map((r) => r.name);
-  },
+  }
 
   async getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]> {
-    const esc = sqliteDialect.escapeIdentifier(table);
+    const esc = this.dialectImpl.escapeIdentifier(table);
     const rows = await driver.execute(`PRAGMA table_info(${esc})`).then((r) => r.rows);
     return rows as DbColumnInfo[];
-  },
-
-  async diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]> {
-    return diffSchemaBase(
-      "sqlite",
-      () => this.getDbTables(driver),
-      (table) => this.getDbColumns(driver, table),
-      entities,
-    );
-  },
-
-  generateSql(action: DiffAction): string {
-    const shared = generateCommonSql(action, sqliteDialect);
-    if (shared !== null) return shared;
-    // alter_column: SQLite does not support it natively
-    const a = action as Extract<DiffAction, { kind: "alter_column" }>;
-    return (
-      `-- SQLite does not support ALTER COLUMN. Recreate the table to change column type.\n` +
-      `-- Column "${a.column}" on "${a.table}": ${a.oldDef} → ${getColumnDef(a.newDef, "sqlite")}`
-    );
-  },
+  }
 
   getTrackingTableDdl(): string {
-    const esc = sqliteDialect.escapeIdentifier.bind(sqliteDialect);
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
     return `CREATE TABLE IF NOT EXISTS ${esc("_typhex_migrations")} (
   ${esc("id")} integer primary key autoincrement,
   ${esc("name")} text not null unique,
   ${esc("applied_at")} text not null default (datetime('now'))
 )`;
-  },
+  }
 
   getRecordMigrationSql(): string {
-    const esc = sqliteDialect.escapeIdentifier.bind(sqliteDialect);
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
     return `INSERT INTO ${esc("_typhex_migrations")} (${esc("name")}) VALUES (?)`;
-  },
+  }
 
   getDeleteMigrationSql(): string {
-    const esc = sqliteDialect.escapeIdentifier.bind(sqliteDialect);
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
     return `DELETE FROM ${esc("_typhex_migrations")} WHERE ${esc("name")} = ?`;
-  },
+  }
 
-  generateDownSql(action: DiffAction): string {
-    const shared = generateCommonDownSql(action, sqliteDialect);
-    if (shared !== null) return shared;
-    // alter_column: SQLite does not support it natively
-    const a = action as Extract<DiffAction, { kind: "alter_column" }>;
-    return (
-      `-- SQLite does not support ALTER COLUMN. Recreate the table to change column type.\n` +
-      `-- Column "${a.column}" on "${a.table}": ${getColumnDef(a.newDef, "sqlite")} → ${a.oldDef}`
+  protected alterColumnSql(action: AlterColumnAction, reverse: boolean): never {
+    const dimensions = action.changes.map((c) => c.kind).join(", ");
+    const direction = reverse ? "rollback" : "apply";
+    throw new Error(
+      `SQLite cannot ${direction} ALTER COLUMN on ${action.table}.${action.column} ` +
+        `(changes: ${dimensions}). The table must be recreated; please write the migration manually.`,
     );
-  },
-};
+  }
+}
+
+export const sqliteMigrations = new SqliteMigrations();
