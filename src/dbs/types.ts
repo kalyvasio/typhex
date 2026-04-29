@@ -1,10 +1,9 @@
 /**
- * Multi-database types: Driver, Dialect, DbMigrations.
+ * Multi-database types: Driver, Dialect, DialectImpl.
  */
 
 import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
-import type { Connection, ExecuteResult, Driver } from "../driver/types.js";
-import type { RegisteredEntity } from "../entity/global-driver.js";
+import type { Connection, ExecuteResult } from "../driver/types.js";
 import type { RelationJoinInfo } from "../orm/helpers/relations/relation-joins.js";
 import type { Dialect } from "../dialect.js";
 
@@ -47,13 +46,27 @@ export interface DbColumnInfo {
   pk: number;
 }
 
-/** A single schema change action produced by `diffSchema` (add/drop table or column, alter column). */
+/** A single dimension in which a DB column has drifted from the entity definition. */
+export type ColumnChange =
+  | { kind: "type"; from: string; to: string }
+  | { kind: "not_null" | "nullable"; from: boolean; to: boolean }
+  | { kind: "default"; from: string | null; to: string | null }
+  | { kind: "primary_key"; from: boolean; to: boolean };
+
 export type DiffAction =
   | { kind: "add_table"; table: string; schema: Record<string, ColumnDef> }
   | { kind: "drop_table"; table: string; columnInfos: DbColumnInfo[] }
   | { kind: "add_column"; table: string; column: string; definition: ColumnDef }
   | { kind: "drop_column"; table: string; column: string; columnInfo: DbColumnInfo }
-  | { kind: "alter_column"; table: string; column: string; oldDef: string; newDef: ColumnDef };
+  | {
+      kind: "alter_column";
+      table: string;
+      column: string;
+      oldDef: string;
+      newDef: ColumnDef;
+      columnInfo: DbColumnInfo;
+      changes: ColumnChange[];
+    };
 
 export type { Connection, ExecuteResult };
 export type { TransactionOptions, Driver } from "../driver/types.js";
@@ -184,25 +197,12 @@ export interface DialectImpl {
   buildJoinClause(join: RelationJoinInfo): string;
 }
 
-/** DB-specific migrations: diff, DDL generation, and runner support. */
-export interface DbMigrations {
-  readonly dialect: Dialect;
-  getDbTables(driver: Driver): Promise<string[]>;
-  getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
-  diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]>;
-  generateSql(action: DiffAction): string;
-  /** DDL for the _typhex_migrations tracking table. */
-  getTrackingTableDdl(): string;
-  /** INSERT SQL for recording a migration (single placeholder for name). */
-  getRecordMigrationSql(): string;
-  /** DELETE SQL for removing a migration record (single placeholder for name). */
-  getDeleteMigrationSql(): string;
-  /** Generate the reverse (down) SQL for a DiffAction. */
-  generateDownSql(action: DiffAction): string;
-}
-
 /** Resolve column definition for a dialect. */
 export function getColumnDef(def: ColumnDef, dialect: Dialect): string {
   if (typeof def === "string") return def;
-  return def[dialect] ?? def.sqlite ?? def.postgres ?? "";
+  const resolved = def[dialect] ?? def.sqlite ?? def.postgres;
+  if (resolved == null) {
+    throw new Error(`No column definition provided for dialect "${dialect}"`);
+  }
+  return resolved;
 }

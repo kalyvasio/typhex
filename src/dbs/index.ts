@@ -4,7 +4,8 @@ export type { SqliteDriverOptions } from "./sqlite/index.js";
 export { createPostgresDriver, postgresDialect, postgresMigrations } from "./postgres/index.js";
 export type { PostgresDriverOptions } from "./postgres/index.js";
 
-import type { DialectImpl, DbMigrations } from "./types.js";
+import type { DialectImpl } from "./types.js";
+import type { BaseMigrations } from "./base-migrations.js";
 import { sqliteDialect } from "./sqlite/dialect.js";
 import { sqliteMigrations } from "./sqlite/migrations.js";
 import { postgresDialect } from "./postgres/dialect.js";
@@ -15,7 +16,7 @@ const dialectMap: Record<string, DialectImpl> = {
   postgres: postgresDialect,
 };
 
-const migrationsMap: Record<string, DbMigrations> = {
+const migrationsMap: Record<string, BaseMigrations> = {
   sqlite: sqliteMigrations,
   postgres: postgresMigrations,
 };
@@ -27,8 +28,8 @@ export function getDialect(name: string): DialectImpl {
   return d;
 }
 
-/** Get DbMigrations implementation by dialect name. */
-export function getDbMigrations(dialect: string): DbMigrations {
+/** Get migrations implementation by dialect name. */
+export function getDbMigrations(dialect: string): BaseMigrations {
   const m = migrationsMap[dialect];
   if (!m) throw new Error(`Unknown dialect: ${dialect}`);
   return m;

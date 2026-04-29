@@ -2,14 +2,15 @@
  * PostgreSQL migrations: diff and DDL generation.
  */
 
-import type { Driver, DbMigrations, DiffAction, DbColumnInfo } from "../types.js";
-import { getColumnDef } from "../types.js";
+import type { Driver, DbColumnInfo, DiffAction, DialectImpl } from "../types.js";
 import { postgresDialect } from "./dialect.js";
-import type { RegisteredEntity } from "../../entity/global-driver.js";
-import { diffSchemaBase, generateCommonSql, generateCommonDownSql } from "../shared-migrations.js";
+import { BaseMigrations } from "../base-migrations.js";
 
-export const postgresMigrations: DbMigrations = {
-  dialect: "postgres",
+type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
+
+export class PostgresMigrations extends BaseMigrations {
+  readonly dialect = "postgres" as const;
+  protected readonly dialectImpl: DialectImpl = postgresDialect;
 
   async getDbTables(driver: Driver): Promise<string[]> {
     const rows = await driver
@@ -24,7 +25,7 @@ export const postgresMigrations: DbMigrations = {
       )
       .then((r) => r.rows);
     return (rows as Array<{ table_name: string }>).map((r) => r.table_name);
-  },
+  }
 
   async getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]> {
     const rows = await driver
@@ -51,51 +52,57 @@ export const postgresMigrations: DbMigrations = {
       )
       .then((r) => r.rows);
     return rows as DbColumnInfo[];
-  },
-
-  async diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]> {
-    return diffSchemaBase(
-      "postgres",
-      () => this.getDbTables(driver),
-      (table) => this.getDbColumns(driver, table),
-      entities,
-    );
-  },
-
-  generateSql(action: DiffAction): string {
-    const shared = generateCommonSql(action, postgresDialect);
-    if (shared !== null) return shared;
-    // alter_column
-    const a = action as Extract<DiffAction, { kind: "alter_column" }>;
-    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
-    return `ALTER TABLE ${esc(a.table)} ALTER COLUMN ${esc(a.column)} TYPE ${getColumnDef(a.newDef, "postgres")};`;
-  },
+  }
 
   getTrackingTableDdl(): string {
-    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
     return `CREATE TABLE IF NOT EXISTS ${esc("_typhex_migrations")} (
   ${esc("id")} SERIAL PRIMARY KEY,
   ${esc("name")} TEXT NOT NULL UNIQUE,
   ${esc("applied_at")} TIMESTAMP NOT NULL DEFAULT NOW()
 )`;
-  },
+  }
 
   getRecordMigrationSql(): string {
-    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
     return `INSERT INTO ${esc("_typhex_migrations")} (${esc("name")}) VALUES ($1)`;
-  },
+  }
 
   getDeleteMigrationSql(): string {
-    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
     return `DELETE FROM ${esc("_typhex_migrations")} WHERE ${esc("name")} = $1`;
-  },
+  }
 
-  generateDownSql(action: DiffAction): string {
-    const shared = generateCommonDownSql(action, postgresDialect);
-    if (shared !== null) return shared;
-    // alter_column: reverse by restoring old type
-    const a = action as Extract<DiffAction, { kind: "alter_column" }>;
-    const esc = postgresDialect.escapeIdentifier.bind(postgresDialect);
-    return `ALTER TABLE ${esc(a.table)} ALTER COLUMN ${esc(a.column)} TYPE ${a.oldDef};`;
-  },
-};
+  protected alterColumnSql(action: AlterColumnAction, reverse: boolean): string {
+    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
+    const table = esc(action.table);
+    const column = esc(action.column);
+
+    return action.changes.map((change) => {
+      switch (change.kind) {
+        case "type": {
+          const type = reverse ? change.from : change.to;
+          return `ALTER TABLE ${table} ALTER COLUMN ${column} TYPE ${type};`;
+        }
+        case "not_null":
+        case "nullable": {
+          const notNull = reverse ? change.from : change.to;
+          const operation = notNull ? "SET NOT NULL" : "DROP NOT NULL";
+          return `ALTER TABLE ${table} ALTER COLUMN ${column} ${operation};`;
+        }
+        case "default": {
+          const value = reverse ? change.from : change.to;
+          const operation = value == null ? "DROP DEFAULT" : `SET DEFAULT ${value}`;
+          return `ALTER TABLE ${table} ALTER COLUMN ${column} ${operation};`;
+        }
+        case "primary_key":
+          throw new Error(
+            `Primary key change on ${action.table}.${action.column} requires a manual migration; ` +
+              `Postgres ALTER TABLE cannot add or drop a PK in isolation.`,
+          );
+      }
+    }).join("\n");
+  }
+}
+
+export const postgresMigrations = new PostgresMigrations();

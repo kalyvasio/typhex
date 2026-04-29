@@ -342,7 +342,7 @@ describe("dbs/postgres", () => {
           table: {
             _table: "pg_test_users",
             _schema: {
-              id: "integer",
+              id: "integer primary key",
               name: "text",
             },
           },
@@ -381,8 +381,43 @@ describe("dbs/postgres", () => {
         column: "age",
         oldDef: "text",
         newDef: "INTEGER",
+        columnInfo: { name: "age", type: "text", notnull: 0, dflt_value: null, pk: 0 },
+        changes: [{ kind: "type", from: "text", to: "integer" }],
       });
-      expect(sql).toBe('ALTER TABLE "pg_test_users" ALTER COLUMN "age" TYPE INTEGER;');
+      expect(sql).toBe('ALTER TABLE "pg_test_users" ALTER COLUMN "age" TYPE integer;');
+    });
+
+    it("generateSql produces Postgres ALTER COLUMN DDL for constraints and defaults", () => {
+      const sql = postgresMigrations.generateSql({
+        kind: "alter_column",
+        table: "pg_test_users",
+        column: "name",
+        oldDef: "text",
+        newDef: "text not null default 'Anon'",
+        columnInfo: { name: "name", type: "text", notnull: 0, dflt_value: null, pk: 0 },
+        changes: [
+          { kind: "not_null", from: false, to: true },
+          { kind: "default", from: null, to: "'Anon'" },
+        ],
+      });
+      expect(sql).toBe(
+        'ALTER TABLE "pg_test_users" ALTER COLUMN "name" SET NOT NULL;\n' +
+          'ALTER TABLE "pg_test_users" ALTER COLUMN "name" SET DEFAULT \'Anon\';',
+      );
+    });
+
+    it("generateSql throws on primary_key alter (no safe single-statement form)", () => {
+      expect(() =>
+        postgresMigrations.generateSql({
+          kind: "alter_column",
+          table: "pg_test_users",
+          column: "id",
+          oldDef: "integer",
+          newDef: "integer primary key",
+          columnInfo: { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 0 },
+          changes: [{ kind: "primary_key", from: false, to: true }],
+        }),
+      ).toThrow(/Primary key change on pg_test_users\.id/);
     });
 
     it("generateDownSql produces reverse Postgres DDL", () => {
@@ -429,8 +464,29 @@ describe("dbs/postgres", () => {
         column: "age",
         oldDef: "text",
         newDef: "INTEGER",
+        columnInfo: { name: "age", type: "text", notnull: 0, dflt_value: null, pk: 0 },
+        changes: [{ kind: "type", from: "text", to: "integer" }],
       });
       expect(sql).toBe('ALTER TABLE "pg_test_users" ALTER COLUMN "age" TYPE text;');
+    });
+
+    it("generateDownSql reverses Postgres constraint and default changes", () => {
+      const sql = postgresMigrations.generateDownSql({
+        kind: "alter_column",
+        table: "pg_test_users",
+        column: "name",
+        oldDef: "text",
+        newDef: "text not null default 'Anon'",
+        columnInfo: { name: "name", type: "text", notnull: 0, dflt_value: null, pk: 0 },
+        changes: [
+          { kind: "not_null", from: false, to: true },
+          { kind: "default", from: null, to: "'Anon'" },
+        ],
+      });
+      expect(sql).toBe(
+        'ALTER TABLE "pg_test_users" ALTER COLUMN "name" DROP NOT NULL;\n' +
+          'ALTER TABLE "pg_test_users" ALTER COLUMN "name" DROP DEFAULT;',
+      );
     });
 
     it("getTrackingTableDdl produces Postgres DDL", () => {
