@@ -38,6 +38,33 @@ users
 users.where((u) => u.id in [1, 2, 3]).count();
 ```
 
+Subqueries are supported on the right-hand side of `in` / `!(... in ...)`. Build the inner query with `.select(p => p.colName)` (a single column) and reference it from the outer query:
+
+```ts
+// Runtime mode: pass the inner builder via the params object.
+const activePostIds = Post.query()
+  .where((p) => p.active === 1)
+  .select((p) => p.id);
+
+const authorsWithActivePosts = await Author.query()
+  .where((a, posts) => a.postId in posts, { posts: activePostIds })
+  .toArray();
+
+// NOT IN works via negation:
+await Author.query()
+  .where((a, posts) => !(a.postId in posts), { posts: activePostIds })
+  .toArray();
+```
+
+When using the transformer, the inner chain can be inlined directly inside the predicate — closure capture happens automatically:
+
+```ts
+// Transformer mode (TypeScript projects):
+await Author.query()
+  .where((a) => a.postId in Post.query().where((p) => p.active === 1).select((p) => p.id))
+  .toArray();
+```
+
 ### Two Modes: Runtime Parsing or Compile-Time Transformation
 
 **Runtime mode** (works everywhere):

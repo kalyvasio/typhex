@@ -3,7 +3,7 @@
  */
 
 import * as ts from "typescript";
-import type { IrSelect, IrAggregate } from "../ir/types.js";
+import type { IrSelect, IrAggregate, IrSubquery } from "../ir/types.js";
 import {
   isTyphexType,
   matchTyphexMethodCall,
@@ -12,72 +12,11 @@ import {
   parseTsAggregateCall,
   irSelectToTsLiteral,
   irAggregateToTsLiteral,
+  getParamBindings,
+  type ParamBindings,
 } from "./shared.js";
-
-const DEFAULT_ROW_PARAM = "u";
-
-// ---------------------------------------------------------------------------
-// Parameter binding extraction — identifier or destructured pattern
-// ---------------------------------------------------------------------------
-
-interface ParamBindings {
-  paramName: string;
-  /** For destructured params: maps local name → path segments into the row. */
-  bindings: Map<string, string[]> | null;
-  /** Name of the ...rest identifier, if any. */
-  restName: string | null;
-}
-
-const NO_BINDINGS: ParamBindings = {
-  paramName: DEFAULT_ROW_PARAM,
-  bindings: null,
-  restName: null,
-};
-
-/**
- * Inspect the arrow's first parameter: if it's a plain identifier, the row is
- * bound to that name; if it's destructured (`{ id, name: n, ...rest }`), build
- * a map from each local binding back to its source key path.
- */
-function getParamBindings(param: ts.BindingName | undefined): ParamBindings {
-  if (!param) return NO_BINDINGS;
-  if (ts.isIdentifier(param)) {
-    return { paramName: param.text, bindings: null, restName: null };
-  }
-  if (!ts.isObjectBindingPattern(param)) return NO_BINDINGS;
-  return extractDestructuredBindings(param);
-}
-
-/**
- * Walk an object-destructuring pattern and build the local-name → source-key
- * map plus the optional rest identifier. Aliased entries (`{ foo: bar }`)
- * map `bar` back to `["foo"]`.
- */
-function extractDestructuredBindings(pattern: ts.ObjectBindingPattern): ParamBindings {
-  const bindings = new Map<string, string[]>();
-  let restName: string | null = null;
-
-  for (const el of pattern.elements) {
-    if (el.dotDotDotToken) {
-      if (ts.isIdentifier(el.name)) restName = el.name.text;
-      continue;
-    }
-    if (!ts.isIdentifier(el.name)) continue;
-
-    const localName = el.name.text;
-    // `{ foo: bar }` destructuring aliases — propertyName is the source key.
-    const sourceKey =
-      el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : localName;
-    bindings.set(localName, [sourceKey]);
-  }
-
-  if (bindings.size === 0 && !restName) return NO_BINDINGS;
-  return {
-    paramName: DEFAULT_ROW_PARAM,
-    bindings: bindings.size > 0 ? bindings : null,
-    restName,
-  };
-}
+import { tryExtractInlineSubqueryAggregate } from "./subquery-extract.js";
+import { toOuterDestructured } from "./where-transformer.js";
 
 // ---------------------------------------------------------------------------
 // Top-level arrow dispatch
@@ -91,6 +30,7 @@ function extractDestructuredBindings(pattern: ts.ObjectBindingPattern): ParamBin
 function arrowToIrSelect(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   pb: ParamBindings,
+  checker: ts.TypeChecker,
 ): IrSelect | null {
   // Single-expression shorthand bodies: p => p, p => p.id, p => count(p.id)
   if (!ts.isBlock(fn.body)) {
@@ -100,7 +40,7 @@ function arrowToIrSelect(
 
   const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
-  return parseSelectObjectLiteral(obj, pb);
+  return parseSelectObjectLiteral(obj, pb, checker);
 }
 
 /**
@@ -174,10 +114,12 @@ function parseShorthandAggregateBody(body: ts.CallExpression, paramName: string)
 function parseSelectObjectLiteral(
   obj: ts.ObjectLiteralExpression,
   pb: ParamBindings,
+  checker: ts.TypeChecker,
 ): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
   const aggregates: IrAggregate[] = [];
+  const subqueries: Array<{ alias: string; subquery: IrSubquery }> = [];
   let rest = false;
 
   for (const prop of obj.properties) {
@@ -190,24 +132,29 @@ function parseSelectObjectLiteral(
     const keyName = getPropertyKeyName(prop);
     if (!keyName) return null;
 
-    const handled = parseSelectObjectProperty(prop, keyName, pb);
+    const handled = parseSelectObjectProperty(prop, keyName, pb, checker);
     if (!handled) return null;
 
     if (handled.kind === "path") {
       paths.push(handled.path);
       aliases.push(keyName);
-    } else {
+    } else if (handled.kind === "aggregate") {
       aggregates.push(handled.aggregate);
+    } else {
+      subqueries.push({ alias: keyName, subquery: handled.subquery });
     }
   }
 
-  if (paths.length === 0 && aggregates.length === 0 && !rest) return null;
+  if (paths.length === 0 && aggregates.length === 0 && subqueries.length === 0 && !rest) {
+    return null;
+  }
   return {
     param: pb.paramName,
     paths,
     aliases,
     ...(rest ? { rest: true } : {}),
     ...(aggregates.length > 0 ? { aggregates } : {}),
+    ...(subqueries.length > 0 ? { subqueries } : {}),
   };
 }
 
@@ -228,7 +175,8 @@ function getPropertyKeyName(prop: ts.ObjectLiteralElementLike): string | null {
 
 type PropertyResult =
   | { kind: "path"; path: string[] }
-  | { kind: "aggregate"; aggregate: IrAggregate };
+  | { kind: "aggregate"; aggregate: IrAggregate }
+  | { kind: "subquery"; subquery: IrSubquery };
 
 /**
  * Classify a single select-object property as either a column path or an
@@ -239,6 +187,7 @@ function parseSelectObjectProperty(
   prop: ts.ObjectLiteralElementLike,
   keyName: string,
   pb: ParamBindings,
+  checker: ts.TypeChecker,
 ): PropertyResult | null {
   // { id }  →  shorthand refers to destructured binding
   if (ts.isShorthandPropertyAssignment(prop)) {
@@ -266,6 +215,19 @@ function parseSelectObjectProperty(
   if (ts.isCallExpression(value)) {
     const parsed = parseTsAggregateCall(value, [pb.paramName]);
     if (parsed) return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
+
+    // { totalPosts: Post.query().count() } / { sales: Sale.query().where(…).sum(s => s.amount) }
+    // Pass the outer select-arrow's row param so a correlated inner where
+    // (e.g. `.where(p => p.authorId === a.id)`) resolves `a.id` correctly.
+    // For destructured outer arrows, also pass the bindings so bare locals
+    // like `id` resolve to IrMember on the outer row.
+    const sub = tryExtractInlineSubqueryAggregate(
+      value,
+      checker,
+      [pb.paramName],
+      toOuterDestructured(pb),
+    );
+    if (sub) return { kind: "subquery", subquery: sub };
   }
 
   return null;
@@ -284,7 +246,7 @@ export function transformSelectCall(
   if (!arrow) return null;
 
   const pb = getParamBindings(arrow.parameters[0]?.name);
-  const irSelect = arrowToIrSelect(arrow, pb);
+  const irSelect = arrowToIrSelect(arrow, pb, checker);
   if (!irSelect) return null;
 
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [

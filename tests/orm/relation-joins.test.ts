@@ -185,7 +185,7 @@ describe("relation-joins", () => {
     });
 
     it("returns join when relation column used in orderBy (dot-notation path)", () => {
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
+      const orderBy: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "asc" }];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
@@ -198,7 +198,7 @@ describe("relation-joins", () => {
     });
 
     it("returns empty when orderBy path has only one segment (not a relation column)", () => {
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["name"], direction: "asc" }];
+      const orderBy: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" }];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toEqual([]);
     });
@@ -210,7 +210,7 @@ describe("relation-joins", () => {
         left: { kind: "member", param: "u", path: ["company", "name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
+      const orderBy: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "asc" }];
       const result = buildRelationJoins(ctx, where, "u", orderBy);
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
@@ -218,7 +218,7 @@ describe("relation-joins", () => {
 
     it("does not join one-to-many relation from orderBy", () => {
       mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["employees", "name"], direction: "asc" }];
+      const orderBy: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["employees", "name"] }, direction: "asc" }];
       const result = buildRelationJoins(ctx, null, "u", orderBy);
       expect(result).toHaveLength(0);
       mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });

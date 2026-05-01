@@ -148,7 +148,10 @@ async function fetchRows(
 
   const whereIr = rel?.whereIr ? whereAnd(baseWhere, rel.whereIr) : baseWhere;
   let chain = entity.query(qe).where(whereIr, rel?.whereParams ?? {});
-  for (const o of rel?.orderBy ?? []) chain = chain.orderBy(o.path[0] ?? "", o.direction);
+  for (const o of rel?.orderBy ?? []) {
+    const col = o.expr.kind === "member" ? (o.expr.path[0] ?? "") : "";
+    chain = chain.orderBy(col, o.direction);
+  }
   if (rel?.limitNum != null) chain = chain.limit(rel.limitNum);
   if (rel?.offsetNum != null) chain = chain.offset(rel.offsetNum);
   if (rel?.subPaths && rel.subPaths.length > 0) {

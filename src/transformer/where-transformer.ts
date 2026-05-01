@@ -3,7 +3,8 @@
  */
 
 import * as ts from "typescript";
-import type { IrNode, IrExists, IrCall, IrBinary, IrIn, IrConst } from "../ir/types.js";
+import type { IrNode, IrExists, IrCall, IrBinary, IrIn, IrConst, IrSubquery } from "../ir/types.js";
+import { buildIrSubquery } from "../ir/subquery-builder.js";
 import {
   getArrowExpressionBody,
   isTyphexType,
@@ -12,9 +13,124 @@ import {
   binaryOpFromSyntaxKind,
   parseTsAggregateCall,
   irNodeToTsLiteral,
+  getParamBindings,
+  type ParamBindings,
 } from "./shared.js";
+import { tryExtractInlineSubqueryAggregate, walkSubqueryChain } from "./subquery-extract.js";
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
+
+/** Destructured outer-arrow context. When the surrounding `.select(({ id }) => …)`
+ *  arrow uses object destructuring, the inner subquery's WHERE may reference
+ *  the destructured locals (e.g. `id`) — these resolve to IrMember on the
+ *  outer row rather than free variables. Always carries non-null bindings;
+ *  when the outer arrow has no destructure, callers pass `undefined` instead. */
+export type OuterDestructured = ParamBindings & { bindings: Map<string, string[]> };
+
+/** Narrow a ParamBindings into an OuterDestructured (or undefined when there
+ *  are no destructured locals to expose). Centralizes the conversion. */
+export function toOuterDestructured(pb: ParamBindings): OuterDestructured | undefined {
+  return pb.bindings ? { ...pb, bindings: pb.bindings } : undefined;
+}
+
+/** Context bundle threaded through where-IR conversion: lambda param names,
+ *  free-var collector, type checker, and the optional outer-destructured info. */
+interface WhereCtx {
+  paramNames: string[];
+  freeVars: Set<string>;
+  checker?: ts.TypeChecker;
+  outerDestructured?: OuterDestructured;
+}
+
+// ---------------------------------------------------------------------------
+// Inline subquery helpers
+// ---------------------------------------------------------------------------
+
+/** Extract a single column name from a `(p) => p.colName` arrow function. */
+function extractSelectColumn(fn: ts.ArrowFunction | ts.FunctionExpression): string | null {
+  if (fn.parameters.length !== 1) return null;
+  const paramName = fn.parameters[0]?.name;
+  if (!paramName || !ts.isIdentifier(paramName)) return null;
+  const body = ts.isBlock(fn.body)
+    ? fn.body.statements.length === 1 && ts.isReturnStatement(fn.body.statements[0])
+      ? ((fn.body.statements[0] as ts.ReturnStatement).expression ?? null)
+      : null
+    : fn.body;
+  if (!body) return null;
+  if (
+    ts.isPropertyAccessExpression(body) &&
+    ts.isIdentifier(body.expression) &&
+    body.expression.text === paramName.text
+  ) {
+    return body.name.text;
+  }
+  return null;
+}
+
+/** Read the static `tableName` string literal from an entity class expression via the type checker. */
+export function extractTableName(
+  entityExpr: ts.Expression,
+  checker: ts.TypeChecker,
+): string | null {
+  try {
+    const type = checker.getTypeAtLocation(entityExpr);
+    const prop = checker.getPropertyOfType(type, "tableName");
+    if (!prop) return null;
+    const propType = checker.getTypeOfSymbolAtLocation(prop, entityExpr);
+    return propType.isStringLiteral() ? propType.value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Try to convert a call-chain expression of the form
+ *   EntityClass.query().where(p => ...).select(p => p.col)
+ *   EntityClass.query().select(p => p.col)
+ * into an IrSubquery node. Returns null if the pattern doesn't match.
+ * Free variables inside the inner where predicate make it a correlated subquery
+ * which is not yet supported — return null in that case.
+ */
+function tryExtractInlineSubquery(
+  expr: ts.Expression,
+  checker: ts.TypeChecker,
+  outerParamNames: string[] = [],
+  outerDestructured?: OuterDestructured,
+): IrSubquery | null {
+  if (!ts.isCallExpression(expr)) return null;
+  if (!ts.isPropertyAccessExpression(expr.expression)) return null;
+  if (expr.expression.name.text !== "select") return null;
+  if (expr.arguments.length !== 1) return null;
+  const selectFn = expr.arguments[0];
+  if (!ts.isArrowFunction(selectFn) && !ts.isFunctionExpression(selectFn)) return null;
+  const selectCol = extractSelectColumn(selectFn as ts.ArrowFunction);
+  if (!selectCol) return null;
+
+  const chain = walkSubqueryChain(
+    expr.expression.expression,
+    checker,
+    outerParamNames,
+    outerDestructured,
+  );
+  if (!chain) return null;
+
+  const tableName = extractTableName(chain.entityExpr, checker);
+  if (!tableName) return null;
+
+  // For the IN form `.distinct(p => p.col)` only makes sense if the column
+  // matches `selectCol`; otherwise the chain is malformed. Either way, the
+  // SELECT list is single-column, so a bare `DISTINCT` flag is sufficient.
+  return buildIrSubquery({
+    tableName,
+    selectCol,
+    whereIr: chain.whereIr,
+    innerParamNames: chain.innerParamNames,
+    orderBy: chain.orderBy,
+    limitNum: chain.limitNum,
+    offsetNum: chain.offsetNum,
+    distinct: chain.distinctCol !== undefined ? true : undefined,
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Expression → IR dispatch
@@ -25,17 +141,15 @@ const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
  * the transformer silently skips them and the runtime parser can handle them
  * later if needed.
  */
-function exprToIr(expr: ts.Expression, paramNames: string[], freeVars: Set<string>): IrNode | null {
-  if (ts.isParenthesizedExpression(expr)) {
-    return exprToIr(expr.expression, paramNames, freeVars);
-  }
-  if (ts.isBinaryExpression(expr)) return binaryExprToIr(expr, paramNames, freeVars);
-  if (isBangExpression(expr)) return unaryExprToIr(expr, paramNames, freeVars);
-  if (ts.isPropertyAccessExpression(expr)) return memberExprToIr(expr, paramNames);
-  if (ts.isIdentifier(expr)) return identifierToIr(expr, paramNames, freeVars);
+function exprToIr(expr: ts.Expression, ctx: WhereCtx): IrNode | null {
+  if (ts.isParenthesizedExpression(expr)) return exprToIr(expr.expression, ctx);
+  if (ts.isBinaryExpression(expr)) return binaryExprToIr(expr, ctx);
+  if (isBangExpression(expr)) return unaryExprToIr(expr, ctx);
+  if (ts.isPropertyAccessExpression(expr)) return memberExprToIr(expr, ctx);
+  if (ts.isIdentifier(expr)) return identifierToIr(expr, ctx);
   if (isConstantLiteral(expr)) return literalToIr(expr);
-  if (ts.isCallExpression(expr)) return callExprToIr(expr, paramNames, freeVars);
-  if (ts.isArrayLiteralExpression(expr)) return arrayLiteralToIr(expr, paramNames, freeVars);
+  if (ts.isCallExpression(expr)) return callExprToIr(expr, ctx);
+  if (ts.isArrayLiteralExpression(expr)) return arrayLiteralToIr(expr, ctx);
   return null;
 }
 
@@ -60,16 +174,37 @@ function isConstantLiteral(expr: ts.Expression): boolean {
 // ---- Per-node-kind handlers -------------------------------------------------
 
 /** Handle `&&`, `||`, `===`, `in`, etc. — returns IrBinary or IrIn. */
-function binaryExprToIr(
-  expr: ts.BinaryExpression,
-  paramNames: string[],
-  freeVars: Set<string>,
-): IrNode | null {
+function binaryExprToIr(expr: ts.BinaryExpression, ctx: WhereCtx): IrNode | null {
   const opStr = binaryOpFromSyntaxKind(expr.operatorToken.kind);
   if (!opStr) return null;
 
-  const left = exprToIr(expr.left, paramNames, freeVars);
-  const right = exprToIr(expr.right, paramNames, freeVars);
+  if (opStr === "in" && ctx.checker) {
+    const left = exprToIr(expr.left, ctx);
+    if (!left) return null;
+    // Pass paramNames so the inline subquery's inner where can reference
+    // the outer arrow's row params (correlated IN subquery).
+    const sub = tryExtractInlineSubquery(
+      expr.right,
+      ctx.checker,
+      ctx.paramNames,
+      ctx.outerDestructured,
+    );
+    if (sub) return { kind: "in", left, right: sub } as IrIn;
+    const right = exprToIr(expr.right, ctx);
+    if (!right) return null;
+    return { kind: "in", left, right } as IrIn;
+  }
+
+  const left =
+    exprToIr(expr.left, ctx) ??
+    (ctx.checker
+      ? tryExtractInlineSubqueryAggregate(expr.left, ctx.checker, ctx.paramNames, ctx.outerDestructured)
+      : null);
+  const right =
+    exprToIr(expr.right, ctx) ??
+    (ctx.checker
+      ? tryExtractInlineSubqueryAggregate(expr.right, ctx.checker, ctx.paramNames, ctx.outerDestructured)
+      : null);
   if (!left || !right) return null;
 
   if (opStr === "in") return { kind: "in", left, right } as IrIn;
@@ -77,21 +212,32 @@ function binaryExprToIr(
 }
 
 /** Handle `!<expr>` — wraps the inner IR in an IrUnary with `!`. */
-function unaryExprToIr(
-  expr: ts.PrefixUnaryExpression,
-  paramNames: string[],
-  freeVars: Set<string>,
-): IrNode | null {
-  const operand = exprToIr(expr.operand, paramNames, freeVars);
+function unaryExprToIr(expr: ts.PrefixUnaryExpression, ctx: WhereCtx): IrNode | null {
+  const operand = exprToIr(expr.operand, ctx);
   if (!operand) return null;
   return { kind: "unary", op: "!", operand };
 }
 
-/** Handle `p.a.b.c` — resolves against the lambda params and returns an IrMember. */
-function memberExprToIr(expr: ts.PropertyAccessExpression, paramNames: string[]): IrNode | null {
-  const resolved = resolveMemberPath(expr, paramNames);
-  if (!resolved) return null;
-  return { kind: "member", param: resolved.param, path: resolved.path };
+/** Handle `p.a.b.c` — resolves against the lambda params and returns an IrMember.
+ *  Falls back to `outerDestructured` so `post.id` works when `post` is a
+ *  destructured local from the outer arrow. */
+function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNode | null {
+  const resolved = resolveMemberPath(expr, ctx.paramNames);
+  if (resolved) return { kind: "member", param: resolved.param, path: resolved.path };
+
+  if (!ctx.outerDestructured) return null;
+  // Walk the chain manually; if the root identifier is a destructured local,
+  // prefix its source path and emit IrMember on the outer row.
+  const parts: string[] = [];
+  let current: ts.Expression = expr;
+  while (ts.isPropertyAccessExpression(current)) {
+    parts.unshift(current.name.text);
+    current = current.expression;
+  }
+  if (!ts.isIdentifier(current)) return null;
+  const prefix = ctx.outerDestructured.bindings.get(current.text);
+  if (!prefix) return null;
+  return { kind: "member", param: ctx.outerDestructured.paramName, path: [...prefix, ...parts] };
 }
 
 /**
@@ -99,11 +245,15 @@ function memberExprToIr(expr: ts.PropertyAccessExpression, paramNames: string[])
  * empty path) or a closure variable (→ IrParam; the caller records it in
  * `freeVars` so the rewritten call can pass it along at runtime).
  */
-function identifierToIr(expr: ts.Identifier, paramNames: string[], freeVars: Set<string>): IrNode {
-  if (paramNames.includes(expr.text)) {
+function identifierToIr(expr: ts.Identifier, ctx: WhereCtx): IrNode {
+  if (ctx.paramNames.includes(expr.text)) {
     return { kind: "member", param: expr.text, path: [] };
   }
-  freeVars.add(expr.text);
+  if (ctx.outerDestructured) {
+    const path = ctx.outerDestructured.bindings.get(expr.text);
+    if (path) return { kind: "member", param: ctx.outerDestructured.paramName, path };
+  }
+  ctx.freeVars.add(expr.text);
   return { kind: "param", key: expr.text };
 }
 
@@ -126,15 +276,11 @@ function extractLiteralValue(expr: ts.Expression): unknown {
  * Handle `[a, b, c]` — only valid as the right-hand-side of `in`, so all
  * elements must reduce to constants. Returns null for spreads / non-literals.
  */
-function arrayLiteralToIr(
-  expr: ts.ArrayLiteralExpression,
-  paramNames: string[],
-  freeVars: Set<string>,
-): IrNode | null {
+function arrayLiteralToIr(expr: ts.ArrayLiteralExpression, ctx: WhereCtx): IrNode | null {
   const values: unknown[] = [];
   for (const element of expr.elements) {
     if (element.kind === ts.SyntaxKind.SpreadElement) return null;
-    const ir = exprToIr(element, paramNames, freeVars);
+    const ir = exprToIr(element, ctx);
     if (!ir || ir.kind !== "const") return null;
     values.push(ir.value);
   }
@@ -147,24 +293,22 @@ function arrayLiteralToIr(
  * Dispatch a CallExpression: method calls go through some/every or the
  * string-method whitelist; identifier calls must be aggregate functions.
  */
-function callExprToIr(
-  expr: ts.CallExpression,
-  paramNames: string[],
-  freeVars: Set<string>,
-): IrNode | null {
+function callExprToIr(expr: ts.CallExpression, ctx: WhereCtx): IrNode | null {
   const callee = expr.expression;
 
   // Method calls: .some()/.every()/.startsWith()/.endsWith()/.includes()
   if (ts.isPropertyAccessExpression(callee)) {
-    const exists = tryParseSomeEvery(expr, callee, paramNames, freeVars);
+    // some/every introduce their own inner-row scope; outer destructured locals
+    // do not leak into that scope (matches the existing freeVars isolation).
+    const exists = tryParseSomeEvery(expr, callee, ctx);
     if (exists) return exists;
 
-    return tryParseAllowedMethod(expr, callee, paramNames, freeVars);
+    return tryParseAllowedMethod(expr, callee, ctx);
   }
 
   // Identifier calls: aggregates only — SUM, COUNT, groupConcat, etc.
   if (ts.isIdentifier(callee)) {
-    const parsed = parseTsAggregateCall(expr, paramNames);
+    const parsed = parseTsAggregateCall(expr, ctx.paramNames);
     return parsed ? parsed.ir : null;
   }
 
@@ -179,16 +323,15 @@ function callExprToIr(
 function tryParseAllowedMethod(
   call: ts.CallExpression,
   callee: ts.PropertyAccessExpression,
-  paramNames: string[],
-  freeVars: Set<string>,
+  ctx: WhereCtx,
 ): IrCall | null {
   const method = callee.name.text;
   if (!ALLOWED_METHODS.has(method)) return null;
 
-  const receiver = exprToIr(callee.expression, paramNames, freeVars);
+  const receiver = exprToIr(callee.expression, ctx);
   if (!receiver) return null;
 
-  const args = call.arguments.map((a) => exprToIr(a, paramNames, freeVars));
+  const args = call.arguments.map((a) => exprToIr(a, ctx));
   if (args.some((a) => a === null)) return null;
 
   return { kind: "call", method, receiver, args: args as IrNode[] };
@@ -202,15 +345,14 @@ function tryParseAllowedMethod(
 function tryParseSomeEvery(
   call: ts.CallExpression,
   callee: ts.PropertyAccessExpression,
-  paramNames: string[],
-  _freeVars: Set<string>,
+  ctx: WhereCtx,
 ): IrExists | null {
   const method = callee.name.text;
   if (method !== "some" && method !== "every") return null;
   if (call.arguments.length !== 1) return null;
   if (!ts.isPropertyAccessExpression(callee.expression)) return null;
 
-  const receiver = resolveMemberPath(callee.expression, paramNames);
+  const receiver = resolveMemberPath(callee.expression, ctx.paramNames);
   if (!receiver || receiver.path.length < 1) return null;
 
   const innerFn = call.arguments[0];
@@ -221,7 +363,11 @@ function tryParseSomeEvery(
   if (!innerExpr) return null;
 
   // Inner free-vars are intentionally discarded — subquery scope is self-contained.
-  const innerWhere = exprToIr(innerExpr, [innerParam], new Set());
+  const innerWhere = exprToIr(innerExpr, {
+    paramNames: [innerParam],
+    freeVars: new Set(),
+    checker: ctx.checker,
+  });
   if (!innerWhere) return null;
 
   return {
@@ -257,14 +403,17 @@ function extractParamNames(fn: ts.ArrowFunction | ts.FunctionExpression): string
  */
 function arrowToIr(
   fn: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  extraParamNames: string[] = [],
+  outerDestructured?: OuterDestructured,
 ): { ir: IrNode; freeVars: string[] } | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
 
-  const paramNames = extractParamNames(fn);
+  const paramNames = [...extractParamNames(fn), ...extraParamNames];
   const freeVars = new Set<string>();
 
-  const ir = exprToIr(expr, paramNames, freeVars);
+  const ir = exprToIr(expr, { paramNames, freeVars, checker, outerDestructured });
   if (!ir) return null;
 
   return { ir, freeVars: [...freeVars] };
@@ -287,7 +436,11 @@ function transformArrowCall(
   const arrow = matchTyphexMethodCall(call, methodName, checker, isTyphexType);
   if (!arrow) return null;
 
-  const result = arrowToIr(arrow);
+  // If the where/having arrow's first param is destructured, expose its
+  // bindings so a bare local (or member access on a destructured local)
+  // inside an inline subquery's correlated WHERE resolves to the outer row.
+  const pb = getParamBindings(arrow.parameters[0]?.name);
+  const result = arrowToIr(arrow, checker, [], toOuterDestructured(pb));
   if (!result) return null;
 
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [
@@ -306,6 +459,20 @@ function buildFreeVarsLiteral(freeVars: string[]): ts.ObjectLiteralExpression {
 // ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
+
+/** Convert a where-style arrow (`p => predicate`) to IR + free-var list.
+ *  Exposed for the select transformer so it can parse inner WHEREs of
+ *  inline subqueries used as scalar columns. `outerParamNames` enables
+ *  correlation: bare references to those names resolve as IrMember rather
+ *  than as free variables. */
+export function parseWhereArrowToIr(
+  fn: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  outerParamNames: string[] = [],
+  outerDestructured?: OuterDestructured,
+): { ir: IrNode; freeVars: string[] } | null {
+  return arrowToIr(fn, checker, outerParamNames, outerDestructured);
+}
 
 /** Rewrite a `.where(arrow)` call on a Typhex Table/QueryBuilder into IR form. */
 export function transformWhereCall(

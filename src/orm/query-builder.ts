@@ -9,10 +9,13 @@ import {
   type IrNode,
   type IrOrderBy,
   type IrSelect,
+  type IrSubquery,
   type OrderDirection,
   type JoinHint,
   type JoinType,
 } from "../ir/types.js";
+import { collectParamNamesFromWhere } from "../ir/types.js";
+import { buildIrSubquery } from "../ir/subquery-builder.js";
 import type { QueryExecutor } from "./db.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
@@ -109,6 +112,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     this.state.whereIr = resolveWhereIr(
       predicate as IrNode | ((entity: unknown) => boolean),
       params ? Object.keys(params) : [],
+      params,
     );
     return this;
   }
@@ -158,6 +162,38 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const newHints: JoinHint[] = relationKeys.map((k) => ({ relationKey: k, joinType }));
     this.state.joinHints = [...(this.state.joinHints ?? []), ...newHints];
     return this;
+  }
+
+  /** Return an IrSubquery for use as the right-hand side of a WHERE IN clause. */
+  toSubqueryIr(): IrSubquery {
+    const { selectIr } = this.state;
+    if (!selectIr || selectIr.paths.length !== 1 || selectIr.paths[0].length !== 1) {
+      throw new Error(
+        "QueryBuilder used as a subquery must select exactly one top-level column via .select(p => p.colName) — nested paths and multi-column selects are not supported as subquery results.",
+      );
+    }
+    // Param names referenced inside the QB's where lambda are all "inner" —
+    // QB-built subqueries are non-correlated (no shared scope with an outer
+    // query). Treat every member param name as an inner one.
+    const whereIr = this.state.whereIr ?? null;
+    const seen = new Set<string>();
+    if (whereIr) collectParamNamesFromWhere(whereIr, seen);
+    // orderBy expressions reference the subquery's own row too — fold their
+    // param names in so the subquery alias resolves correctly.
+    for (const ob of this.state.orderBy) {
+      if (ob.expr.kind === "member") seen.add(ob.expr.param);
+    }
+    const innerParamNames = [...seen];
+    return buildIrSubquery({
+      tableName: this.state.tableName,
+      selectCol: selectIr.paths[0][0],
+      whereIr,
+      whereParams: this.state.whereParams,
+      innerParamNames,
+      orderBy: this.state.orderBy.length > 0 ? this.state.orderBy : undefined,
+      limitNum: this.state.limitNum,
+      offsetNum: this.state.offsetNum,
+    });
   }
 
   /** Set the maximum number of rows to return. */
@@ -413,33 +449,54 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const qe = this.state.qe;
     const dialect = getDialectOrThrow(this.state);
     const opts = getCompileOpts(this.state);
-    const whereResult = dialect.compileWhere(this.state.whereIr, opts);
-    const { sql: whereSql, params: whereParams } = this.expandWithSentinels(
-      dialect,
-      whereResult.sql,
-      whereResult.params,
+
+    // Each call expands placeholders and advances `nextOffset` by the param
+    // count, so call-sites never have to add up segments themselves.
+    let nextOffset = 1;
+    const expand = (
+      compiled: { sql: string; params: unknown[] },
+      paramValues: Record<string, unknown>,
+    ): ExpandPlaceholdersResult => {
+      const out = this.expandWithSentinels(
+        dialect,
+        compiled.sql,
+        compiled.params,
+        paramValues,
+        nextOffset,
+      );
+      nextOffset += out.params.length;
+      return out;
+    };
+
+    const selectListExpanded = expand(
+      dialect.compileSelectList(selectForSql, columnNames, opts),
       this.state.whereParams,
     );
-    const selectList = dialect.compileSelectList(selectForSql, columnNames, opts);
-    const orderBySql = dialect.compileOrderBy(this.state.orderBy, opts);
+    const whereExpanded = expand(
+      dialect.compileWhere(this.state.whereIr, opts),
+      this.state.whereParams,
+    );
+    const { sql: whereSql, params: whereParams } = whereExpanded;
     const joinsSql = buildJoinsSql(this.state, dialect);
-    let havingSqlResult: { sql: string; params: unknown[] } | null = null;
+    let havingSqlResult: ExpandPlaceholdersResult | null = null;
     if (this.state.havingIr) {
-      const havingResult = dialect.compileWhere(this.state.havingIr, opts);
-      havingSqlResult = this.expandWithSentinels(
-        dialect,
-        havingResult.sql,
-        havingResult.params,
+      havingSqlResult = expand(
+        dialect.compileWhere(this.state.havingIr, opts),
         this.state.havingParams ?? {},
-        whereParams.length + 1,
       );
     }
+    const orderByExpanded = expand(
+      dialect.compileOrderBy(this.state.orderBy, opts),
+      this.state.whereParams,
+    );
     const { sql, params } = dialect.compileSelect({
       table: tableName,
-      selectList,
+      selectList: selectListExpanded.sql,
+      selectListParams: selectListExpanded.params,
       whereSql,
       whereParams,
-      orderBySql,
+      orderBySql: orderByExpanded.sql,
+      orderByParams: orderByExpanded.params,
       limitNum: this.state.limitNum,
       offsetNum: this.state.offsetNum,
       joinsSql: joinsSql || undefined,

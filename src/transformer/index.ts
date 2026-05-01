@@ -21,10 +21,16 @@ import { transformJoinCall } from "./join-transformer.js";
  */
 function visit(node: ts.Node, ctx: ts.TransformationContext, checker: ts.TypeChecker): ts.Node {
   if (ts.isCallExpression(node)) {
-    // Visit children first so nested calls (e.g. users.select(...).where(...)) get transformed from the inside out
+    // Try outside-in first for select/where: inline subquery detection requires
+    // the inner .where() arrow to still be present (not yet replaced by IR).
+    const early = transformSelectCall(node, checker) || transformWhereCall(node, checker);
+    if (early) {
+      return ts.visitEachChild(early, (n) => visit(n, ctx, checker), ctx);
+    }
+
+    // Visit children first so nested calls get transformed inside-out
     const visited = ts.visitEachChild(node, (n) => visit(n, ctx, checker), ctx);
 
-    // Try each transformer in order
     const rewritten =
       transformSelectCall(visited, checker) ||
       transformWhereCall(visited, checker) ||

@@ -31,7 +31,9 @@ export function getRootParam(state: QueryState<unknown>): string {
     const first = names.values().next().value;
     if (first) return first;
   }
-  return state.orderBy[0]?.param ?? DEFAULT_ROW_PARAM;
+  const firstOrder = state.orderBy[0]?.expr;
+  if (firstOrder?.kind === "member") return firstOrder.param;
+  return DEFAULT_ROW_PARAM;
 }
 
 /** Map every row-parameter name in the query to the main table alias (t0),
@@ -40,7 +42,9 @@ export function buildParamToAlias(state: QueryState<unknown>): Record<string, st
   const names = new Set<string>();
   names.add(DEFAULT_ROW_PARAM);
   if (state.whereIr) collectParamNamesFromWhere(state.whereIr, names);
-  for (const o of state.orderBy) names.add(o.param);
+  for (const o of state.orderBy) {
+    if (o.expr.kind === "member") names.add(o.expr.param);
+  }
   if (state.selectIr) names.add(state.selectIr.param);
   const paramToAlias: Record<string, string> = {};
   for (const p of names) paramToAlias[p] = TABLE_ALIAS;

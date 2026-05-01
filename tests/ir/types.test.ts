@@ -140,40 +140,43 @@ describe("ir/types", () => {
 
   describe("isIrOrderBy", () => {
     it("returns true for a valid IrOrderBy", () => {
-      const ob: IrOrderBy = { param: "u", path: ["name"], direction: "asc" };
+      const ob: IrOrderBy = { expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" };
       expect(isIrOrderBy(ob)).toBe(true);
     });
 
     it("returns true for desc direction", () => {
-      expect(isIrOrderBy({ param: "u", path: ["age"], direction: "desc" })).toBe(true);
+      expect(isIrOrderBy({ expr: { kind: "member", param: "u", path: ["age"] }, direction: "desc" })).toBe(true);
     });
 
     it("returns true for a relation path", () => {
-      expect(isIrOrderBy({ param: "u", path: ["author", "name"], direction: "asc" })).toBe(true);
+      expect(isIrOrderBy({ expr: { kind: "member", param: "u", path: ["author", "name"] }, direction: "asc" })).toBe(true);
     });
 
-    it("returns false when param is missing", () => {
-      expect(isIrOrderBy({ path: ["name"], direction: "asc" })).toBe(false);
+    it("returns true for a subquery expr", () => {
+      expect(
+        isIrOrderBy({
+          expr: {
+            kind: "subquery",
+            tableName: "posts",
+            aggregate: { func: "COUNT" },
+            whereIr: null,
+            whereParams: {},
+          },
+          direction: "asc",
+        }),
+      ).toBe(true);
     });
 
-    it("returns false when param is an empty string", () => {
-      expect(isIrOrderBy({ param: "", path: ["name"], direction: "asc" })).toBe(false);
+    it("returns false when expr is missing", () => {
+      expect(isIrOrderBy({ direction: "asc" })).toBe(false);
     });
 
-    it("returns false when param is not a string", () => {
-      expect(isIrOrderBy({ param: 1, path: ["name"], direction: "asc" })).toBe(false);
-    });
-
-    it("returns false when path is empty", () => {
-      expect(isIrOrderBy({ param: "u", path: [], direction: "asc" })).toBe(false);
-    });
-
-    it("returns false when path contains non-string segments", () => {
-      expect(isIrOrderBy({ param: "u", path: [42], direction: "asc" })).toBe(false);
+    it("returns false when expr is not an IR node", () => {
+      expect(isIrOrderBy({ expr: { kind: "bogus" }, direction: "asc" })).toBe(false);
     });
 
     it("returns false for unknown direction", () => {
-      expect(isIrOrderBy({ param: "u", path: ["name"], direction: "random" })).toBe(false);
+      expect(isIrOrderBy({ expr: { kind: "member", param: "u", path: ["name"] }, direction: "random" })).toBe(false);
     });
 
     it("returns false for null", () => {

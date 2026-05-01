@@ -298,6 +298,6 @@ describe("parser/parseArrowToIrSelect", () => {
       limitNum: 5,
     });
     expect(ir?.relations?.[0].whereIr).toBeDefined();
-    expect(ir?.relations?.[0].orderBy).toEqual([{ param: "u", path: ["title"], direction: "asc" }]);
+    expect(ir?.relations?.[0].orderBy).toEqual([{ expr: { kind: "member", param: "u", path: ["title"] }, direction: "asc" }]);
   });
 });

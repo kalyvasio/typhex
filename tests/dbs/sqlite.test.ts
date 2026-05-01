@@ -136,8 +136,8 @@ describe("dbs/sqlite", () => {
       const result = sqliteDialect.compileSelectList(select, ["id", "name", "companyId"], {
         relationPathToAlias: { "c.company": "t1" },
       });
-      expect(result).toContain('"t1"."name"');
-      expect(result).toContain("company_name");
+      expect(result.sql).toContain('"t1"."name"');
+      expect(result.sql).toContain("company_name");
     });
 
     it("compileInsertMany produces multi-row INSERT with RETURNING * when pk provided", () => {

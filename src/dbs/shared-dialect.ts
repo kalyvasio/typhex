@@ -8,7 +8,8 @@
  * provided by the dialect object passed to makeCompileNode().
  */
 
-import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect, IrAggregate, IrSubquery } from "../ir/types.js";
+import { validateIrSubquery } from "../ir/types.js";
 import type { CompileOptions, DialectImpl, ResolvedOpts } from "./types.js";
 
 export const DEFAULT_OPTS: CompileOptions = {
@@ -18,6 +19,30 @@ export const DEFAULT_OPTS: CompileOptions = {
 
 export function quoteId(name: string): string {
   return `"${name.replaceAll('"', '""')}"`;
+}
+
+/** Resolve the SQL alias and remaining column path for `<param>.<path...>`,
+ *  honoring `relationPathToAlias` rewrites.
+ *
+ *  `minPathLenForRewrite` is normally 1 (any single-segment path that matches
+ *  a relation key is rewritten). ORDER BY uses 2 — `u.company` should remain
+ *  on the main table even when `company` is a relation key. */
+export function resolveColumnAlias(
+  param: string,
+  path: string[],
+  opts: ResolvedOpts,
+  minPathLenForRewrite = 1,
+): { alias: string; path: string[] } {
+  let alias = opts.paramToAlias[param] ?? opts.tableAlias;
+  let p = path;
+  if (path.length >= minPathLenForRewrite && opts.relationPathToAlias) {
+    const relAlias = opts.relationPathToAlias[`${param}.${path[0]}`];
+    if (relAlias) {
+      alias = relAlias;
+      p = path.slice(1);
+    }
+  }
+  return { alias: alias ?? "t0", path: p };
 }
 
 export function resolveOpts(options: CompileOptions): ResolvedOpts {
@@ -40,17 +65,11 @@ export function compileAggregateArg(
 ): string {
   if (arg === null) return "*";
   if (arg.kind === "member") {
-    const m = arg;
-    let alias = opts ? (opts.paramToAlias[m.param] ?? opts.tableAlias) : "t0";
-    let path = m.path;
-    if (opts?.relationPathToAlias && path.length >= 1) {
-      const relAlias = opts.relationPathToAlias[`${m.param}.${path[0]}`];
-      if (relAlias) {
-        alias = relAlias;
-        path = path.slice(1);
-      }
+    if (opts) {
+      const { alias, path } = resolveColumnAlias(arg.param, arg.path, opts);
+      return `${quoteId(alias)}.${quoteId(path[path.length - 1])}`;
     }
-    return `${quoteId(alias ?? "t0")}.${quoteId(path[path.length - 1])}`;
+    return `${quoteId("t0")}.${quoteId(arg.path[arg.path.length - 1])}`;
   }
   if (arg.kind === "const" && typeof arg.value === "number") {
     return String(arg.value);
@@ -169,7 +188,29 @@ function compileInNode(
     params.push({ __param: node.right.key });
     return `${left} ${op} (${dialect.placeholder(params.length)})`;
   }
-  throw new Error("IN right side must be const array or param");
+  if (node.right.kind === "subquery") {
+    if (!node.right.selectCol) {
+      throw new Error("[typhex] Subquery on right side of IN must specify selectCol");
+    }
+    return `${left} ${op} ${compileSubqueryExpr(node.right, opts, params, compileNode)}`;
+  }
+  throw new Error("IN right side must be const array, param, or subquery");
+}
+
+/** Pick the next free `t<N>` alias not already used by paramToAlias or
+ *  relationPathToAlias values. Avoids collisions with relation JOIN aliases
+ *  (which start at t1) and with nested subquery aliases. */
+function nextFreeAlias(opts: ResolvedOpts): string {
+  const used = new Set<string>();
+  used.add(opts.tableAlias);
+  for (const a of Object.values(opts.paramToAlias)) used.add(a);
+  if (opts.relationPathToAlias) {
+    for (const a of Object.values(opts.relationPathToAlias)) used.add(a);
+  }
+  for (let i = 1; ; i++) {
+    const candidate = `t${i}`;
+    if (!used.has(candidate)) return candidate;
+  }
 }
 
 function compileExistsNode(
@@ -217,15 +258,7 @@ export function makeCompileNode(dialect: DialectImpl) {
       case "unary":
         return `(NOT ${compileNode(node.operand, opts, params)})`;
       case "member": {
-        let alias = opts.paramToAlias[node.param] ?? opts.tableAlias;
-        let path = node.path;
-        if (path.length >= 1 && opts.relationPathToAlias) {
-          const relAlias = opts.relationPathToAlias[`${node.param}.${path[0]}`];
-          if (relAlias) {
-            alias = relAlias;
-            path = path.slice(1);
-          }
-        }
+        const { alias, path } = resolveColumnAlias(node.param, node.path, opts);
         if (path.length === 0) return quoteId(alias);
         return `${quoteId(alias)}.${path.map(quoteId).join(".")}`;
       }
@@ -239,6 +272,8 @@ export function makeCompileNode(dialect: DialectImpl) {
         return compileInNode(node, opts, params, dialect, compileNode);
       case "exists":
         return compileExistsNode(node, opts, params, dialect, compileNode);
+      case "subquery":
+        return compileSubqueryExpr(node, opts, params, compileNode);
       case "call": {
         const receiver = compileNode(node.receiver, opts, params);
         if (
@@ -263,25 +298,44 @@ export function makeCompileNode(dialect: DialectImpl) {
   return compileNode;
 }
 
-export function compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}): string {
-  if (orders.length === 0) return "";
+export function compileOrderBy(
+  orders: IrOrderBy[],
+  options: CompileOptions = {},
+  dialect?: DialectImpl,
+): { sql: string; params: unknown[] } {
+  if (orders.length === 0) return { sql: "", params: [] };
   const opts = resolveOpts(options);
-  return orders
+  const params: unknown[] = [];
+  const compileNode = dialect ? makeCompileNode(dialect) : null;
+  const sql = orders
     .map((o) => {
-      let tableAlias = opts.paramToAlias?.[o.param] ?? opts.tableAlias ?? "t0";
-      let path = o.path;
-      if (path.length >= 2 && opts.relationPathToAlias) {
-        const relAlias = opts.relationPathToAlias[`${o.param}.${path[0]}`];
-        if (relAlias) {
-          tableAlias = relAlias;
-          path = path.slice(1);
-        }
-      }
-      const col = path.map(quoteId).join(".");
       const dir = o.direction === "desc" ? "DESC" : "ASC";
-      return `${quoteId(tableAlias)}.${col} ${dir}`;
+      // Member exprs use the dedicated renderer to preserve historical
+      // single-segment-path semantics (`u.company` → `"t0"."company"`,
+      // not the relation join's alias). compileNode would treat any
+      // `param.relationKey` as a relation rewrite even for length-1 paths.
+      if (o.expr.kind === "member") {
+        return `${renderOrderByMember(o.expr, opts)} ${dir}`;
+      }
+      if (!compileNode) {
+        throw new Error(
+          "[typhex] compileOrderBy needs a dialect to compile non-member sort expressions",
+        );
+      }
+      return `${compileNode(o.expr, opts, params)} ${dir}`;
     })
     .join(", ");
+  return { sql, params };
+}
+
+/** Render an IrMember expression as the resolved column reference for ORDER BY,
+ *  honoring relation alias rewrites (`u.company.name` → `"t1"."name"`). */
+function renderOrderByMember(expr: IrNode & { kind: "member" }, opts: ResolvedOpts): string {
+  // ORDER BY uses minPathLenForRewrite=2 so a length-1 path like `u.company`
+  // stays on the main table even when `company` is also a relation key —
+  // historic behavior we preserve to match snapshot expectations.
+  const { alias, path } = resolveColumnAlias(expr.param, expr.path, opts, 2);
+  return `${quoteId(alias)}.${path.map(quoteId).join(".")}`;
 }
 
 export function compileSelectList(
@@ -289,8 +343,10 @@ export function compileSelectList(
   columns: string[],
   options: CompileOptions = {},
   compileAggFn: (agg: IrAggregate, opts: ResolvedOpts) => string = compileAggregate,
-): string {
+  dialect?: DialectImpl,
+): { sql: string; params: unknown[] } {
   const opts = resolveOpts(options);
+  const params: unknown[] = [];
   const rootAlias = select?.param
     ? (opts.paramToAlias?.[select.param] ?? opts.tableAlias ?? "t0")
     : (opts.tableAlias ?? "t0");
@@ -299,24 +355,25 @@ export function compileSelectList(
     select?.aggregates && select.aggregates.length > 0
       ? select.aggregates.map((agg) => compileAggFn(agg, opts))
       : [];
+  const subqueryParts =
+    select?.subqueries && select.subqueries.length > 0 && dialect
+      ? select.subqueries.map((entry) =>
+          compileSelectListSubquery(entry.alias, entry.subquery, opts, params, dialect),
+        )
+      : [];
   if (!select || select.paths.length === 0) {
-    if (aggParts.length > 0 && (!select || !select.rest)) {
-      return aggParts.join(", ");
+    if ((aggParts.length > 0 || subqueryParts.length > 0) && (!select || !select.rest)) {
+      return { sql: [...aggParts, ...subqueryParts].join(", "), params };
     }
     const baseParts = columns.map((c) => `${base}.${quoteId(c)}`);
-    return [...baseParts, ...aggParts].join(", ");
+    return { sql: [...baseParts, ...aggParts, ...subqueryParts].join(", "), params };
   }
   const aliases = select.aliases;
   const explicitParts = select.paths.map((path, i) => {
-    let alias = rootAlias;
-    let p = path;
-    if (path.length >= 1 && opts.relationPathToAlias && select?.param) {
-      const relAlias = opts.relationPathToAlias[`${select.param}.${path[0]}`];
-      if (relAlias) {
-        alias = relAlias;
-        p = path.slice(1);
-      }
-    }
+    const resolved = select?.param
+      ? resolveColumnAlias(select.param, path, opts)
+      : { alias: rootAlias, path };
+    const { alias, path: p } = resolved;
     if (p.length === 0) return quoteId(alias);
     const col = `${quoteId(alias)}.${p.map(quoteId).join(".")}`;
     return aliases?.[i] !== undefined ? `${col} AS ${quoteId(aliases[i])}` : col;
@@ -324,9 +381,99 @@ export function compileSelectList(
   if (select.rest) {
     const explicitCols = new Set(select.paths.map((p) => p[0]));
     const restCols = columns.filter((c) => !explicitCols.has(c));
-    return [...explicitParts, restCols.map((c) => `${base}.${quoteId(c)}`), ...aggParts]
-      .flat()
-      .join(", ");
+    return {
+      sql: [
+        ...explicitParts,
+        restCols.map((c) => `${base}.${quoteId(c)}`),
+        ...aggParts,
+        ...subqueryParts,
+      ]
+        .flat()
+        .join(", "),
+      params,
+    };
   }
-  return [...explicitParts, ...aggParts].join(", ");
+  return { sql: [...explicitParts, ...aggParts, ...subqueryParts].join(", "), params };
+}
+
+/** Render the projection clause for a subquery (the bit between SELECT and FROM).
+ *  Pure presentation: relies on `validateIrSubquery` having been called so we can
+ *  trust the IR is well-formed. */
+function renderSubqueryProjection(sub: IrSubquery, subAlias: string): string {
+  const distinctCol =
+    sub.distinct && typeof sub.distinct === "object" ? sub.distinct.col : undefined;
+  if (sub.aggregate) {
+    const { func, valueCol } = sub.aggregate;
+    const col = distinctCol ?? valueCol;
+    if (col === undefined) return "COUNT(*)";
+    const inner = `${quoteId(subAlias)}.${quoteId(col)}`;
+    return `${func}(${distinctCol !== undefined ? "DISTINCT " : ""}${inner})`;
+  }
+  // selectCol form (validated)
+  const distinctPrefix = sub.distinct === true ? "DISTINCT " : "";
+  return `${distinctPrefix}${quoteId(subAlias)}.${quoteId(sub.selectCol!)}`;
+}
+
+/** Compile a scalar subquery as a parenthesized SQL expression:
+ *    (SELECT <agg or col> FROM <table> AS <alias> WHERE <cond>)
+ *
+ *  The IR is expected to be well-formed (call `validateIrSubquery` upstream).
+ *  Correlated outer references are taken verbatim from `sub.outerCorrelatedParams`
+ *  (resolved against `outerOpts.paramToAlias`); inner row params come from
+ *  `sub.innerParamNames` and resolve to the subquery's own alias. */
+function compileSubqueryExpr(
+  sub: IrSubquery,
+  outerOpts: ResolvedOpts,
+  outerParams: unknown[],
+  compileNode: CompileNodeFn,
+): string {
+  validateIrSubquery(sub);
+  const subAlias = nextFreeAlias(outerOpts);
+
+  const subParamToAlias: Record<string, string> = {};
+  for (const n of sub.innerParamNames ?? []) subParamToAlias[n] = subAlias;
+  const outerParamToAlias: Record<string, string> = {};
+  for (const n of sub.outerCorrelatedParams ?? []) {
+    const a = outerOpts.paramToAlias[n];
+    if (a) outerParamToAlias[n] = a;
+  }
+  const subOpts: ResolvedOpts = {
+    tableAlias: subAlias,
+    // Inner names win over outer; outer paramToAlias is included as a fallback
+    // for legacy callers that don't populate outerCorrelatedParams (matches the
+    // pre-refactor "merge outer into sub" behavior).
+    paramToAlias: { ...outerOpts.paramToAlias, ...outerParamToAlias, ...subParamToAlias },
+    relationPathToAlias: {},
+    oneToManyExists: {},
+  };
+  const whereSql = sub.whereIr ? compileNode(sub.whereIr, subOpts, outerParams) : "1=1";
+
+  const projection = renderSubqueryProjection(sub, subAlias);
+
+  let tail = "";
+  if (sub.orderBy && sub.orderBy.length > 0) {
+    const parts = sub.orderBy.map((o) => {
+      const dir = o.direction === "desc" ? "DESC" : "ASC";
+      const exprSql = compileNode(o.expr, subOpts, outerParams);
+      return `${exprSql} ${dir}`;
+    });
+    tail += ` ORDER BY ${parts.join(", ")}`;
+  }
+  if (sub.limitNum !== undefined) tail += ` LIMIT ${sub.limitNum}`;
+  if (sub.offsetNum !== undefined) tail += ` OFFSET ${sub.offsetNum}`;
+
+  return `(SELECT ${projection} FROM ${quoteId(sub.tableName)} AS ${quoteId(subAlias)} WHERE ${whereSql}${tail})`;
+}
+
+/** Compile a scalar-subquery column for a SELECT list — the expression form
+ *  with an `AS "<alias>"` suffix. */
+function compileSelectListSubquery(
+  outputAlias: string,
+  sub: IrSubquery,
+  outerOpts: ResolvedOpts,
+  outerParams: unknown[],
+  dialect: DialectImpl,
+): string {
+  const compileNode = makeCompileNode(dialect);
+  return `${compileSubqueryExpr(sub, outerOpts, outerParams, compileNode)} AS ${quoteId(outputAlias)}`;
 }

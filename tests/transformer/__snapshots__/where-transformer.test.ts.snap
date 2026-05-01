@@ -1,5 +1,10 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`having transformer > transforms ({ id }) => id > 5 — destructured outer where arrow 1`] = `
+"users.where({ kind: "binary", op: ">", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 5 } }, {});
+"
+`;
+
 exports[`having transformer > transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10 1`] = `
 "employees.having({ kind: "binary", op: "&&", left: { kind: "binary", op: ">", left: { kind: "aggregate", func: "AVG", arg: { kind: "member", param: "p", path: ["salary"] } }, right: { kind: "const", value: 50000 } }, right: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 10 } } }, {});
 "
@@ -18,6 +23,29 @@ exports[`having transformer > transforms (p) => count(p.id) > 5 1`] = `
 exports[`having transformer > transforms (p) => sum(p.price) >= minAmount with closure var 1`] = `
 "const minAmount = 100;
 orders.having({ kind: "binary", op: ">=", left: { kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["price"] } }, right: { kind: "param", key: "minAmount" } }, { minAmount });
+"
+`;
+
+exports[`having transformer > transforms destructured outer where with correlated inline subquery comparison 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.where({ kind: "binary", op: ">", left: { kind: "subquery", tableName: "posts", aggregate: { func: "COUNT" }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["u"] }, right: { kind: "const", value: 5 } }, {});
+"
+`;
+
+exports[`having transformer > transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id) 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.where({ kind: "in", left: { kind: "member", param: "a", path: ["postId"] }, right: { kind: "subquery", tableName: "posts", selectCol: "id", whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["active"] }, right: { kind: "const", value: true } }, innerParamNames: ["p"] } }, {});
+"
+`;
+
+exports[`having transformer > transforms member access on destructured local — ({ author }) => author.id === 1 1`] = `
+"rows.where({ kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["author", "id"] }, right: { kind: "const", value: 1 } }, {});
 "
 `;
 

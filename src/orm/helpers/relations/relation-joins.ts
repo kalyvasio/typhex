@@ -157,8 +157,8 @@ function collectRelationKeysFromOrderBy(
   out: Set<string>,
 ): void {
   for (const order of orderBy) {
-    if (order.path.length > 1) {
-      const key = order.path[0];
+    if (order.expr.kind === "member" && order.expr.path.length > 1) {
+      const key = order.expr.path[0];
       if (key in relations) out.add(key);
     }
   }

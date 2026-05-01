@@ -18,6 +18,22 @@ function transform(source: string): string {
   return ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
 }
 
+/** Real program build so the type checker can resolve static `tableName`
+ *  on entity classes referenced from inline subqueries. */
+function transformWithChecker(source: string): string {
+  const fileName = "test.ts";
+  const host = ts.createCompilerHost({ skipLibCheck: true, noLib: true });
+  const orig = host.getSourceFile.bind(host);
+  host.getSourceFile = (name, lang) =>
+    name === fileName
+      ? ts.createSourceFile(fileName, source, ts.ScriptTarget.ESNext, true)
+      : orig(name, lang);
+  const program = ts.createProgram([fileName], { skipLibCheck: true, noLib: true }, host);
+  const sf = program.getSourceFile(fileName)!;
+  const result = ts.transform(sf, [createTyphexTransformer(program)]);
+  return ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
+}
+
 describe("select transformer", () => {
   it("transforms (u) => ({ id: u.id, name: u.name }) to IR object", () => {
     expect(transform("users.select((u) => ({ id: u.id, name: u.name }));")).toMatchSnapshot();
@@ -91,5 +107,45 @@ describe("select transformer", () => {
     expect(
       transform("users.select((p) => ({ names: groupConcat(p.name, ', ') }));"),
     ).toMatchSnapshot();
+  });
+
+  it("transforms ({ id }) destructured outer with correlated inner subquery", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.select(({ id }: any) => ({ c: Post.query().where((p: any) => p.authorId === id).count() }));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("transforms ({ id: authorId }) aliased destructured outer with correlated inner subquery", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.select(({ id: authorId }: any) => ({ c: Post.query().where((p: any) => p.authorId === authorId).count() }));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("transforms inline subquery with .limit() chain segment", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.select((a: any) => ({ c: Post.query().where((p: any) => p.authorId === a.id).limit(10).count() }));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("transforms inline subquery with .distinct() chain segment for SUM", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.select((a: any) => ({ s: Post.query().distinct((p: any) => p.score).sum((p: any) => p.score) }));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("transforms inline subquery with .orderBy().limit() top-N chain", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.select((a: any) => ({ topScore: Post.query().where((p: any) => p.authorId === a.id).orderBy((p: any) => p.score, 'desc').limit(1).max((p: any) => p.score) }));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
   });
 });

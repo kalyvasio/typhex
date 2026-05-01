@@ -18,6 +18,7 @@ import type {
   IrIn,
   IrCall,
   IrExists,
+  IrSubquery,
   IrSelect,
   IrSelectRelation,
   IrAggregate,
@@ -63,7 +64,6 @@ const BINARY_OPS: Record<string, IrBinary["op"] | undefined> = {
 };
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
-
 const RELATION_QUERY_METHODS = new Set(["query", "where", "orderBy", "limit", "offset", "select"]);
 
 // ---------------------------------------------------------------------------
@@ -262,6 +262,7 @@ export interface ParseOptions {
   paramName?: string;
   paramNames?: string[];
   paramKeys?: string[];
+  paramValues?: Record<string, unknown>;
 }
 
 /**
@@ -277,7 +278,7 @@ export function parseArrowToIr(fn: (...args: any[]) => any, options: ParseOption
   const expr = parseExpressionSource(body);
   const params = resolveParamsFromOptions(src, options);
 
-  return walk(expr, params, options.paramKeys ?? []);
+  return walk(expr, params, options.paramKeys ?? [], options.paramValues);
 }
 
 /** Pick the effective parameter names from explicit options or inference. */
@@ -295,14 +296,14 @@ function resolveParamsFromOptions(src: string, options: ParseOptions): string[] 
  * Recursively convert an acorn expression node into an IR node.
  * Dispatches to a per-kind handler; throws on unsupported shapes.
  */
-function walk(node: N, params: string[], paramKeys: string[]): IrNode {
+function walk(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
   switch (node.type) {
     case "BinaryExpression":
     case "LogicalExpression":
-      return walkBinaryLike(node, params, paramKeys);
+      return walkBinaryLike(node, params, paramKeys, paramValues);
 
     case "UnaryExpression":
-      return walkUnary(node, params, paramKeys);
+      return walkUnary(node, params, paramKeys, paramValues);
 
     case "MemberExpression":
       return walkMember(node, params);
@@ -314,10 +315,10 @@ function walk(node: N, params: string[], paramKeys: string[]): IrNode {
       return { kind: "const", value: node.value } as IrConst;
 
     case "CallExpression":
-      return walkCall(node, params, paramKeys);
+      return walkCall(node, params, paramKeys, paramValues);
 
     case "ArrayExpression":
-      return walkArrayLiteral(node, params, paramKeys);
+      return walkArrayLiteral(node, params, paramKeys, paramValues);
 
     default:
       throw new Error("Unsupported node type: " + node.type);
@@ -325,24 +326,34 @@ function walk(node: N, params: string[], paramKeys: string[]): IrNode {
 }
 
 /** Handle BinaryExpression / LogicalExpression — includes `in` → IrIn. */
-function walkBinaryLike(node: N, params: string[], paramKeys: string[]): IrNode {
-  const left = walk(node.left as N, params, paramKeys);
-  const right = walk(node.right as N, params, paramKeys);
-
+function walkBinaryLike(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
   if (node.operator === "in") {
+    const left = walk(node.left as N, params, paramKeys, paramValues);
+    const rhs = node.right as N;
+    if (rhs.type === "Identifier") {
+      const name = (rhs.name as string) ?? "";
+      const val = paramValues?.[name];
+      if (val && typeof (val as { toSubqueryIr?: unknown }).toSubqueryIr === "function") {
+        const sub = (val as { toSubqueryIr: () => IrSubquery }).toSubqueryIr();
+        return { kind: "in", left, right: sub } as IrIn;
+      }
+    }
+    const right = walk(rhs, params, paramKeys, paramValues);
     return { kind: "in", left, right } as IrIn;
   }
 
+  const left = walk(node.left as N, params, paramKeys, paramValues);
+  const right = walk(node.right as N, params, paramKeys, paramValues);
   const op = BINARY_OPS[node.operator];
   if (!op) throw new Error("Unsupported binary operator: " + node.operator);
   return { kind: "binary", op, left, right } as IrBinary;
 }
 
 /** Handle `!expr` — only logical-not is supported; collapses `!(x in y)`. */
-function walkUnary(node: N, params: string[], paramKeys: string[]): IrNode {
+function walkUnary(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
   if (node.operator !== "!") throw new Error("Unsupported unary: " + node.operator);
 
-  const inner = walk((node.argument ?? node.operand) as N, params, paramKeys);
+  const inner = walk((node.argument ?? node.operand) as N, params, paramKeys, paramValues);
 
   // Optimization: !(x in arr) → flip the IrIn's negated flag rather than
   // wrapping with an IrUnary. The query layer can then emit NOT IN directly.
@@ -367,11 +378,11 @@ function walkIdentifier(node: N, params: string[], paramKeys: string[]): IrNode 
 }
 
 /** Handle `[a, b, c]` — allowed only for IN right-hand-sides, contents must be constant. */
-function walkArrayLiteral(node: N, params: string[], paramKeys: string[]): IrConst {
+function walkArrayLiteral(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrConst {
   const elements = (node.elements ?? []) as N[];
   const values = elements.map((e) => {
     if (!e || e.type === "SpreadElement") throw new Error("Unsupported array element");
-    const ir = walk(e, params, paramKeys);
+    const ir = walk(e, params, paramKeys, paramValues);
     if (ir.kind !== "const") throw new Error("IN array must contain literals");
     return ir.value;
   });
@@ -385,12 +396,12 @@ function walkArrayLiteral(node: N, params: string[], paramKeys: string[]): IrCon
  * functions; member callees may be `.some()/.every()` subqueries or one of
  * the allowed string methods. Throws on anything else.
  */
-function walkCall(node: N, params: string[], paramKeys: string[]): IrNode {
+function walkCall(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
   const callee = node.callee as N;
 
   // Identifier callee: only aggregates (SUM, COUNT, groupConcat, …) allowed.
   if (callee.type === "Identifier") {
-    const aggregate = tryParseAggregate(node, params, paramKeys, { strictDistinct: true });
+    const aggregate = tryParseAggregate(node, params, paramKeys, { strictDistinct: true }, paramValues);
     if (aggregate) return aggregate.ir;
     throw new Error("Unsupported call expression");
   }
@@ -402,7 +413,7 @@ function walkCall(node: N, params: string[], paramKeys: string[]): IrNode {
   const method = (callee.property as N)?.name as string | undefined;
 
   // Subqueries: relation.some(...) / .every(...)
-  const exists = tryParseSomeEvery(node, method, params, paramKeys);
+  const exists = tryParseSomeEvery(node, method, params, paramKeys, paramValues);
   if (exists) return exists;
 
   // Allowed string methods: startsWith / endsWith / includes
@@ -412,8 +423,8 @@ function walkCall(node: N, params: string[], paramKeys: string[]): IrNode {
   return {
     kind: "call",
     method,
-    receiver: walk(callee.object as N, params, paramKeys),
-    args: ((node.arguments ?? []) as N[]).map((a) => walk(a, params, paramKeys)),
+    receiver: walk(callee.object as N, params, paramKeys, paramValues),
+    args: ((node.arguments ?? []) as N[]).map((a) => walk(a, params, paramKeys, paramValues)),
   } as IrCall;
 }
 
@@ -429,6 +440,7 @@ function tryParseSomeEvery(
   method: string | undefined,
   params: string[],
   paramKeys: string[],
+  paramValues?: Record<string, unknown>,
 ): IrExists | null {
   if (method !== "some" && method !== "every") return null;
 
@@ -444,7 +456,7 @@ function tryParseSomeEvery(
 
   const innerParam = ((cb.params?.[0] as N)?.name as string) ?? "e";
   const innerExpr = extractCallbackExpression(cb.body as N, method);
-  const innerWhere = walk(innerExpr, [innerParam], paramKeys);
+  const innerWhere = walk(innerExpr, [innerParam], paramKeys, paramValues);
 
   return {
     kind: "exists",
@@ -494,6 +506,7 @@ function tryParseAggregate(
   params: string[],
   paramKeys: string[],
   opts: { strictDistinct: boolean },
+  paramValues?: Record<string, unknown>,
 ): AggregateParseResult | null {
   const callee = callNode.callee as N;
   if (!callee || callee.type !== "Identifier") return null;
@@ -503,7 +516,7 @@ function tryParseAggregate(
   if (!AGGREGATE_IR_FUNCS.has(funcName)) return null;
 
   const args = (callNode.arguments ?? []) as N[];
-  const { arg, distinct } = parseAggregateArg(args[0] ?? null, params, paramKeys, rawName, opts);
+  const { arg, distinct } = parseAggregateArg(args[0] ?? null, params, paramKeys, rawName, opts, paramValues);
   const separator = parseAggregateSeparator(funcName, args);
 
   const ir: IrAggregate = {
@@ -527,17 +540,18 @@ function parseAggregateArg(
   paramKeys: string[],
   rawName: string,
   opts: { strictDistinct: boolean },
+  paramValues?: Record<string, unknown>,
 ): { arg: IrNode | null; distinct: boolean } {
   if (!argNode) return { arg: null, distinct: false };
 
   // distinct(expr) wrapper — e.g. count(distinct(p.id))
   if (argNode.type === "CallExpression" && isIdent(argNode.callee as N, "distinct")) {
-    return parseDistinctWrapper(argNode, params, paramKeys, rawName, opts);
+    return parseDistinctWrapper(argNode, params, paramKeys, rawName, opts, paramValues);
   }
 
   // Regular expression argument — swallow walk errors to null (matches legacy).
   try {
-    return { arg: walk(argNode, params, paramKeys), distinct: false };
+    return { arg: walk(argNode, params, paramKeys, paramValues), distinct: false };
   } catch {
     return { arg: null, distinct: false };
   }
@@ -554,6 +568,7 @@ function parseDistinctWrapper(
   paramKeys: string[],
   rawName: string,
   opts: { strictDistinct: boolean },
+  paramValues?: Record<string, unknown>,
 ): { arg: IrNode | null; distinct: boolean } {
   const inner = ((distinctCall.arguments ?? []) as N[])[0];
 
@@ -567,7 +582,7 @@ function parseDistinctWrapper(
   }
 
   try {
-    return { arg: walk(inner, params, paramKeys), distinct: true };
+    return { arg: walk(inner, params, paramKeys, paramValues), distinct: true };
   } catch {
     if (opts.strictDistinct) {
       throw new Error(
@@ -984,7 +999,10 @@ function applyOrderByMethod(args: N[], result: IrSelectRelation): boolean {
 
   const dir = args.length === 2 && args[1].value === "desc" ? "desc" : "asc";
   result.orderBy = result.orderBy ?? [];
-  result.orderBy.push({ param: "u", path: [col], direction: dir });
+  result.orderBy.push({
+    expr: { kind: "member", param: "u", path: [col] },
+    direction: dir,
+  });
   return true;
 }
 

@@ -105,16 +105,16 @@ export const postgresDialect: DialectImpl = {
     return { sql, params };
   },
 
-  compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}): string {
-    return compileOrderBy(orders, options);
+  compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}) {
+    return compileOrderBy(orders, options, postgresDialect);
   },
 
   compileSelectList(
     select: IrSelect | null,
     columns: string[],
     options: CompileOptions = {},
-  ): string {
-    return compileSelectList(select, columns, options, postgresCompileAggregate);
+  ): { sql: string; params: unknown[] } {
+    return compileSelectList(select, columns, options, postgresCompileAggregate, postgresDialect);
   },
 
   toColumnDef(def: ColumnDef): string {
@@ -233,7 +233,7 @@ export const postgresDialect: DialectImpl = {
 
   compileSelect(opts: CompileSelectOpts): CompileResult {
     const esc = quoteId;
-    const params = [...opts.whereParams];
+    const params = [...(opts.selectListParams ?? []), ...opts.whereParams];
     const groupByClause =
       opts.groupBy && opts.groupBy.length > 0
         ? ` GROUP BY ${compileGroupBy(opts.groupBy, resolveOpts(opts.compileOpts ?? {}))}`
@@ -242,6 +242,9 @@ export const postgresDialect: DialectImpl = {
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
       params.push(...(opts.havingParams ?? []));
+    }
+    if (opts.orderByParams && opts.orderByParams.length > 0) {
+      params.push(...opts.orderByParams);
     }
     let paramIdx = params.length + 1;
     const ph = () => `$${paramIdx++}`;

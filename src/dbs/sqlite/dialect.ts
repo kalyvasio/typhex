@@ -99,16 +99,16 @@ export const sqliteDialect: DialectImpl = {
     return { sql, params };
   },
 
-  compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}): string {
-    return compileOrderBy(orders, options);
+  compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}) {
+    return compileOrderBy(orders, options, sqliteDialect);
   },
 
   compileSelectList(
     select: IrSelect | null,
     columns: string[],
     options: CompileOptions = {},
-  ): string {
-    return compileSelectList(select, columns, options, sqliteCompileAggregate);
+  ): { sql: string; params: unknown[] } {
+    return compileSelectList(select, columns, options, sqliteCompileAggregate, sqliteDialect);
   },
 
   toColumnDef(def: ColumnDef): string {
@@ -208,7 +208,7 @@ export const sqliteDialect: DialectImpl = {
 
   compileSelect(opts: CompileSelectOpts): CompileResult {
     const esc = quoteId;
-    const params = [...opts.whereParams];
+    const params = [...(opts.selectListParams ?? []), ...opts.whereParams];
     const groupByClause =
       opts.groupBy && opts.groupBy.length > 0
         ? ` GROUP BY ${compileGroupBy(opts.groupBy, resolveOpts(opts.compileOpts ?? {}))}`
@@ -217,6 +217,9 @@ export const sqliteDialect: DialectImpl = {
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
       params.push(...(opts.havingParams ?? []));
+    }
+    if (opts.orderByParams && opts.orderByParams.length > 0) {
+      params.push(...opts.orderByParams);
     }
     let limitClause = "";
     let offsetClause = "";

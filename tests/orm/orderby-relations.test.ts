@@ -119,56 +119,56 @@ describe("orderBy — lambda and dot-notation support", () => {
 
 describe("compileOrderBy — relation path resolution", () => {
   it("resolves relation alias for path ['company', 'name']", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
+    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "asc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
       relationPathToAlias: { "u.company": "t1" },
     });
-    expect(result).toBe('"t1"."name" ASC');
+    expect(result.sql).toBe('"t1"."name" ASC');
   });
 
   it("resolves relation alias for desc direction", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "desc" }];
+    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "desc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
       relationPathToAlias: { "u.company": "t1" },
     });
-    expect(result).toBe('"t1"."name" DESC');
+    expect(result.sql).toBe('"t1"."name" DESC');
   });
 
   it("falls back to table alias when no relation path alias matches", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["name"], direction: "asc" }];
+    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
     });
-    expect(result).toBe('"t0"."name" ASC');
+    expect(result.sql).toBe('"t0"."name" ASC');
   });
 
   it("does not resolve single-segment paths (non-relation columns)", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["company"], direction: "asc" }];
+    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company"] }, direction: "asc" }];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
       relationPathToAlias: { "u.company": "t1" },
     });
     // single-segment path: no resolution (path.length < 2)
-    expect(result).toBe('"t0"."company" ASC');
+    expect(result.sql).toBe('"t0"."company" ASC');
   });
 
   it("compiles multiple orders including a relation column", () => {
     const orders: IrOrderBy[] = [
-      { param: "u", path: ["company", "name"], direction: "asc" },
-      { param: "u", path: ["name"], direction: "desc" },
+      { expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "asc" },
+      { expr: { kind: "member", param: "u", path: ["name"] }, direction: "desc" },
     ];
     const result = sqliteDialect.compileOrderBy(orders, {
       tableAlias: "t0",
       paramToAlias: { u: "t0" },
       relationPathToAlias: { "u.company": "t1" },
     });
-    expect(result).toBe('"t1"."name" ASC, "t0"."name" DESC');
+    expect(result.sql).toBe('"t1"."name" ASC, "t0"."name" DESC');
   });
 });
 

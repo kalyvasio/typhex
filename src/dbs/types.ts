@@ -75,9 +75,15 @@ export type { TransactionOptions, Driver } from "../driver/types.js";
 export interface CompileSelectOpts {
   table: string;
   selectList: string;
+  /** Params bound to placeholders in `selectList` (subquery columns). Emitted
+   *  before whereParams in the final params array so positional/numbered
+   *  placeholders line up with the assembled SQL. */
+  selectListParams?: unknown[];
   whereSql: string;
   whereParams: unknown[];
   orderBySql: string;
+  /** Params bound to placeholders in `orderBySql` (subquery sort keys). */
+  orderByParams?: unknown[];
   limitNum: number | null;
   offsetNum: number | null;
   joinsSql?: string;
@@ -156,8 +162,12 @@ export interface DialectImpl {
     params?: unknown[],
   ): string;
   compileWhere(node: IrNode | null, opts: CompileOptions): CompileResult;
-  compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): string;
-  compileSelectList(select: IrSelect | null, columns: string[], opts: CompileOptions): string;
+  compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): { sql: string; params: unknown[] };
+  compileSelectList(
+    select: IrSelect | null,
+    columns: string[],
+    opts: CompileOptions,
+  ): { sql: string; params: unknown[] };
   toColumnDef(def: ColumnDef): string;
   compileInsert(
     table: string,

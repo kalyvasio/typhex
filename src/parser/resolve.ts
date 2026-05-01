@@ -11,10 +11,11 @@ import { DEFAULT_ROW_PARAM } from "../orm/compile-context.js";
 export function resolveWhereIr(
   input: IrNode | ((entity: unknown) => boolean),
   paramKeys: string[] = [],
+  paramValues?: Record<string, unknown>,
 ): IrNode {
   if (isIrNode(input)) return input;
   try {
-    return parseArrowToIr(input as (u: any) => boolean, { paramKeys });
+    return parseArrowToIr(input as (u: any) => boolean, { paramKeys, paramValues });
   } catch (e) {
     throw new Error(
       "Failed to parse arrow predicate: " + (e instanceof Error ? e.message : String(e)),
@@ -43,7 +44,7 @@ export function resolveOrderBy(
           "[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)",
         );
       }
-      return { param: ir.param, path: ir.path, direction };
+      return { expr: ir, direction };
     } catch (e) {
       throw new Error(
         "Failed to parse orderBy lambda: " + (e instanceof Error ? e.message : String(e)),
@@ -56,7 +57,10 @@ export function resolveOrderBy(
       '[typhex] orderBy column must be a non-empty dot-separated path (e.g. "company.name")',
     );
   }
-  return { param: DEFAULT_ROW_PARAM, path: segments, direction };
+  return {
+    expr: { kind: "member", param: DEFAULT_ROW_PARAM, path: segments },
+    direction,
+  };
 }
 
 /** Resolve a select input (pre-built IrSelect, column string array, or arrow fn) to an IrSelect. */

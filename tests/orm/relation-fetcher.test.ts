@@ -98,7 +98,9 @@ describe("fetchRelations", () => {
   it("applies orderBy to the query chain", async () => {
     const rows = [{ id: 1, companyId: 10 }];
     const { meta, chain } = makeMeta([{ id: 10 }]);
-    (meta.relation as any).orderBy = [{ path: ["name"], direction: "asc" }];
+    (meta.relation as any).orderBy = [
+      { expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" },
+    ];
 
     await fetchRelations(null as any, rows, [meta], new Set());
 
@@ -150,7 +152,9 @@ describe("fetchRelations", () => {
   it("handles empty path array in orderBy (uses empty string as column name)", async () => {
     const rows = [{ id: 1, companyId: 10 }];
     const { meta, chain } = makeMeta([{ id: 10 }]);
-    (meta.relation as any).orderBy = [{ path: [], direction: "desc" }]; // path[0] is undefined → ?? ""
+    (meta.relation as any).orderBy = [
+      { expr: { kind: "member", param: "u", path: [] }, direction: "desc" },
+    ]; // path[0] is undefined → ?? ""
 
     await fetchRelations(null as any, rows, [meta], new Set());
 

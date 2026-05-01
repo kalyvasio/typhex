@@ -992,3 +992,129 @@ describe("many-to-many relation", () => {
     expect(tagNames).toEqual(["typescript", "orm"]); // alphabetical DESC
   });
 });
+
+// ─── WHERE IN subquery ────────────────────────────────────────────────────────
+
+describe("WHERE IN subquery", () => {
+  const Post = Entity("posts", {
+    id: "integer primary key autoincrement",
+    title: "text not null",
+    active: "integer not null",
+    authorId: "integer not null",
+  });
+
+  const Author = Entity("authors", {
+    id: "integer primary key autoincrement",
+    name: "text not null",
+    postId: "integer",
+  });
+
+  let db: Db;
+
+  beforeEach(async () => {
+    clearRegistry();
+    registerEntity(Post);
+    registerEntity(Author);
+    db = freshDb();
+    await db.migrate();
+
+    // Insert posts: id=1 active, id=2 inactive
+    await Post.query().insert({ title: "Active post", active: 1, authorId: 1 });
+    await Post.query().insert({ title: "Inactive post", active: 0, authorId: 2 });
+
+    // Insert authors: Alice linked to active post, Bob linked to inactive post, Carol unlinked
+    await Author.query().insert({ name: "Alice", postId: 1 });
+    await Author.query().insert({ name: "Bob", postId: 2 });
+    await Author.query().insert({ name: "Carol", postId: null });
+  });
+
+  afterEach(async () => { await db.close(); });
+
+  it("WHERE IN subquery (params-based): filters authors whose postId is in active posts", async () => {
+    const activePosts = Post.query().where((p: any) => p.active === 1).select((p: any) => ({ id: p.id }));
+    const authors = await Author.query()
+      .where((a: any) => a.postId in activePosts, { activePosts })
+      .toArray();
+
+    expect(authors).toHaveLength(1);
+    expect((authors[0] as any).name).toBe("Alice");
+  });
+
+  it("WHERE IN subquery propagates orderBy/limit from the inner QueryBuilder", async () => {
+    // Inner subquery: take only the lowest-id active post via .orderBy().limit(1).
+    // Verifies that QB-built subqueries forward orderBy/limit/offset into the IR.
+    const oneActivePost = Post.query()
+      .where((p: any) => p.active === 1)
+      .orderBy("id", "asc")
+      .limit(1)
+      .select((p: any) => ({ id: p.id }));
+    const authors = await Author.query()
+      .where((a: any) => a.postId in oneActivePost, { oneActivePost })
+      .toArray();
+
+    // Only Alice's postId (1) is in the limited subquery result.
+    expect(authors).toHaveLength(1);
+    expect((authors[0] as any).name).toBe("Alice");
+  });
+
+  it("NOT IN subquery (params-based): filters authors whose postId is NOT in active posts", async () => {
+    const activePosts = Post.query().where((p: any) => p.active === 1).select((p: any) => ({ id: p.id }));
+    const authors = await Author.query()
+      .where((a: any) => !(a.postId in activePosts), { activePosts })
+      .orderBy("name", "asc")
+      .toArray();
+
+    // Bob (postId=2, inactive) and Carol (postId=null, NOT IN excludes NULLs in SQL)
+    expect(authors).toHaveLength(1);
+    expect((authors[0] as any).name).toBe("Bob");
+  });
+});
+
+// ─── JOIN + WHERE IN subquery (alias-collision regression) ────────────────────
+
+describe("JOIN + WHERE IN subquery", () => {
+  const Author = Entity("authors", {
+    id: "integer primary key autoincrement",
+    name: "text not null",
+  });
+
+  const Article = Entity(
+    "articles",
+    {
+      id: "integer primary key autoincrement",
+      title: "text not null",
+      authorId: "integer",
+    },
+    { author: rel.manyToOne(() => Author, { foreignKey: "authorId" }) },
+  );
+
+  let db: Db;
+  beforeEach(async () => {
+    clearRegistry();
+    registerEntity(Author);
+    registerEntity(Article);
+    db = freshDb();
+    await db.migrate();
+    const alice = await Author.query().insert({ name: "Alice" });
+    const bob = await Author.query().insert({ name: "Bob" });
+    await Article.query().insert({ title: "Alice article", authorId: (alice as any).id });
+    await Article.query().insert({ title: "Bob article", authorId: (bob as any).id });
+  });
+  afterEach(async () => { await db.close(); });
+
+  it("innerJoin (claims t1) + IN subquery (must claim t2) returns correct rows", async () => {
+    // The JOIN aliases the related Author table as t1; the subquery's posts
+    // table must therefore be aliased as t2 to avoid SQL ambiguity.
+    const aliceIds = Author.query()
+      .where((a: any) => a.name === "Alice")
+      .select((a: any) => ({ id: a.id }));
+
+    const rows = await Article.query()
+      .innerJoin((a: any) => ({ author: a.author }))
+      .where((a: any) => a.authorId in aliceIds, { aliceIds })
+      .toArray();
+
+    expect(rows).toHaveLength(1);
+    expect((rows[0] as any).title).toBe("Alice article");
+  });
+});

@@ -58,7 +58,7 @@ describe("Aggregations", () => {
         paths: [],
         aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "total" }],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category", "price"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category", "price"], {}).sql;
       expect(sql).toContain("COUNT(*)");
       expect(sql).toContain('AS "total"');
     });
@@ -77,7 +77,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category", "price"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category", "price"], {}).sql;
       expect(sql).toContain("SUM(");
       expect(sql).toContain('"price"');
       expect(sql).toContain('AS "totalPrice"');
@@ -99,7 +99,7 @@ describe("Aggregations", () => {
             },
           ],
         };
-        const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {});
+        const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {}).sql;
         expect(sql).toContain(`${func}(`);
         expect(sql).toContain('AS "result"');
       }
@@ -119,7 +119,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category"], {}).sql;
       expect(sql).toContain("COUNT(DISTINCT ");
       expect(sql).toContain('AS "uniqueCategories"');
     });
@@ -364,7 +364,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "category"], {}).sql;
       expect(sql).toContain("COUNT(DISTINCT ");
       expect(sql).toContain('"category"');
       expect(sql).toContain('AS "unique"');
@@ -384,7 +384,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {}).sql;
       expect(sql).toContain("SUM(DISTINCT ");
       expect(sql).toContain('"price"');
     });
@@ -403,7 +403,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "price"], {}).sql;
       expect(sql).toContain("AVG(DISTINCT ");
     });
 
@@ -433,7 +433,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "name"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "name"], {}).sql;
       expect(sql).toContain("GROUP_CONCAT(");
       expect(sql).toContain('"name"');
       expect(sql).toContain('AS "names"');
@@ -453,7 +453,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "name"], {});
+      const sql = sqliteDialect.compileSelectList(selectIr, ["id", "name"], {}).sql;
       expect(sql).toContain("GROUP_CONCAT(");
       expect(sql).toContain("', '");
     });
@@ -472,7 +472,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = postgresDialect.compileSelectList(selectIr, ["id", "name"], {});
+      const sql = postgresDialect.compileSelectList(selectIr, ["id", "name"], {}).sql;
       expect(sql).toContain("STRING_AGG(");
       expect(sql).not.toContain("GROUP_CONCAT");
     });
@@ -503,7 +503,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = postgresDialect.compileSelectList(selectIr, ["id", "name"], {});
+      const sql = postgresDialect.compileSelectList(selectIr, ["id", "name"], {}).sql;
       expect(sql).toContain("STRING_AGG(");
       expect(sql).toContain("', '");
       expect(sql).toContain('AS "names"');
@@ -522,7 +522,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = postgresDialect.compileSelectList(selectIr, ["id"], {});
+      const sql = postgresDialect.compileSelectList(selectIr, ["id"], {}).sql;
       expect(sql).toContain("ARRAY_AGG(");
       expect(sql).toContain('"id"');
       expect(sql).toContain('AS "ids"');
@@ -541,7 +541,7 @@ describe("Aggregations", () => {
           },
         ],
       };
-      const sql = postgresDialect.compileSelectList(selectIr, ["category"], {});
+      const sql = postgresDialect.compileSelectList(selectIr, ["category"], {}).sql;
       expect(sql).toContain("JSON_AGG(");
       expect(sql).toContain('AS "cats"');
     });
@@ -643,7 +643,7 @@ describe("Bug fix: compileAggregate uses opts for alias resolution (comment 1)",
     const sql = sqliteDialect.compileSelectList(selectIr, ["name"], {
       tableAlias: "t2",
       paramToAlias: { u: "t2" },
-    });
+    }).sql;
     expect(sql).toContain('"t2"."name"');
     expect(sql).not.toContain('"t0"');
   });
@@ -665,7 +665,7 @@ describe("Bug fix: compileAggregate uses opts for alias resolution (comment 1)",
     const sql = postgresDialect.compileSelectList(selectIr, ["name"], {
       tableAlias: "t2",
       paramToAlias: { u: "t2" },
-    });
+    }).sql;
     expect(sql).toContain('"t2"."name"');
     expect(sql).not.toContain('"t0"');
   });
@@ -724,7 +724,7 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag (comment 5)", () => {
         },
       ],
     };
-    const sql = postgresDialect.compileSelectList(selectIr, ["category"], {});
+    const sql = postgresDialect.compileSelectList(selectIr, ["category"], {}).sql;
     expect(sql).toContain("JSON_AGG(DISTINCT ");
   });
 
@@ -741,7 +741,7 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag (comment 5)", () => {
         },
       ],
     };
-    const sql = postgresDialect.compileSelectList(selectIr, ["category"], {});
+    const sql = postgresDialect.compileSelectList(selectIr, ["category"], {}).sql;
     expect(sql).not.toContain("DISTINCT");
     expect(sql).toContain("JSON_AGG(");
   });

@@ -12,7 +12,8 @@ export type IrNode =
   | IrCall
   | IrIn
   | IrExists
-  | IrAggregate;
+  | IrAggregate
+  | IrSubquery;
 
 export interface IrBinary {
   kind: "binary";
@@ -71,6 +72,60 @@ export interface IrCall {
   args: IrNode[];
 }
 
+/** Aggregate projection for a scalar subquery used in a SELECT list.
+ *  `valueCol` is required for SUM/AVG/MIN/MAX, omitted for COUNT (→ COUNT(*)). */
+export interface IrSubqueryAggregate {
+  func: "COUNT" | "SUM" | "AVG" | "MIN" | "MAX";
+  valueCol?: string;
+}
+
+/** Subquery IR. Used as the right-hand side of `IN (...)` (selectCol form) or
+ *  as a scalar column in a SELECT list (aggregate form). Exactly one of
+ *  `selectCol` or `aggregate` is set — call `validateIrSubquery` to enforce. */
+export interface IrSubquery {
+  kind: "subquery";
+  tableName: string;
+  selectCol?: string;
+  aggregate?: IrSubqueryAggregate;
+  whereIr: IrNode | null;
+  /** Names of row params bound by the subquery's own WHERE lambda
+   *  (e.g. `["p"]` for `Post.query().where(p => …)`). */
+  innerParamNames?: string[];
+  /** Names of params the subquery's WHERE references against the *outer* query.
+   *  When set, only these names map to the outer paramToAlias; everything else
+   *  in `whereIr` belongs to the subquery's own scope (innerParamNames). */
+  outerCorrelatedParams?: string[];
+  /** Optional ORDER BY applied inside the subquery. Each entry sorts by an
+   *  inner column (typically `IrMember` against the subquery's own row). */
+  orderBy?: IrOrderBy[];
+  /** Optional LIMIT applied inside the subquery. Literal numeric only. */
+  limitNum?: number;
+  /** Optional OFFSET applied inside the subquery. Literal numeric only. */
+  offsetNum?: number;
+  /** DISTINCT modifier. For aggregate form, `{ col }` emits `<func>(DISTINCT col)`.
+   *  For selectCol form, `true` emits `SELECT DISTINCT <selectCol>`. */
+  distinct?: { col: string } | true;
+}
+
+/** Validate an IrSubquery's invariants. Throws when malformed.
+ *  - Exactly one of `selectCol` / `aggregate` must be set.
+ *  - Aggregates other than COUNT require `valueCol` (or a DISTINCT col in `distinct`). */
+export function validateIrSubquery(sub: IrSubquery): void {
+  if (sub.selectCol === undefined && sub.aggregate === undefined) {
+    throw new Error("[typhex] Subquery must specify either selectCol or aggregate");
+  }
+  if (sub.selectCol !== undefined && sub.aggregate !== undefined) {
+    throw new Error("[typhex] Subquery cannot specify both selectCol and aggregate");
+  }
+  if (sub.aggregate) {
+    const distinctCol = sub.distinct && typeof sub.distinct === "object" ? sub.distinct.col : undefined;
+    const col = distinctCol ?? sub.aggregate.valueCol;
+    if (sub.aggregate.func !== "COUNT" && col === undefined) {
+      throw new Error(`[typhex] ${sub.aggregate.func} subquery requires a column (valueCol)`);
+    }
+  }
+}
+
 export interface IrAggregate {
   kind: "aggregate";
   func:
@@ -93,8 +148,8 @@ export interface IrAggregate {
 export type OrderDirection = "asc" | "desc";
 
 export interface IrOrderBy {
-  param: string;
-  path: string[];
+  /** Sort key — typically an IrMember (column path) or IrSubquery (scalar subquery). */
+  expr: IrNode;
   direction: OrderDirection;
 }
 
@@ -125,6 +180,8 @@ export interface IrSelect {
   relations?: IrSelectRelation[];
   /** Aggregate columns in SELECT (SUM, AVG, MIN, MAX, COUNT). */
   aggregates?: IrAggregate[];
+  /** Scalar subquery columns in SELECT (e.g. `(SELECT COUNT(*) FROM …) AS "x"`). */
+  subqueries?: Array<{ alias: string; subquery: IrSubquery }>;
   /** GROUP BY entries: string[] = member path, number = positional column reference (GROUP BY 1). */
   groupBy?: Array<string[] | number>;
 }
@@ -147,14 +204,7 @@ export interface JoinHint {
 export function isIrOrderBy(value: unknown): value is IrOrderBy {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
-  return (
-    typeof v.param === "string" &&
-    v.param.length > 0 &&
-    Array.isArray(v.path) &&
-    v.path.length > 0 &&
-    (v.path as unknown[]).every((segment): segment is string => typeof segment === "string") &&
-    (v.direction === "asc" || v.direction === "desc")
-  );
+  return isIrNode(v.expr) && (v.direction === "asc" || v.direction === "desc");
 }
 
 export function isIrNode(node: unknown): node is IrNode {
@@ -169,7 +219,8 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "in" ||
     k === "call" ||
     k === "exists" ||
-    k === "aggregate"
+    k === "aggregate" ||
+    k === "subquery"
   );
 }
 
@@ -258,6 +309,23 @@ export function isIrSelect(node: unknown): node is IrSelect {
   }
   if (o.groupBy !== undefined) {
     if (!Array.isArray(o.groupBy)) return false;
+  }
+  if (o.subqueries !== undefined) {
+    if (!Array.isArray(o.subqueries)) return false;
+    if (
+      !o.subqueries.every((s: unknown) => {
+        const x = s as Record<string, unknown>;
+        const sub = x?.subquery as Record<string, unknown> | undefined;
+        return (
+          x &&
+          typeof x.alias === "string" &&
+          sub != null &&
+          sub.kind === "subquery" &&
+          typeof sub.tableName === "string"
+        );
+      })
+    )
+      return false;
   }
   return true;
 }
