@@ -94,7 +94,7 @@ describe("subquery scenarios (postgres)", () => {
   const correlatedPostCount: IrSubquery = {
     kind: "subquery",
     tableName: "pg_subq_posts",
-    aggregate: { func: "COUNT" },
+    selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
     whereIr: {
       kind: "binary",
       op: "===",
@@ -111,7 +111,7 @@ describe("subquery scenarios (postgres)", () => {
       const sub: IrSubquery = {
         kind: "subquery",
         tableName: "pg_subq_posts",
-        aggregate: { func: "COUNT" },
+        selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
         whereIr: null,
         whereParams: {},
       };
@@ -234,7 +234,7 @@ describe("subquery scenarios (postgres)", () => {
       const sub: IrSubquery = {
         kind: "subquery",
         tableName: "pg_subq_posts",
-        selectCol: "authorId",
+        selectIr: { param: "p", paths: [["authorId"]] },
         whereIr: innerWhere,
         whereParams: {},
         orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],

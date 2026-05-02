@@ -9,7 +9,7 @@ import type { IrSelect, IrSubquery } from "../../src/ir/types.js";
 const countAllPosts: IrSubquery = {
   kind: "subquery",
   tableName: "posts",
-  aggregate: { func: "COUNT" },
+  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
   whereIr: null,
   whereParams: {},
 };
@@ -17,7 +17,7 @@ const countAllPosts: IrSubquery = {
 const countActivePosts: IrSubquery = {
   kind: "subquery",
   tableName: "posts",
-  aggregate: { func: "COUNT" },
+  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
   whereIr: {
     kind: "binary",
     op: "===",
@@ -30,7 +30,7 @@ const countActivePosts: IrSubquery = {
 const sumActivePostScores: IrSubquery = {
   kind: "subquery",
   tableName: "posts",
-  aggregate: { func: "SUM", valueCol: "score" },
+  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["score"] } }] },
   whereIr: {
     kind: "binary",
     op: "===",
@@ -167,7 +167,7 @@ describe("Scalar subquery columns in SELECT", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "COUNT" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
       whereIr: null,
       whereParams: {},
       limitNum: 10,
@@ -188,7 +188,7 @@ describe("Scalar subquery columns in SELECT", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "MAX", valueCol: "score" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] } }] },
       whereIr: null,
       whereParams: {},
       orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],
@@ -212,7 +212,7 @@ describe("Scalar subquery columns in SELECT", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "COUNT" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
       whereIr: null,
       whereParams: {},
       limitNum: 5,
@@ -234,7 +234,7 @@ describe("Scalar subquery columns in SELECT", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "SUM", valueCol: "score" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["score"] } }] },
       whereIr: null,
       whereParams: {},
       distinct: { col: "score" },
@@ -255,7 +255,7 @@ describe("Scalar subquery columns in SELECT", () => {
     const broken: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "SUM" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: null }] },
       whereIr: null,
       whereParams: {},
     };

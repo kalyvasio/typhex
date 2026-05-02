@@ -14,6 +14,7 @@ import {
   irAggregateToTsLiteral,
   getParamBindings,
   type ParamBindings,
+  type ScopeFrame,
 } from "./shared.js";
 import { tryExtractInlineSubqueryAggregate } from "./subquery-transformer.js";
 import { toOuterDestructured } from "./where-transformer.js";
@@ -31,6 +32,7 @@ function arrowToIrSelect(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   pb: ParamBindings,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): IrSelect | null {
   // Single-expression shorthand bodies: p => p, p => p.id, p => count(p.id)
   if (!ts.isBlock(fn.body)) {
@@ -40,7 +42,7 @@ function arrowToIrSelect(
 
   const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
-  return parseSelectObjectLiteral(obj, pb, checker);
+  return parseSelectObjectLiteral(obj, pb, checker, outerScope);
 }
 
 /**
@@ -115,6 +117,7 @@ function parseSelectObjectLiteral(
   obj: ts.ObjectLiteralExpression,
   pb: ParamBindings,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
@@ -132,7 +135,7 @@ function parseSelectObjectLiteral(
     const keyName = getPropertyKeyName(prop);
     if (!keyName) return null;
 
-    const handled = parseSelectObjectProperty(prop, keyName, pb, checker);
+    const handled = parseSelectObjectProperty(prop, keyName, pb, checker, outerScope);
     if (!handled) return null;
 
     if (handled.kind === "path") {
@@ -188,6 +191,7 @@ function parseSelectObjectProperty(
   keyName: string,
   pb: ParamBindings,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): PropertyResult | null {
   // { id }  →  shorthand refers to destructured binding
   if (ts.isShorthandPropertyAssignment(prop)) {
@@ -226,6 +230,7 @@ function parseSelectObjectProperty(
       checker,
       [pb.paramName],
       toOuterDestructured(pb),
+      outerScope,
     );
     if (sub) return { kind: "subquery", subquery: sub };
   }
@@ -241,12 +246,13 @@ function parseSelectObjectProperty(
 export function transformSelectCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): ts.CallExpression | null {
   const arrow = matchTyphexMethodCall(call, "select", checker, isTyphexType);
   if (!arrow) return null;
 
   const pb = getParamBindings(arrow.parameters[0]?.name);
-  const irSelect = arrowToIrSelect(arrow, pb, checker);
+  const irSelect = arrowToIrSelect(arrow, pb, checker, outerScope);
   if (!irSelect) return null;
 
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [

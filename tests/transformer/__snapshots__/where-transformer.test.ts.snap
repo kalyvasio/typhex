@@ -31,7 +31,7 @@ exports[`having transformer > transforms destructured outer where with correlate
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.where({ kind: "binary", op: ">", left: { kind: "subquery", tableName: "posts", aggregate: { func: "COUNT" }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["u"] }, right: { kind: "const", value: 5 } }, {});
+authors.where({ kind: "binary", op: ">", left: { kind: "subquery", tableName: "posts", selectIr: { param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["u"] }, right: { kind: "const", value: 5 } }, {});
 "
 `;
 
@@ -40,7 +40,7 @@ exports[`having transformer > transforms inline subquery: (a) => a.postId in Pos
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.where({ kind: "in", left: { kind: "member", param: "a", path: ["postId"] }, right: { kind: "subquery", tableName: "posts", selectCol: "id", whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["active"] }, right: { kind: "const", value: true } }, innerParamNames: ["p"] } }, {});
+authors.where({ kind: "in", left: { kind: "member", param: "a", path: ["postId"] }, right: { kind: "subquery", tableName: "posts", selectIr: { param: "p", paths: [["id"]], aliases: ["id"] }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["active"] }, right: { kind: "const", value: true } }, innerParamNames: ["p"] } }, {});
 "
 `;
 

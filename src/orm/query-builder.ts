@@ -75,18 +75,6 @@ export interface QueryState<T = unknown> {
   entity?: AnyEntityClass;
 }
 
-/** Extract a single top-level column name from `selectIr` (used by toSubqueryIr).
- *  Throws when the selection isn't a single bare column — that shape can't be
- *  used as the RHS of an IN subquery. */
-function extractSingleColumn(selectIr: IrSelect | null | undefined): string {
-  if (!selectIr || selectIr.paths.length !== 1 || selectIr.paths[0].length !== 1) {
-    throw new Error(
-      "QueryBuilder used as a subquery must select exactly one top-level column via .select(p => p.colName) — nested paths and multi-column selects are not supported as subquery results.",
-    );
-  }
-  return selectIr.paths[0][0];
-}
-
 /** Collect param names referenced inside the QB's where lambda + orderBy
  *  exprs. QB-built subqueries are non-correlated, so every member param
  *  name belongs to the subquery's own (inner) scope. */
@@ -192,6 +180,11 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Return an IrSubquery for use as the right-hand side of a WHERE IN clause. */
   toSubqueryIr(): IrSubquery {
+    if (!this.state.selectIr) {
+      throw new Error(
+        "QueryBuilder used as a subquery must call .select(...) to project exactly one column.",
+      );
+    }
     const innerParamNames = collectInnerParamNames(this.state);
     const whereIr = this.state.whereIr
       ? inlineParams(this.state.whereIr, this.state.whereParams)
@@ -200,7 +193,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: this.state.tableName,
-      selectCol: extractSingleColumn(this.state.selectIr),
+      selectIr: this.state.selectIr,
       whereIr,
     };
     if (innerParamNames.length > 0) sub.innerParamNames = innerParamNames;

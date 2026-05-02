@@ -9,7 +9,7 @@ import type { IrOrderBy, IrSubquery } from "../../src/ir/types.js";
 const correlatedPostCount: IrSubquery = {
   kind: "subquery",
   tableName: "posts",
-  aggregate: { func: "COUNT" },
+  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
   whereIr: {
     kind: "binary",
     op: "===",
@@ -37,7 +37,7 @@ describe("ORDER BY subquery", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "COUNT" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
       whereIr: {
         kind: "binary",
         op: "===",

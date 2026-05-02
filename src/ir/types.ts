@@ -72,21 +72,15 @@ export interface IrCall {
   args: IrNode[];
 }
 
-/** Aggregate projection for a scalar subquery used in a SELECT list.
- *  `valueCol` is required for SUM/AVG/MIN/MAX, omitted for COUNT (→ COUNT(*)). */
-export interface IrSubqueryAggregate {
-  func: "COUNT" | "SUM" | "AVG" | "MIN" | "MAX";
-  valueCol?: string;
-}
-
-/** Subquery IR. Used as the right-hand side of `IN (...)` (selectCol form) or
- *  as a scalar column in a SELECT list (aggregate form). Exactly one of
- *  `selectCol` or `aggregate` is set — call `validateIrSubquery` to enforce. */
+/** Subquery IR. Used as the right-hand side of `IN (...)` or as a scalar
+ *  column in a SELECT list. Always carries an `IrSelect` projecting exactly
+ *  one column (a member path or an aggregate); call `validateIrSubquery` to
+ *  enforce that invariant. */
 export interface IrSubquery {
   kind: "subquery";
   tableName: string;
-  selectCol?: string;
-  aggregate?: IrSubqueryAggregate;
+  /** Single-column projection: either one member path or one aggregate. */
+  selectIr: IrSelect;
   whereIr: IrNode | null;
   /** Names of row params bound by the subquery's own WHERE lambda
    *  (e.g. `["p"]` for `Post.query().where(p => …)`). */
@@ -102,8 +96,9 @@ export interface IrSubquery {
   limitNum?: number;
   /** Optional OFFSET applied inside the subquery. Literal numeric only. */
   offsetNum?: number;
-  /** DISTINCT modifier. For aggregate form, `{ col }` emits `<func>(DISTINCT col)`.
-   *  For selectCol form, `true` emits `SELECT DISTINCT <selectCol>`. */
+  /** DISTINCT modifier. For aggregate-column form, `{ col }` emits
+   *  `<func>(DISTINCT col)`. For path-column form, `true` emits
+   *  `SELECT DISTINCT <col>`. */
   distinct?: { col: string } | true;
 }
 
@@ -129,20 +124,33 @@ export function computeOuterCorrelatedParams(
 }
 
 /** Validate an IrSubquery's invariants. Throws when malformed.
- *  - Exactly one of `selectCol` / `aggregate` must be set.
- *  - Aggregates other than COUNT require `valueCol` (or a DISTINCT col in `distinct`). */
+ *  - `selectIr` must project exactly one column (one path xor one aggregate).
+ *  - Aggregates other than COUNT require an arg (or a DISTINCT col in `distinct`). */
 export function validateIrSubquery(sub: IrSubquery): void {
-  if (sub.selectCol === undefined && sub.aggregate === undefined) {
-    throw new Error("[typhex] Subquery must specify either selectCol or aggregate");
+  const sel = sub.selectIr;
+  if (!sel) {
+    throw new Error("[typhex] Subquery requires selectIr");
   }
-  if (sub.selectCol !== undefined && sub.aggregate !== undefined) {
-    throw new Error("[typhex] Subquery cannot specify both selectCol and aggregate");
+  const pathCount = sel.paths.length;
+  const aggCount = sel.aggregates?.length ?? 0;
+  const total = pathCount + aggCount;
+  if (total !== 1) {
+    throw new Error(
+      `[typhex] Subquery must select exactly one column (got ${total}: ${pathCount} path(s) + ${aggCount} aggregate(s))`,
+    );
   }
-  if (sub.aggregate) {
-    const distinctCol = sub.distinct && typeof sub.distinct === "object" ? sub.distinct.col : undefined;
-    const col = distinctCol ?? sub.aggregate.valueCol;
-    if (sub.aggregate.func !== "COUNT" && col === undefined) {
-      throw new Error(`[typhex] ${sub.aggregate.func} subquery requires a column (valueCol)`);
+  if (sel.rest) {
+    throw new Error("[typhex] Subquery cannot use rest projection");
+  }
+  if (sel.subqueries && sel.subqueries.length > 0) {
+    throw new Error("[typhex] Subquery cannot nest scalar subquery columns");
+  }
+  if (aggCount === 1) {
+    const agg = sel.aggregates![0];
+    const distinctCol =
+      sub.distinct && typeof sub.distinct === "object" ? sub.distinct.col : undefined;
+    if (agg.func !== "COUNT" && agg.arg === null && distinctCol === undefined) {
+      throw new Error(`[typhex] ${agg.func} subquery requires a column argument`);
     }
   }
 }

@@ -259,6 +259,28 @@ export function getParamBindings(param: ts.BindingName | undefined): ParamBindin
   };
 }
 
+/** One arrow's binding info captured while the visitor descends into it.
+ *  The `scope` stack is `ScopeFrame[]` — each enclosing arrow adds one frame.
+ *  Used by per-method transformers (where/select/orderby) to recognize
+ *  references to outer-arrow params/destructured locals when the inner call
+ *  is rewritten inside-out (so the outer arrow hasn't been processed yet). */
+export interface ScopeFrame {
+  /** Row-param name for this arrow (the value identifier or DEFAULT_ROW_PARAM
+   *  for destructured patterns). */
+  paramName: string;
+  /** Destructured locals — local-name → path into the row. */
+  bindings?: Map<string, string[]>;
+}
+
+/** Build a ScopeFrame from an arrow's first parameter's binding name. */
+export function frameFromBindingName(name: ts.BindingName | undefined): ScopeFrame | null {
+  const pb = getParamBindings(name);
+  if (pb === NO_BINDINGS) return null;
+  const frame: ScopeFrame = { paramName: pb.paramName };
+  if (pb.bindings) frame.bindings = pb.bindings;
+  return frame;
+}
+
 // ---------------------------------------------------------------------------
 // Aggregate call detection & parsing (shared between where + select)
 // ---------------------------------------------------------------------------
@@ -479,22 +501,7 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
     case "subquery": {
       const sub = ir as IrSubquery;
       props.push(f.createPropertyAssignment("tableName", f.createStringLiteral(sub.tableName)));
-      if (sub.selectCol !== undefined) {
-        props.push(f.createPropertyAssignment("selectCol", f.createStringLiteral(sub.selectCol)));
-      }
-      if (sub.aggregate) {
-        const aggProps: ts.ObjectLiteralElementLike[] = [
-          f.createPropertyAssignment("func", f.createStringLiteral(sub.aggregate.func)),
-        ];
-        if (sub.aggregate.valueCol !== undefined) {
-          aggProps.push(
-            f.createPropertyAssignment("valueCol", f.createStringLiteral(sub.aggregate.valueCol)),
-          );
-        }
-        props.push(
-          f.createPropertyAssignment("aggregate", f.createObjectLiteralExpression(aggProps)),
-        );
-      }
+      props.push(f.createPropertyAssignment("selectIr", irSelectToTsLiteral(sub.selectIr)));
       props.push(
         f.createPropertyAssignment(
           "whereIr",

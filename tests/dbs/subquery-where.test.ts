@@ -10,7 +10,7 @@ import type { IrBinary, IrSubquery } from "../../src/ir/types.js";
 const correlatedPostCount: IrSubquery = {
   kind: "subquery",
   tableName: "posts",
-  aggregate: { func: "COUNT" },
+  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
   whereIr: {
     kind: "binary",
     op: "===",
@@ -77,7 +77,7 @@ describe("Aggregate subquery comparison in WHERE", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "COUNT" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
       whereIr: null,
       whereParams: {},
     };

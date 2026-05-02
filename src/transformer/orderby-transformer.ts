@@ -5,7 +5,13 @@
 
 import * as ts from "typescript";
 import type { IrNode } from "../ir/types.js";
-import { isTyphexType, matchTyphexMethodCall, memberPath, irOrderByToTsLiteral } from "./shared.js";
+import {
+  isTyphexType,
+  matchTyphexMethodCall,
+  memberPath,
+  irOrderByToTsLiteral,
+  type ScopeFrame,
+} from "./shared.js";
 import { tryExtractInlineSubqueryAggregate } from "./subquery-transformer.js";
 
 type Direction = "asc" | "desc";
@@ -19,6 +25,7 @@ type Direction = "asc" | "desc";
 export function transformOrderByCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): ts.CallExpression | null {
   const fn = matchTyphexMethodCall(call, "orderBy", checker, isTyphexType);
   if (!fn) return null;
@@ -26,7 +33,7 @@ export function transformOrderByCall(
   const paramName = getFirstIdentifierParamName(fn);
   if (!paramName) return null;
 
-  const expr = extractOrderByExpr(fn.body, paramName, checker);
+  const expr = extractOrderByExpr(fn.body, paramName, checker, outerScope);
   if (!expr) return null;
 
   const direction = parseDirectionArg(call.arguments);
@@ -43,11 +50,12 @@ function extractOrderByExpr(
   body: ts.ConciseBody,
   paramName: string,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): IrNode | null {
   const path = extractColumnPath(body, paramName);
   if (path) return { kind: "member", param: paramName, path };
   if (ts.isExpression(body)) {
-    const sub = tryExtractInlineSubqueryAggregate(body, checker, [paramName]);
+    const sub = tryExtractInlineSubqueryAggregate(body, checker, [paramName], undefined, outerScope);
     if (sub) return sub;
   }
   return null;

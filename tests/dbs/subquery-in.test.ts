@@ -11,7 +11,7 @@ describe("IrSubquery compilation", () => {
   const subquery: IrSubquery = {
     kind: "subquery",
     tableName: "posts",
-    selectCol: "id",
+    selectIr: { param: "p", paths: [["id"]] },
     whereIr: {
       kind: "binary",
       op: "===",
@@ -83,7 +83,7 @@ describe("IrSubquery compilation", () => {
     const customSubquery: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      selectCol: "id",
+      selectIr: { param: "p", paths: [["id"]] },
       whereIr: {
         kind: "binary",
         op: "===",
@@ -113,7 +113,7 @@ describe("IrSubquery compilation", () => {
     const innerSub: IrSubquery = {
       kind: "subquery",
       tableName: "users",
-      selectCol: "id",
+      selectIr: { param: "p", paths: [["id"]] },
       whereIr: {
         kind: "binary",
         op: "===",
@@ -125,7 +125,7 @@ describe("IrSubquery compilation", () => {
     const middleSub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      selectCol: "id",
+      selectIr: { param: "p", paths: [["id"]] },
       whereIr: {
         kind: "in",
         left: { kind: "member", param: "p", path: ["authorId"] },
@@ -153,7 +153,7 @@ describe("IrSubquery compilation", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      selectCol: "id",
+      selectIr: { param: "p", paths: [["id"]] },
       whereIr: null,
       whereParams: {},
       orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],
@@ -178,7 +178,7 @@ describe("IrSubquery compilation", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      selectCol: "authorId",
+      selectIr: { param: "p", paths: [["authorId"]] },
       whereIr: null,
       whereParams: {},
       distinct: true,
@@ -203,7 +203,7 @@ describe("IrSubquery compilation", () => {
     const noWhereSubquery: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      selectCol: "id",
+      selectIr: { param: "p", paths: [["id"]] },
       whereIr: null,
       whereParams: {},
     };

@@ -14,9 +14,11 @@ import {
   irNodeToTsLiteral,
   getParamBindings,
   type ParamBindings,
+  type ScopeFrame,
 } from "./shared.js";
 import {
   assembleIrSubquery,
+  extractSubquerySelectIr,
   tryExtractInlineSubqueryAggregate,
   walkSubqueryChain,
 } from "./subquery-transformer.js";
@@ -43,6 +45,11 @@ interface WhereCtx {
   freeVars: Set<string>;
   checker?: ts.TypeChecker;
   outerDestructured?: OuterDestructured;
+  /** Stack of enclosing arrow ScopeFrames (paramName + optional destructured
+   *  bindings). Identifiers matching any frame's paramName or bindings resolve
+   *  as `IrMember` against the named outer row (correlated reference) rather
+   *  than as closure captures. */
+  outerScope?: ScopeFrame[];
 }
 
 // ---------------------------------------------------------------------------
@@ -99,31 +106,35 @@ function tryExtractInlineSubquery(
   checker: ts.TypeChecker,
   outerParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
+  outerScope: ScopeFrame[] = [],
 ): IrSubquery | null {
   if (!ts.isCallExpression(expr)) return null;
   if (!ts.isPropertyAccessExpression(expr.expression)) return null;
   if (expr.expression.name.text !== "select") return null;
   if (expr.arguments.length !== 1) return null;
-  const selectFn = expr.arguments[0];
-  if (!ts.isArrowFunction(selectFn) && !ts.isFunctionExpression(selectFn)) return null;
-  const selectCol = extractSelectColumn(selectFn as ts.ArrowFunction);
-  if (!selectCol) return null;
+
+  // Reuse the shared select-extractor: accepts either a fresh `.select(arrow)`
+  // or an already-rewritten `.select(<IrSelect literal>)` (post inside-out).
+  const selectIr = extractSubquerySelectIr(expr);
+  if (!selectIr) return null;
+  // IN form requires single-column path projection (not aggregate).
+  if (selectIr.paths.length !== 1 || (selectIr.aggregates && selectIr.aggregates.length > 0)) {
+    return null;
+  }
 
   const chain = walkSubqueryChain(
     expr.expression.expression,
     checker,
     outerParamNames,
     outerDestructured,
+    outerScope,
   );
   if (!chain) return null;
 
   const tableName = extractTableName(chain.entityExpr, checker);
   if (!tableName) return null;
 
-  // For the IN form `.distinct(p => p.col)` only makes sense if the column
-  // matches `selectCol`; otherwise the chain is malformed. Either way, the
-  // SELECT list is single-column, so a bare `DISTINCT` flag is sufficient.
-  return assembleIrSubquery(tableName, chain, { selectCol });
+  return assembleIrSubquery(tableName, chain, selectIr);
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +193,7 @@ function binaryExprToIr(expr: ts.BinaryExpression, ctx: WhereCtx): IrNode | null
       ctx.checker,
       ctx.paramNames,
       ctx.outerDestructured,
+      ctx.outerScope,
     );
     if (sub) return { kind: "in", left, right: sub } as IrIn;
     const right = exprToIr(expr.right, ctx);
@@ -192,12 +204,24 @@ function binaryExprToIr(expr: ts.BinaryExpression, ctx: WhereCtx): IrNode | null
   const left =
     exprToIr(expr.left, ctx) ??
     (ctx.checker
-      ? tryExtractInlineSubqueryAggregate(expr.left, ctx.checker, ctx.paramNames, ctx.outerDestructured)
+      ? tryExtractInlineSubqueryAggregate(
+          expr.left,
+          ctx.checker,
+          ctx.paramNames,
+          ctx.outerDestructured,
+          ctx.outerScope,
+        )
       : null);
   const right =
     exprToIr(expr.right, ctx) ??
     (ctx.checker
-      ? tryExtractInlineSubqueryAggregate(expr.right, ctx.checker, ctx.paramNames, ctx.outerDestructured)
+      ? tryExtractInlineSubqueryAggregate(
+          expr.right,
+          ctx.checker,
+          ctx.paramNames,
+          ctx.outerDestructured,
+          ctx.outerScope,
+        )
       : null);
   if (!left || !right) return null;
 
@@ -214,14 +238,14 @@ function unaryExprToIr(expr: ts.PrefixUnaryExpression, ctx: WhereCtx): IrNode | 
 
 /** Handle `p.a.b.c` — resolves against the lambda params and returns an IrMember.
  *  Falls back to `outerDestructured` so `post.id` works when `post` is a
- *  destructured local from the outer arrow. */
+ *  destructured local from the outer arrow, then to `outerScope` so a bare
+ *  outer-arrow param `u` in `u.id` resolves as IrMember on `u`. */
 function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNode | null {
   const resolved = resolveMemberPath(expr, ctx.paramNames);
   if (resolved) return { kind: "member", param: resolved.param, path: resolved.path };
 
-  if (!ctx.outerDestructured) return null;
-  // Walk the chain manually; if the root identifier is a destructured local,
-  // prefix its source path and emit IrMember on the outer row.
+  // Walk the chain manually so we can resolve the root identifier against
+  // outerDestructured / outerScope.
   const parts: string[] = [];
   let current: ts.Expression = expr;
   while (ts.isPropertyAccessExpression(current)) {
@@ -229,9 +253,25 @@ function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNod
     current = current.expression;
   }
   if (!ts.isIdentifier(current)) return null;
-  const prefix = ctx.outerDestructured.bindings.get(current.text);
-  if (!prefix) return null;
-  return { kind: "member", param: ctx.outerDestructured.paramName, path: [...prefix, ...parts] };
+
+  if (ctx.outerDestructured) {
+    const prefix = ctx.outerDestructured.bindings.get(current.text);
+    if (prefix)
+      return { kind: "member", param: ctx.outerDestructured.paramName, path: [...prefix, ...parts] };
+  }
+
+  if (ctx.outerScope) {
+    for (const frame of ctx.outerScope) {
+      if (frame.paramName === current.text) {
+        return { kind: "member", param: current.text, path: parts };
+      }
+      const bound = frame.bindings?.get(current.text);
+      if (bound) {
+        return { kind: "member", param: frame.paramName, path: [...bound, ...parts] };
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -246,6 +286,17 @@ function identifierToIr(expr: ts.Identifier, ctx: WhereCtx): IrNode {
   if (ctx.outerDestructured) {
     const path = ctx.outerDestructured.bindings.get(expr.text);
     if (path) return { kind: "member", param: ctx.outerDestructured.paramName, path };
+  }
+  if (ctx.outerScope) {
+    for (const frame of ctx.outerScope) {
+      if (frame.paramName === expr.text) {
+        return { kind: "member", param: expr.text, path: [] };
+      }
+      const bound = frame.bindings?.get(expr.text);
+      if (bound) {
+        return { kind: "member", param: frame.paramName, path: bound };
+      }
+    }
   }
   ctx.freeVars.add(expr.text);
   return { kind: "param", key: expr.text };
@@ -400,6 +451,7 @@ function arrowToIr(
   checker: ts.TypeChecker,
   extraParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
+  outerScope?: ScopeFrame[],
 ): { ir: IrNode; freeVars: string[] } | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
@@ -407,7 +459,7 @@ function arrowToIr(
   const paramNames = [...extractParamNames(fn), ...extraParamNames];
   const freeVars = new Set<string>();
 
-  const ir = exprToIr(expr, { paramNames, freeVars, checker, outerDestructured });
+  const ir = exprToIr(expr, { paramNames, freeVars, checker, outerDestructured, outerScope });
   if (!ir) return null;
 
   return { ir, freeVars: [...freeVars] };
@@ -426,6 +478,7 @@ function transformArrowCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   methodName: string,
+  outerScope: ScopeFrame[] = [],
 ): ts.CallExpression | null {
   const arrow = matchTyphexMethodCall(call, methodName, checker, isTyphexType);
   if (!arrow) return null;
@@ -434,7 +487,7 @@ function transformArrowCall(
   // bindings so a bare local (or member access on a destructured local)
   // inside an inline subquery's correlated WHERE resolves to the outer row.
   const pb = getParamBindings(arrow.parameters[0]?.name);
-  const result = arrowToIr(arrow, checker, [], toOuterDestructured(pb));
+  const result = arrowToIr(arrow, checker, [], toOuterDestructured(pb), outerScope);
   if (!result) return null;
 
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [
@@ -464,22 +517,25 @@ export function parseWhereArrowToIr(
   checker: ts.TypeChecker,
   outerParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
+  outerScope?: ScopeFrame[],
 ): { ir: IrNode; freeVars: string[] } | null {
-  return arrowToIr(fn, checker, outerParamNames, outerDestructured);
+  return arrowToIr(fn, checker, outerParamNames, outerDestructured, outerScope);
 }
 
 /** Rewrite a `.where(arrow)` call on a Typhex Table/QueryBuilder into IR form. */
 export function transformWhereCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): ts.CallExpression | null {
-  return transformArrowCall(call, checker, "where");
+  return transformArrowCall(call, checker, "where", outerScope);
 }
 
 /** Rewrite a `.having(arrow)` call on a Typhex Table/QueryBuilder into IR form. */
 export function transformHavingCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
+  outerScope: ScopeFrame[] = [],
 ): ts.CallExpression | null {
-  return transformArrowCall(call, checker, "having");
+  return transformArrowCall(call, checker, "having", outerScope);
 }

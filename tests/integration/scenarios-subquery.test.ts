@@ -91,7 +91,7 @@ describe("subquery scenarios (SQLite)", () => {
   const correlatedPostCount: IrSubquery = {
     kind: "subquery",
     tableName: "posts",
-    aggregate: { func: "COUNT" },
+    selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
     whereIr: {
       kind: "binary",
       op: "===",
@@ -106,7 +106,7 @@ describe("subquery scenarios (SQLite)", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "COUNT" },
+      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
       whereIr: null,
       whereParams: {},
     };
@@ -227,7 +227,7 @@ describe("subquery scenarios (SQLite)", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      selectCol: "authorId",
+      selectIr: { param: "p", paths: [["authorId"]] },
       whereIr: innerWhere,
       whereParams: {},
       orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],

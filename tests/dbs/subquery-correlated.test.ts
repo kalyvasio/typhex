@@ -11,7 +11,11 @@ import type { IrSelect, IrSubquery, IrIn } from "../../src/ir/types.js";
 const correlatedActivePosts: IrSubquery = {
   kind: "subquery",
   tableName: "posts",
-  aggregate: { func: "COUNT" },
+  selectIr: {
+    param: "p",
+    paths: [],
+    aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+  },
   whereIr: {
     kind: "binary",
     op: "===",
@@ -61,7 +65,17 @@ describe("Correlated scalar subquery in SELECT", () => {
     const sumActivePostsForAuthor: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "SUM", valueCol: "score" },
+      selectIr: {
+        param: "p",
+        paths: [],
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "SUM",
+            arg: { kind: "member", param: "p", path: ["score"] },
+          },
+        ],
+      },
       whereIr: {
         kind: "binary",
         op: "&&",
@@ -105,7 +119,11 @@ describe("Correlated scalar subquery from destructured outer arrow", () => {
     const sub: IrSubquery = {
       kind: "subquery",
       tableName: "posts",
-      aggregate: { func: "COUNT" },
+      selectIr: {
+        param: "p",
+        paths: [],
+        aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+      },
       whereIr: {
         kind: "binary",
         op: "===",
@@ -139,7 +157,7 @@ describe("Correlated IN subquery", () => {
       right: {
         kind: "subquery",
         tableName: "posts",
-        selectCol: "authorId",
+        selectIr: { param: "p", paths: [["authorId"]] },
         whereIr: {
           kind: "binary",
           op: "===",

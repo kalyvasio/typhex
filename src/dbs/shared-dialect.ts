@@ -189,10 +189,7 @@ function compileInNode(
     return `${left} ${op} (${dialect.placeholder(params.length)})`;
   }
   if (node.right.kind === "subquery") {
-    if (!node.right.selectCol) {
-      throw new Error("[typhex] Subquery on right side of IN must specify selectCol");
-    }
-    return `${left} ${op} ${compileSubqueryExpr(node.right, opts, params, compileNode)}`;
+    return `${left} ${op} ${compileSubqueryExpr(node.right, opts, params, compileNode, dialect)}`;
   }
   throw new Error("IN right side must be const array, param, or subquery");
 }
@@ -273,7 +270,7 @@ export function makeCompileNode(dialect: DialectImpl) {
       case "exists":
         return compileExistsNode(node, opts, params, dialect, compileNode);
       case "subquery":
-        return compileSubqueryExpr(node, opts, params, compileNode);
+        return compileSubqueryExpr(node, opts, params, compileNode, dialect);
       case "call": {
         const receiver = compileNode(node.receiver, opts, params);
         if (
@@ -396,24 +393,6 @@ export function compileSelectList(
   return { sql: [...explicitParts, ...aggParts, ...subqueryParts].join(", "), params };
 }
 
-/** Render the projection clause for a subquery (the bit between SELECT and FROM).
- *  Pure presentation: relies on `validateIrSubquery` having been called so we can
- *  trust the IR is well-formed. */
-function renderSubqueryProjection(sub: IrSubquery, subAlias: string): string {
-  const distinctCol =
-    sub.distinct && typeof sub.distinct === "object" ? sub.distinct.col : undefined;
-  if (sub.aggregate) {
-    const { func, valueCol } = sub.aggregate;
-    const col = distinctCol ?? valueCol;
-    if (col === undefined) return "COUNT(*)";
-    const inner = `${quoteId(subAlias)}.${quoteId(col)}`;
-    return `${func}(${distinctCol !== undefined ? "DISTINCT " : ""}${inner})`;
-  }
-  // selectCol form (validated)
-  const distinctPrefix = sub.distinct === true ? "DISTINCT " : "";
-  return `${distinctPrefix}${quoteId(subAlias)}.${quoteId(sub.selectCol!)}`;
-}
-
 /** Compile a scalar subquery as a parenthesized SQL expression:
  *    (SELECT <agg or col> FROM <table> AS <alias> WHERE <cond>)
  *
@@ -426,6 +405,7 @@ function compileSubqueryExpr(
   outerOpts: ResolvedOpts,
   outerParams: unknown[],
   compileNode: CompileNodeFn,
+  dialect: DialectImpl,
 ): string {
   validateIrSubquery(sub);
   const subAlias = nextFreeAlias(outerOpts);
@@ -448,7 +428,31 @@ function compileSubqueryExpr(
   };
   const whereSql = sub.whereIr ? compileNode(sub.whereIr, subOpts, outerParams) : "1=1";
 
-  const projection = renderSubqueryProjection(sub, subAlias);
+  // Project the single column via compileSelectList. For aggregate-form
+  // DISTINCT (`<func>(DISTINCT col)`), rewrite the aggregate's `distinct`
+  // flag in a fresh selectIr; for path-form DISTINCT, prefix `DISTINCT `.
+  const distinctCol =
+    sub.distinct && typeof sub.distinct === "object" ? sub.distinct.col : undefined;
+  let projectionIr: IrSelect = sub.selectIr;
+  if (distinctCol !== undefined && projectionIr.aggregates && projectionIr.aggregates.length === 1) {
+    const agg = projectionIr.aggregates[0];
+    const argParam =
+      agg.arg && agg.arg.kind === "member" ? agg.arg.param : projectionIr.param;
+    projectionIr = {
+      ...projectionIr,
+      aggregates: [
+        {
+          ...agg,
+          arg: { kind: "member", param: argParam, path: [distinctCol] },
+          distinct: true,
+        },
+      ],
+    };
+  }
+  const projList = compileSelectList(projectionIr, [], subOpts, undefined, dialect);
+  outerParams.push(...projList.params);
+  const projection =
+    sub.distinct === true ? `DISTINCT ${projList.sql}` : projList.sql;
 
   let tail = "";
   if (sub.orderBy && sub.orderBy.length > 0) {
@@ -475,5 +479,5 @@ function compileSelectListSubquery(
   dialect: DialectImpl,
 ): string {
   const compileNode = makeCompileNode(dialect);
-  return `${compileSubqueryExpr(sub, outerOpts, outerParams, compileNode)} AS ${quoteId(outputAlias)}`;
+  return `${compileSubqueryExpr(sub, outerOpts, outerParams, compileNode, dialect)} AS ${quoteId(outputAlias)}`;
 }

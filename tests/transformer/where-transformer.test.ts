@@ -110,7 +110,7 @@ authors.where((a: any) => a.postId in Post.query().where((p: any) => p.active ==
   it("transforms destructured outer where with correlated inline subquery comparison", () => {
     const source = `
 class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
-authors.where(({ id }: any) => Post.query().where((p: any) => p.authorId === id).count() > 5);
+authors.where(({ id }: any) => Post.query().where((p: any) => p.authorId === id).select(() => count()) > 5);
 `;
     expect(transformWithChecker(source)).toMatchSnapshot();
   });
