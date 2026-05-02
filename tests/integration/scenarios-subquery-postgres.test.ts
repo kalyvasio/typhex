@@ -1,6 +1,6 @@
 /**
  * PostgreSQL integration scenarios for the four subquery shapes. Mirrors
- * scenarios-subquery.test.ts: hand-built IR is compiled via the Postgres
+ * scenarios-subquery.test.ts: hand-built Expr is compiled via the Postgres
  * dialect and executed against a real database. Skipped unless
  * `TYPHEX_POSTGRES_URL` is set.
  */
@@ -9,7 +9,27 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity, createPostgresDriver } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 import { postgresDialect } from "../../src/dbs/index.js";
-import type { IrNode, IrOrderBy, IrSelect, IrSubquery } from "../../src/ir/types.js";
+import {
+  compileOrderByExpr,
+  compileSelectListExpr,
+  compileWhereExpr,
+} from "../../src/dbs/shared-dialect.js";
+import type { DialectImpl } from "../../src/dbs/types.js";
+import type {
+  Expr,
+  ExprAggregate,
+  OrderItem,
+  SelectItem,
+} from "../../src/orm/expr.js";
+import type { QueryPlan } from "../../src/orm/query-plan.js";
+import {
+  bin,
+  col,
+  countPostsSelect,
+  eq,
+  konst,
+  selectPlan,
+} from "../dbs/subquery-ref-helpers.js";
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
@@ -22,21 +42,35 @@ function freshDb() {
   return new Db(createPostgresDriver({ connectionString }));
 }
 
-function runIrQuery(
+function aggCompiler(dialect: DialectImpl) {
+  return dialect.compileAggregate
+    ? (agg: ExprAggregate, fn: (n: Expr, p: unknown[]) => string, p: unknown[]) =>
+        dialect.compileAggregate!(agg, fn, p)
+    : undefined;
+}
+
+function runExprQuery(
   db: Db,
   table: string,
   columnNames: string[],
-  select: IrSelect,
-  whereIr: IrNode | null,
-  orderBy: IrOrderBy[],
-  rowParam: string,
+  selectItems: SelectItem[],
+  selectAll: boolean,
+  whereExpr: Expr | null,
+  orderBy: OrderItem[],
 ): Promise<Record<string, unknown>[]> {
-  const opts = { tableAlias: "t0", paramToAlias: { [rowParam]: "t0" } };
-  const selectListResult = postgresDialect.compileSelectList(select, columnNames, opts);
-  const whereResult = postgresDialect.compileWhere(whereIr, opts);
-  const orderByResult = postgresDialect.compileOrderBy(orderBy, opts);
+  const selectListResult = compileSelectListExpr(
+    selectItems,
+    selectAll,
+    "t0",
+    columnNames,
+    postgresDialect,
+    aggCompiler(postgresDialect),
+  );
+  const whereResult = compileWhereExpr(whereExpr, postgresDialect);
+  const orderByResult = compileOrderByExpr(orderBy, postgresDialect);
   const { sql, params } = postgresDialect.compileSelect({
     table,
+    tableAlias: "t0",
     selectList: selectListResult.sql,
     selectListParams: selectListResult.params,
     whereSql: whereResult.sql,
@@ -91,47 +125,32 @@ describe("subquery scenarios (postgres)", () => {
     if (db) await db.close();
   });
 
-  const correlatedPostCount: IrSubquery = {
-    kind: "subquery",
+  const correlatedPostCount: QueryPlan = selectPlan({
     tableName: "pg_subq_posts",
-    selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-    whereIr: {
-      kind: "binary",
-      op: "===",
-      left: { kind: "member", param: "p", path: ["authorId"] },
-      right: { kind: "member", param: "a", path: ["id"] },
-    },
-    whereParams: {},
-    innerParamNames: ["p"],
-  };
+    selectItems: countPostsSelect,
+    where: eq(col("t1", "authorId"), col("t0", "id")),
+  });
 
   it(
     "non-correlated scalar count() in SELECT returns the same value per row",
     async () => {
-      const sub: IrSubquery = {
-        kind: "subquery",
+      const sub: QueryPlan = selectPlan({
         tableName: "pg_subq_posts",
-        selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-        whereIr: null,
-        whereParams: {},
-      };
-      const select: IrSelect = {
-        param: "a",
-        paths: [["name"]],
-        aliases: ["name"],
-        subqueries: [{ alias: "totalPosts", subquery: sub }],
-      };
-      const orderBy: IrOrderBy[] = [
-        { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
+        selectItems: countPostsSelect,
+      });
+      const items: SelectItem[] = [
+        { expr: col("t0", "name"), alias: "name" },
+        { expr: { kind: "subquery", plan: sub }, alias: "totalPosts" },
       ];
-      const rows = (await runIrQuery(
+      const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+      const rows = (await runExprQuery(
         db,
         "pg_subq_authors",
         AUTHOR_COLS,
-        select,
+        items,
+        false,
         null,
         orderBy,
-        "a",
       )) as Array<{ name: string; totalPosts: number | string }>;
       expect(rows).toHaveLength(3);
       expect(rows.every((r) => Number(r.totalPosts) === 4)).toBe(true);
@@ -142,23 +161,19 @@ describe("subquery scenarios (postgres)", () => {
   it(
     "correlated count() in SELECT yields per-author post counts",
     async () => {
-      const select: IrSelect = {
-        param: "a",
-        paths: [["name"]],
-        aliases: ["name"],
-        subqueries: [{ alias: "postCount", subquery: correlatedPostCount }],
-      };
-      const orderBy: IrOrderBy[] = [
-        { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
+      const items: SelectItem[] = [
+        { expr: col("t0", "name"), alias: "name" },
+        { expr: { kind: "subquery", plan: correlatedPostCount }, alias: "postCount" },
       ];
-      const rows = (await runIrQuery(
+      const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+      const rows = (await runExprQuery(
         db,
         "pg_subq_authors",
         AUTHOR_COLS,
-        select,
+        items,
+        false,
         null,
         orderBy,
-        "a",
       )) as Array<{ name: string; postCount: number | string }>;
       expect(rows.map((r) => [r.name, Number(r.postCount)])).toEqual([
         ["Alice", 3],
@@ -172,24 +187,17 @@ describe("subquery scenarios (postgres)", () => {
   it(
     "WHERE aggregate compare: authors with more than 1 post",
     async () => {
-      const select: IrSelect = { param: "a", paths: [], rest: true };
-      const whereIr: IrNode = {
-        kind: "binary",
-        op: ">",
-        left: correlatedPostCount,
-        right: { kind: "const", value: 1 },
-      };
-      const orderBy: IrOrderBy[] = [
-        { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
-      ];
-      const rows = (await runIrQuery(
+      const items: SelectItem[] = AUTHOR_COLS.map((c) => ({ expr: col("t0", c) }));
+      const where: Expr = bin(">", { kind: "subquery", plan: correlatedPostCount }, konst(1));
+      const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+      const rows = (await runExprQuery(
         db,
         "pg_subq_authors",
         AUTHOR_COLS,
-        select,
-        whereIr,
+        items,
+        false,
+        where,
         orderBy,
-        "a",
       )) as Array<{ name: string }>;
       expect(rows.map((r) => r.name)).toEqual(["Alice"]);
     },
@@ -199,23 +207,19 @@ describe("subquery scenarios (postgres)", () => {
   it(
     "ORDER BY correlated count() sorts authors by post count desc",
     async () => {
-      const select: IrSelect = {
-        param: "a",
-        paths: [["name"]],
-        aliases: ["name"],
-      };
-      const orderBy: IrOrderBy[] = [
-        { expr: correlatedPostCount, direction: "desc" },
-        { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
+      const items: SelectItem[] = [{ expr: col("t0", "name"), alias: "name" }];
+      const orderBy: OrderItem[] = [
+        { expr: { kind: "subquery", plan: correlatedPostCount }, direction: "desc" },
+        { expr: col("t0", "id"), direction: "asc" },
       ];
-      const rows = (await runIrQuery(
+      const rows = (await runExprQuery(
         db,
         "pg_subq_authors",
         AUTHOR_COLS,
-        select,
+        items,
+        false,
         null,
         orderBy,
-        "a",
       )) as Array<{ name: string }>;
       expect(rows.map((r) => r.name)).toEqual(["Alice", "Bob", "Carol"]);
     },
@@ -225,38 +229,28 @@ describe("subquery scenarios (postgres)", () => {
   it(
     "top-N IN subquery: authors whose id is among the top 2 active-post scorers",
     async () => {
-      const innerWhere: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "p", path: ["active"] },
-        right: { kind: "const", value: 1 },
-      };
-      const sub: IrSubquery = {
-        kind: "subquery",
+      const sub: QueryPlan = selectPlan({
         tableName: "pg_subq_posts",
-        selectIr: { param: "p", paths: [["authorId"]] },
-        whereIr: innerWhere,
-        whereParams: {},
-        orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],
+        selectItems: [{ expr: col("t1", "authorId") }],
+        where: eq(col("t1", "active"), konst(1)),
+        orderBy: [{ expr: col("t1", "score"), direction: "desc" }],
         limitNum: 2,
-      };
-      const whereIr: IrNode = {
+      });
+      const where: Expr = {
         kind: "in",
-        left: { kind: "member", param: "a", path: ["id"] },
-        right: sub,
+        left: col("t0", "id"),
+        right: { kind: "subquery", plan: sub },
       };
-      const select: IrSelect = { param: "a", paths: [], rest: true };
-      const orderBy: IrOrderBy[] = [
-        { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
-      ];
-      const rows = (await runIrQuery(
+      const items: SelectItem[] = AUTHOR_COLS.map((c) => ({ expr: col("t0", c) }));
+      const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+      const rows = (await runExprQuery(
         db,
         "pg_subq_authors",
         AUTHOR_COLS,
-        select,
-        whereIr,
+        items,
+        false,
+        where,
         orderBy,
-        "a",
       )) as Array<{ name: string }>;
       expect(rows.map((r) => r.name).sort()).toEqual(["Alice", "Bob"]);
     },

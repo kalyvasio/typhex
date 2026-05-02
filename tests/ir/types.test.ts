@@ -156,11 +156,8 @@ describe("ir/types", () => {
       expect(
         isIrOrderBy({
           expr: {
-            kind: "subquery",
-            tableName: "posts",
-            selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-            whereIr: null,
-            whereParams: {},
+            kind: "subqueryRef",
+            key: "sub",
           },
           direction: "asc",
         }),

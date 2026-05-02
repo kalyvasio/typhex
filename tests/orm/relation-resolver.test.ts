@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildRelationContext } from "../../src/orm/helpers/relations/relation-context-builder.js";
-import type { RelationFetchMetadata } from "../../src/orm/helpers/relations/relation-context-builder.js";
+import { QueryPlanBuilder } from "../../src/orm/query-plan.js";
+import type { JoinedProjection, RelationFetchMetadata } from "../../src/orm/query-plan.js";
 import {
-  assembleJoined,
   assembleFetched,
+  assembleJoined,
 } from "../../src/orm/helpers/relations/relation-assembler.js";
-import type { IrSelect } from "../../src/ir/types.js";
+import type { IrSelect, IrNode } from "../../src/ir/types.js";
+import type { QueryState } from "../../src/orm/query-builder.js";
+import type { QueryExecutor } from "../../src/orm/db.js";
 
 const mockRelations = {
   company: {
@@ -19,7 +21,7 @@ const mockRelations = {
 const mockRelationsWithTarget = {
   company: {
     _relType: "many-to-one",
-    _target: () => ({ query: () => ({}) }),
+    _target: () => ({ query: () => ({}), table: { _table: "companies" } }),
     _options: { foreignKey: "companyId" },
   },
 } as any;
@@ -27,19 +29,65 @@ const mockRelationsWithTarget = {
 const mockRelationsToMany = {
   posts: {
     _relType: "one-to-many",
-    _target: () => ({ query: () => ({}) }),
+    _target: () => ({ query: () => ({}), table: { _table: "posts" } }),
     _options: { foreignKey: "userId" },
   },
 } as any;
 
 // A WHERE IR that references company.name — makes getReusableJoinKeys produce {"company"}
 // when the select also references company and rootParam is "c".
-const companyJoinWhereIr = {
+const companyJoinWhereIr: IrNode = {
   kind: "binary",
   op: "===",
   left: { kind: "member", param: "c", path: ["company", "name"] },
   right: { kind: "const", value: "Acme" },
 };
+
+function makeQe(): QueryExecutor {
+  return {
+    dialect: "sqlite",
+    query: async () => [],
+    run: async () => ({ lastID: 1, changes: 0 }),
+  };
+}
+
+function buildState(args: {
+  selectIr: IrSelect | null;
+  relations?: any;
+  whereIr?: IrNode | null;
+  pkColumns?: string[] | null;
+}): QueryState<unknown> {
+  return {
+    tableName: "contacts",
+    columnNames: ["id", "name", "companyId"],
+    qe: makeQe(),
+    pkColumns: args.pkColumns ?? ["id"],
+    whereIr: args.whereIr ?? null,
+    whereParams: {},
+    subqueryParams: {},
+    orderBy: [],
+    limitNum: null,
+    offsetNum: null,
+    selectIr: args.selectIr,
+    relations: args.relations,
+    resolveRelationTarget: args.relations
+      ? (rel: any) => {
+          const target = rel._target();
+          return target?.table ? { table: target.table._table, pk: ["id"] } : null;
+        }
+      : undefined,
+  } as QueryState<unknown>;
+}
+
+function planFor(args: {
+  selectIr: IrSelect | null;
+  relations?: any;
+  whereIr?: IrNode | null;
+  pkColumns?: string[] | null;
+}) {
+  const state = buildState(args);
+  return QueryPlanBuilder.build(state, { kind: "select" });
+}
 
 function makeToOneFetch(overrides: Partial<RelationFetchMetadata> = {}): RelationFetchMetadata {
   return {
@@ -71,74 +119,47 @@ describe("relation-resolver", () => {
         { id: 1, name: "John", company_id: 1, company_name: "Acme" },
         { id: 2, name: "Jane", company_id: 1, company_name: "Acme" },
       ];
-      const select: IrSelect = {
-        param: "c",
-        paths: [
-          ["company", "id"],
-          ["company", "name"],
-        ],
-        aliases: ["company_id", "company_name"],
-      };
-      assembleJoined(rows, new Set(["company"]), select);
-      expect(rows[0].company).toEqual({ id: 1, name: "Acme" });
-      expect(rows[0]).not.toHaveProperty("company_id");
-      expect(rows[0]).not.toHaveProperty("company_name");
-    });
-
-    it("falls back to relKey_field alias when no explicit aliases provided", () => {
-      const rows: Record<string, unknown>[] = [{ id: 1, company_id: 10, company_name: "Acme" }];
-      const select: IrSelect = {
-        param: "c",
-        paths: [
-          ["company", "id"],
-          ["company", "name"],
-        ],
-        aliases: [], // empty → forces the ?? fallback inside collectJoinedSubPaths
-      };
-      assembleJoined(rows, new Set(["company"]), select);
-      expect(rows[0].company).toEqual({ id: 10, name: "Acme" });
-      expect(rows[0]).not.toHaveProperty("company_id");
-      expect(rows[0]).not.toHaveProperty("company_name");
-    });
-
-    it("builds from select.relations with subPaths", () => {
-      const rows: Record<string, unknown>[] = [
-        { id: 1, name: "John", company_id: 1, company_name: "Acme" },
+      const projections: JoinedProjection[] = [
+        {
+          relationKey: "company",
+          outputKey: "company",
+          members: [
+            { alias: "company_id", subPath: "id" },
+            { alias: "company_name", subPath: "name" },
+          ],
+        },
       ];
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"], ["name"]],
-        aliases: ["id", "name"],
-        relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
-      };
-      assembleJoined(rows, new Set(["company"]), select);
+      assembleJoined(rows, projections);
       expect(rows[0].company).toEqual({ id: 1, name: "Acme" });
+      expect(rows[0]).not.toHaveProperty("company_id");
+      expect(rows[0]).not.toHaveProperty("company_name");
     });
 
-    it("uses outputKey from IrSelectRelation when it differs from relation name", () => {
+    it("uses outputKey from JoinedProjection when it differs from relation name", () => {
       const rows: Record<string, unknown>[] = [
         { id: 1, name: "John", employer_id: 1, employer_name: "Acme" },
       ];
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"], ["name"]],
-        aliases: ["id", "name"],
-        relations: [{ name: "company", outputKey: "employer", subPaths: [["id"], ["name"]] }],
-      };
-      assembleJoined(rows, new Set(["company"]), select);
+      const projections: JoinedProjection[] = [
+        {
+          relationKey: "company",
+          outputKey: "employer",
+          members: [
+            { alias: "employer_id", subPath: "id" },
+            { alias: "employer_name", subPath: "name" },
+          ],
+        },
+      ];
+      assembleJoined(rows, projections);
       expect(rows[0]).not.toHaveProperty("company");
       expect((rows[0] as any).employer).toEqual({ id: 1, name: "Acme" });
     });
 
-    it("skips relation key when no subPaths produce columns", () => {
+    it("skips projection when members is empty", () => {
       const rows: Record<string, unknown>[] = [{ id: 1 }];
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"]],
-        aliases: ["id"],
-        // no relation paths for "company"
-      };
-      assembleJoined(rows, new Set(["company"]), select);
+      const projections: JoinedProjection[] = [
+        { relationKey: "company", outputKey: "company", members: [] },
+      ];
+      assembleJoined(rows, projections);
       expect(rows[0]).not.toHaveProperty("company");
     });
   });
@@ -168,7 +189,7 @@ describe("relation-resolver", () => {
     it("sets to-one relation to null when fk not found in fetched map", () => {
       const rows: Record<string, unknown>[] = [{ id: 1, companyId: 99 }];
       const fetch = makeToOneFetch();
-      const companyMap = new Map<string, unknown>(); // "99" not in map
+      const companyMap = new Map<string, unknown>();
       const fetched = new Map<string, any>([["company", companyMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
@@ -201,7 +222,7 @@ describe("relation-resolver", () => {
     it("sets to-many to empty array when id not in fetched map", () => {
       const rows: Record<string, unknown>[] = [{ id: 7 }];
       const fetch = makeToManyFetch();
-      const postsMap = new Map<unknown, unknown[]>(); // 7 not in map
+      const postsMap = new Map<unknown, unknown[]>();
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
@@ -210,19 +231,18 @@ describe("relation-resolver", () => {
     });
 
     it("sets to-many to empty array when row has no parentPkColumn value", () => {
-      const rows: Record<string, unknown>[] = [{ userId: 5 }]; // no "id" key, parentPkColumns defaults to ["id"]
+      const rows: Record<string, unknown>[] = [{ userId: 5 }];
       const fetch = makeToManyFetch();
       const postsMap = new Map<unknown, unknown[]>([["5", [{ id: 1 }]]]);
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
       assembleFetched(rows, [fetch], fetched, new Set());
 
-      // parentPkCol = "id" (default), row["id"] = undefined → no match → empty
       expect(rows[0].posts).toEqual([]);
     });
 
     it("sets to-many to empty array when row has neither id nor fkColumn", () => {
-      const rows: Record<string, unknown>[] = [{}]; // pk = undefined ?? undefined = undefined → null check fails
+      const rows: Record<string, unknown>[] = [{}];
       const fetch = makeToManyFetch();
       const fetched = new Map<string, any>([["posts", new Map()]]);
 
@@ -245,7 +265,7 @@ describe("relation-resolver", () => {
     it("skips attachment when fetched has no entry for the relation", () => {
       const rows: Record<string, unknown>[] = [{ id: 1, companyId: 10 }];
       const fetch = makeToOneFetch();
-      const fetched = new Map<string, any>(); // no "company" entry
+      const fetched = new Map<string, any>();
 
       assembleFetched(rows, [fetch], fetched, new Set());
 
@@ -253,42 +273,39 @@ describe("relation-resolver", () => {
     });
   });
 
-  describe("column/relation resolution (via buildRelationContext)", () => {
-    it("includes relation subPaths in columnPaths when joined", () => {
+  describe("relation classification (via QueryPlanBuilder)", () => {
+    it("includes joined relation columns in selectItems when JOIN is reusable", () => {
       const select: IrSelect = {
         param: "c",
         paths: [["id"], ["name"]],
         aliases: ["id", "name"],
         relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
       };
-      const ctx = buildRelationContext(
-        select,
-        mockRelations,
-        companyJoinWhereIr as any,
-        ["id"],
-        "c",
-      );
-      expect(ctx.columnPaths).toContainEqual(["company", "id"]);
-      expect(ctx.columnPaths).toContainEqual(["company", "name"]);
-      expect(ctx.relationFetches).toHaveLength(0);
+      const plan = planFor({
+        selectIr: select,
+        relations: mockRelationsWithTarget,
+        whereIr: companyJoinWhereIr,
+      });
+      const aliases = plan.selectItems.map((i) => i.alias).filter(Boolean);
+      expect(aliases).toContain("company_id");
+      expect(aliases).toContain("company_name");
+      expect(plan.relationFetches).toHaveLength(0);
     });
 
-    it("adds joined relation field paths from select.paths directly to columnPaths", () => {
+    it("treats joined relation field paths as columns on the join alias", () => {
       const select: IrSelect = {
         param: "c",
         paths: [["id"], ["company", "name"]],
         aliases: ["id", "company_name"],
       };
-      const ctx = buildRelationContext(
-        select,
-        mockRelations,
-        companyJoinWhereIr as any,
-        ["id"],
-        "c",
-      );
-      expect(ctx.columnPaths).toContainEqual(["company", "name"]);
-      expect(ctx.columnAliases).toContain("company_name");
-      expect(ctx.relationFetches).toHaveLength(0);
+      const plan = planFor({
+        selectIr: select,
+        relations: mockRelationsWithTarget,
+        whereIr: companyJoinWhereIr,
+      });
+      const aliases = plan.selectItems.map((i) => i.alias).filter(Boolean);
+      expect(aliases).toContain("company_name");
+      expect(plan.relationFetches).toHaveLength(0);
     });
 
     it("creates fetch for whole-relation path (single segment)", () => {
@@ -297,11 +314,10 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
-      expect(ctx.columnPaths).not.toContainEqual(["company"]);
-      expect(ctx.relationFetches).toHaveLength(1);
-      expect(ctx.relationFetches[0].relation.name).toBe("company");
-      expect(ctx.relationFetches[0].relationType).toBe("many-to-one");
+      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
+      expect(plan.relationFetches).toHaveLength(1);
+      expect(plan.relationFetches[0].relation.name).toBe("company");
+      expect(plan.relationFetches[0].relationType).toBe("many-to-one");
     });
 
     it("creates fetch for relation field path when not joined", () => {
@@ -310,17 +326,16 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company", "name"]],
         aliases: ["id", "company_name"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
-      expect(ctx.columnPaths).not.toContainEqual(["company", "name"]);
-      expect(ctx.relationFetches).toHaveLength(1);
-      expect(ctx.relationFetches[0].relation.name).toBe("company");
+      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
+      expect(plan.relationFetches).toHaveLength(1);
+      expect(plan.relationFetches[0].relation.name).toBe("company");
     });
 
     it("excludes relation with unsupported type from fetches", () => {
       const badRelations = {
         company: {
           _relType: "unknown-relation-kind",
-          _target: () => ({ query: () => ({}) }),
+          _target: () => ({ query: () => ({}), table: { _table: "companies" } }),
           _options: { foreignKey: "companyId" },
         },
       } as any;
@@ -329,15 +344,14 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const ctx = buildRelationContext(select, badRelations, null, ["id"], "c");
-      expect(ctx.relationFetches).toHaveLength(0);
+      const plan = planFor({ selectIr: select, relations: badRelations });
+      expect(plan.relationFetches).toHaveLength(0);
     });
 
-    it("returns null columnPaths when select is null", () => {
-      const ctx = buildRelationContext(null, mockRelations, null, ["id"], "c");
-      expect(ctx.columnPaths).toBeNull();
-      expect(ctx.columnAliases).toBeNull();
-      expect(ctx.relationFetches).toHaveLength(0);
+    it("returns empty selectItems when select is null", () => {
+      const plan = planFor({ selectIr: null, relations: mockRelations });
+      expect(plan.selectItems).toEqual([]);
+      expect(plan.relationFetches).toHaveLength(0);
     });
 
     it("appends missing FK column when it is not already selected", () => {
@@ -346,9 +360,11 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
-      // "companyId" FK must be appended so the fetched rows can be correlated
-      expect(ctx.columnPaths!.some((p) => p[0] === "companyId")).toBe(true);
+      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
+      const cols = plan.selectItems
+        .map((i) => (i.expr.kind === "column" ? i.expr.column : null))
+        .filter(Boolean);
+      expect(cols).toContain("companyId");
     });
 
     it("does not duplicate FK column when already in selected paths", () => {
@@ -357,8 +373,11 @@ describe("relation-resolver", () => {
         paths: [["id"], ["companyId"], ["company"]],
         aliases: ["id", "companyId", "company"],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
-      expect(ctx.columnPaths!.filter((p) => p[0] === "companyId")).toHaveLength(1);
+      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
+      const companyIdCount = plan.selectItems.filter(
+        (i) => i.expr.kind === "column" && i.expr.column === "companyId",
+      ).length;
+      expect(companyIdCount).toBe(1);
     });
 
     it("creates fetch via select.relations when relation is not joined", () => {
@@ -368,10 +387,9 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
-      expect(ctx.relationFetches).toHaveLength(1);
-      expect(ctx.relationFetches[0].relation.name).toBe("company");
-      expect(ctx.columnPaths).not.toContainEqual(["company", "id"]);
+      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
+      expect(plan.relationFetches).toHaveLength(1);
+      expect(plan.relationFetches[0].relation.name).toBe("company");
     });
 
     it("deduplicates relations with same outputKey in select.relations", () => {
@@ -381,22 +399,21 @@ describe("relation-resolver", () => {
         aliases: ["id"],
         relations: [
           { name: "company", outputKey: "employer" },
-          { name: "company", outputKey: "employer" }, // duplicate outputKey → skipped
+          { name: "company", outputKey: "employer" },
         ],
       };
-      const ctx = buildRelationContext(select, mockRelationsWithTarget, null, ["id"], "c");
-      expect(ctx.relationFetches).toHaveLength(1);
+      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
+      expect(plan.relationFetches).toHaveLength(1);
     });
 
     it("excludes from fetches when target entity has no query method", () => {
-      // mockRelations._target() returns {} (no query fn) → buildRelationFetchMeta returns null
       const select: IrSelect = {
         param: "c",
         paths: [["company"]],
         aliases: ["company"],
       };
-      const ctx = buildRelationContext(select, mockRelations, null, ["id"], "c");
-      expect(ctx.relationFetches).toHaveLength(0);
+      const plan = planFor({ selectIr: select, relations: mockRelations });
+      expect(plan.relationFetches).toHaveLength(0);
     });
 
     it("appends PK column for to-many relation when not already selected", () => {
@@ -405,8 +422,11 @@ describe("relation-resolver", () => {
         paths: [["name"], ["posts"]],
         aliases: ["name", "posts"],
       };
-      const ctx = buildRelationContext(select, mockRelationsToMany, null, ["id"], "u");
-      expect(ctx.columnPaths!.some((p) => p[0] === "id")).toBe(true);
+      const plan = planFor({ selectIr: select, relations: mockRelationsToMany });
+      const cols = plan.selectItems
+        .map((i) => (i.expr.kind === "column" ? i.expr.column : null))
+        .filter(Boolean);
+      expect(cols).toContain("id");
     });
 
     it("does not duplicate PK column for to-many when already selected", () => {
@@ -415,8 +435,11 @@ describe("relation-resolver", () => {
         paths: [["id"], ["posts"]],
         aliases: ["id", "posts"],
       };
-      const ctx = buildRelationContext(select, mockRelationsToMany, null, ["id"], "u");
-      expect(ctx.columnPaths!.filter((p) => p[0] === "id")).toHaveLength(1);
+      const plan = planFor({ selectIr: select, relations: mockRelationsToMany });
+      const idCount = plan.selectItems.filter(
+        (i) => i.expr.kind === "column" && i.expr.column === "id",
+      ).length;
+      expect(idCount).toBe(1);
     });
 
     it("adds default 'id' PK column when pkColumns is null (to-many)", () => {
@@ -425,181 +448,45 @@ describe("relation-resolver", () => {
         paths: [["name"], ["posts"]],
         aliases: ["name", "posts"],
       };
-      const ctx = buildRelationContext(select, mockRelationsToMany, null, null, "u");
-      // pkColumns null → defaults to ["id"] so "id" is added to ensure to-many correlation works
-      expect(ctx.columnPaths!.some((p) => p[0] === "id")).toBe(true);
-    });
-  });
-
-  describe("buildRelationContext", () => {
-    it("returns null columnPaths when no select", () => {
-      const ctx = buildRelationContext(null, undefined, null, ["id"], "c");
-      expect(ctx.columnPaths).toBeNull();
-      expect(ctx.relationFetches).toHaveLength(0);
+      const plan = planFor({
+        selectIr: select,
+        relations: mockRelationsToMany,
+        pkColumns: null,
+      });
+      const cols = plan.selectItems
+        .map((i) => (i.expr.kind === "column" ? i.expr.column : null))
+        .filter(Boolean);
+      expect(cols).toContain("id");
     });
 
-    it("returns null columnPaths when select has no relation paths", () => {
-      const select: IrSelect = { param: "c", paths: [["id"], ["name"]], aliases: ["id", "name"] };
-      const ctx = buildRelationContext(select, mockRelations, null, ["id"], "c");
-      expect(ctx.columnPaths).toBeNull();
-    });
-
-    it("populates skipLoadFor via paths when relation is reusable from join", () => {
-      const whereIr = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
+    it("populates skipLoadFor / joinedProjections via paths when relation is reusable from join", () => {
       const select: IrSelect = {
         param: "c",
         paths: [["id"], ["company", "name"]],
         aliases: ["id", "company_name"],
       };
-      const ctx = buildRelationContext(
-        select,
-        mockRelationsWithTarget,
-        whereIr as any,
-        ["id"],
-        "c",
-      );
-      expect(ctx.reusableJoinKeys.has("company")).toBe(true);
-      expect(ctx.skipLoadFor.has("company")).toBe(true);
-    });
-
-    it("handles relation in select.relations with no subPaths (subPaths?.length ?? 0 fallback)", () => {
-      // Covers the `?? 0` branch when r.subPaths is undefined
-      const whereIr = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"]],
-        aliases: ["id"],
-        relations: [{ name: "company", outputKey: "company" }], // no subPaths → subPaths?.length = undefined → ?? 0
-      };
-      const ctx = buildRelationContext(
-        select,
-        mockRelationsWithTarget,
-        whereIr as any,
-        ["id"],
-        "c",
-      );
-      // subPaths undefined → (r.subPaths?.length ?? 0) = 0 → not > 0 → hasReusableRelationInSelect = false
-      expect(ctx.hasReusableRelationInSelect).toBe(false);
-    });
-
-    it("evaluates select.relations ?? [] branch when select.relations is undefined", () => {
-      // Relation is in paths as whole-segment ["company"] → length=1, not >1
-      // So paths.some() returns false → || evaluates right side → relations ?? [] fires (line 63)
-      const whereIr = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const select: IrSelect = {
-        param: "c",
-        paths: [["company"]], // single segment → length=1, not >1
-        aliases: ["company"],
-        // no relations property → selectIr.relations is undefined
-      };
-      const ctx = buildRelationContext(
-        select,
-        mockRelationsWithTarget,
-        whereIr as any,
-        ["id"],
-        "c",
-      );
-      // reusableJoinKeys has "company" but hasReusableRelationInSelect = false (no matching path/relation)
-      expect(ctx.reusableJoinKeys.has("company")).toBe(true);
-      expect(ctx.hasReusableRelationInSelect).toBe(false);
+      const plan = planFor({
+        selectIr: select,
+        relations: mockRelationsWithTarget,
+        whereIr: companyJoinWhereIr,
+      });
+      expect(plan.skipLoadFor.has("company")).toBe(true);
+      expect(plan.joinedProjections.some((p) => p.relationKey === "company")).toBe(true);
     });
 
     it("populates skipLoadFor via select.relations when relation is reusable from join", () => {
-      const whereIr = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
       const select: IrSelect = {
         param: "c",
         paths: [["id"]],
         aliases: ["id"],
         relations: [{ name: "company", outputKey: "company", subPaths: [["id"], ["name"]] }],
       };
-      const ctx = buildRelationContext(
-        select,
-        mockRelationsWithTarget,
-        whereIr as any,
-        ["id"],
-        "c",
-      );
-      expect(ctx.skipLoadFor.has("company")).toBe(true);
-    });
-  });
-
-  describe("alias fallback behavior (via buildRelationContext)", () => {
-    it("falls back to last path segment when aliases array is shorter than paths", () => {
-      // Include a relation path to make hasRelations = true so buildRelationContext
-      // calls resolveSelectColumnsAndRelations and populates ctx.columnPaths/columnAliases.
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"], ["name"], ["company", "name"]],
-        aliases: [], // shorter → aliases[i] is undefined → fallback
-      };
-      const ctx = buildRelationContext(
-        select,
-        mockRelations,
-        companyJoinWhereIr as any,
-        ["id"],
-        "c",
-      );
-      expect(ctx.columnPaths).toContainEqual(["id"]);
-      expect(ctx.columnAliases).toContain("id");
-      expect(ctx.columnAliases).toContain("name");
-    });
-
-    it("uses relKey_field fallback alias for joined path when no explicit alias given", () => {
-      // aliases is empty → joinedRelationColumnAlias receives undefined → ?? fallback
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"], ["company", "name"]],
-        aliases: [], // empty → aliases[1] for ["company","name"] is undefined
-      };
-      const ctx = buildRelationContext(
-        select,
-        mockRelations,
-        companyJoinWhereIr as any,
-        ["id"],
-        "c",
-      );
-      expect(ctx.columnAliases).toContain("company_name");
-    });
-  });
-
-  describe("expandJoinedRelationToColumns — empty subPath", () => {
-    it("skips empty sub-array entries inside subPaths", () => {
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"]],
-        aliases: ["id"],
-        relations: [{ name: "company", outputKey: "company", subPaths: [[]] }], // empty subPath
-      };
-      const ctx = buildRelationContext(
-        select,
-        mockRelations,
-        companyJoinWhereIr as any,
-        ["id"],
-        "c",
-      );
-      // empty sub produces no column path
-      expect(ctx.columnPaths).not.toContainEqual(["company"]);
-      expect(ctx.columnPaths!.filter((p) => p[0] === "company")).toHaveLength(0);
+      const plan = planFor({
+        selectIr: select,
+        relations: mockRelationsWithTarget,
+        whereIr: companyJoinWhereIr,
+      });
+      expect(plan.skipLoadFor.has("company")).toBe(true);
     });
   });
 });

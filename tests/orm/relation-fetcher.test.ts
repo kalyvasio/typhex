@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { fetchRelations } from "../../src/orm/helpers/relations/relation-fetcher.js";
-import type { RelationFetchMetadata } from "../../src/orm/helpers/relations/relation-context-builder.js";
+import type { RelationFetchMetadata } from "../../src/orm/query-plan.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 
 /** Builds a spy-able query builder chain whose toArray returns `rows`. */

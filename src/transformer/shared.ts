@@ -9,7 +9,6 @@ import type {
   IrBinary,
   IrOrderBy,
   IrAggregate,
-  IrSubquery,
 } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
@@ -498,57 +497,17 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
         f.createPropertyAssignment("innerWhere", irNodeToTsLiteral(ir.innerWhere)),
       );
       break;
-    case "subquery": {
-      const sub = ir as IrSubquery;
-      props.push(f.createPropertyAssignment("tableName", f.createStringLiteral(sub.tableName)));
-      props.push(f.createPropertyAssignment("selectIr", irSelectToTsLiteral(sub.selectIr)));
-      props.push(
-        f.createPropertyAssignment(
-          "whereIr",
-          sub.whereIr ? irNodeToTsLiteral(sub.whereIr) : f.createNull(),
-        ),
-      );
-      if (sub.innerParamNames && sub.innerParamNames.length > 0) {
-        props.push(
-          f.createPropertyAssignment("innerParamNames", stringArrayLiteral(sub.innerParamNames, f)),
-        );
-      }
-      if (sub.outerCorrelatedParams && sub.outerCorrelatedParams.length > 0) {
+    case "subqueryRef":
+      props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
+      if (ir.localParamNames && ir.localParamNames.length > 0) {
         props.push(
           f.createPropertyAssignment(
-            "outerCorrelatedParams",
-            stringArrayLiteral(sub.outerCorrelatedParams, f),
-          ),
-        );
-      }
-      if (sub.orderBy && sub.orderBy.length > 0) {
-        props.push(
-          f.createPropertyAssignment(
-            "orderBy",
-            f.createArrayLiteralExpression(sub.orderBy.map((o) => irOrderByToTsLiteral(o))),
-          ),
-        );
-      }
-      if (sub.limitNum !== undefined) {
-        props.push(f.createPropertyAssignment("limitNum", f.createNumericLiteral(sub.limitNum)));
-      }
-      if (sub.offsetNum !== undefined) {
-        props.push(f.createPropertyAssignment("offsetNum", f.createNumericLiteral(sub.offsetNum)));
-      }
-      if (sub.distinct === true) {
-        props.push(f.createPropertyAssignment("distinct", f.createTrue()));
-      } else if (sub.distinct && typeof sub.distinct === "object") {
-        props.push(
-          f.createPropertyAssignment(
-            "distinct",
-            f.createObjectLiteralExpression([
-              f.createPropertyAssignment("col", f.createStringLiteral(sub.distinct.col)),
-            ]),
+            "localParamNames",
+            stringArrayLiteral(ir.localParamNames, f),
           ),
         );
       }
       break;
-    }
   }
   return f.createObjectLiteralExpression(props);
 }

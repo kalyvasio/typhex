@@ -2,40 +2,34 @@
  * SQLite dialect: compilation and schema translation.
  */
 
-import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
-import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
 import type {
-  CompileOptions,
   CompileResult,
   ColumnDef,
   DialectImpl,
   CompileSelectOpts,
-  ResolvedOpts,
   OnConflictClause,
 } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/helpers/relations/relation-joins.js";
+import type { Expr, ExprAggregate } from "../../orm/expr.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
+  JOIN_SQL_KEYWORDS,
   quoteId,
-  resolveOpts,
-  makeCompileNode,
-  compileOrderBy,
-  compileSelectList,
+  compilePlan as compilePlanShared,
   compileAggregate,
   compileConcatAggregate,
   compileGroupBy,
 } from "../shared-dialect.js";
 
 function sqliteCompileAggregate(
-  agg: IrAggregate,
-  opts?: ResolvedOpts,
-  compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
+  agg: ExprAggregate,
+  compileNodeFn?: (node: Expr, params: unknown[]) => string,
   params?: unknown[],
 ): string {
   if (agg.func === "GROUP_CONCAT") {
-    return compileConcatAggregate("GROUP_CONCAT", agg, undefined, opts, compileNodeFn, params);
+    return compileConcatAggregate("GROUP_CONCAT", agg, undefined, compileNodeFn, params);
   }
-  return compileAggregate(agg, opts, compileNodeFn, params);
+  return compileAggregate(agg, compileNodeFn, params);
 }
 
 function appendOnConflict(
@@ -92,23 +86,8 @@ export const sqliteDialect: DialectImpl = {
     return { sql: newSql, params: newParams };
   },
 
-  compileWhere(node: IrNode | null, options: CompileOptions = {}): CompileResult {
-    const opts = resolveOpts(options);
-    const params: unknown[] = [];
-    const sql = node ? compileNode(node, opts, params) : "1=1";
-    return { sql, params };
-  },
-
-  compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}) {
-    return compileOrderBy(orders, options, sqliteDialect);
-  },
-
-  compileSelectList(
-    select: IrSelect | null,
-    columns: string[],
-    options: CompileOptions = {},
-  ): { sql: string; params: unknown[] } {
-    return compileSelectList(select, columns, options, sqliteCompileAggregate, sqliteDialect);
+  compilePlan(plan, opts = {}) {
+    return compilePlanShared(plan, opts, sqliteDialect);
   },
 
   toColumnDef(def: ColumnDef): string {
@@ -161,12 +140,13 @@ export const sqliteDialect: DialectImpl = {
 
   compileCount(
     table: string,
+    tableAlias: string,
     whereSql: string,
     whereParams: unknown[],
     joinsSql?: string,
   ): CompileResult {
     return {
-      sql: `SELECT COUNT(*) AS c FROM ${quoteId(table)} AS t0${joinsSql ?? ""} WHERE ${whereSql}`,
+      sql: `SELECT COUNT(*) AS c FROM ${quoteId(table)} AS ${quoteId(tableAlias)}${joinsSql ?? ""} WHERE ${whereSql}`,
       params: whereParams,
     };
   },
@@ -210,9 +190,7 @@ export const sqliteDialect: DialectImpl = {
     const esc = quoteId;
     const params = [...(opts.selectListParams ?? []), ...opts.whereParams];
     const groupByClause =
-      opts.groupBy && opts.groupBy.length > 0
-        ? ` GROUP BY ${compileGroupBy(opts.groupBy, resolveOpts(opts.compileOpts ?? {}))}`
-        : "";
+      opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${compileGroupBy(opts.groupBy)}` : "";
     let havingClause = "";
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
@@ -233,7 +211,7 @@ export const sqliteDialect: DialectImpl = {
     }
     const orderClause = opts.orderBySql ? ` ORDER BY ${opts.orderBySql}` : "";
     return {
-      sql: `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`,
+      sql: `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS ${esc(opts.tableAlias)}${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`,
       params,
     };
   },
@@ -262,16 +240,14 @@ export const sqliteDialect: DialectImpl = {
   },
   compileAggregate: sqliteCompileAggregate,
 
-  buildJoinClause(join: RelationJoinInfo): string {
+  buildJoinClause(join: RelationJoinInfo, mainAlias: string): string {
     const kw = JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
     const on = join.foreignKeys
       .map(
         (fk, i) =>
-          `${quoteId("t0")}.${quoteId(fk)} = ${quoteId(join.alias)}.${quoteId(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`,
+          `${quoteId(mainAlias)}.${quoteId(fk)} = ${quoteId(join.alias)}.${quoteId(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`,
       )
       .join(" AND ");
     return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${on}`;
   },
 };
-
-const compileNode = makeCompileNode(sqliteDialect);

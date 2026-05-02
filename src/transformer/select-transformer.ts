@@ -3,7 +3,7 @@
  */
 
 import * as ts from "typescript";
-import type { IrSelect, IrAggregate, IrSubquery } from "../ir/types.js";
+import type { IrSelect, IrAggregate, IrSubqueryRef } from "../ir/types.js";
 import {
   isTyphexType,
   matchTyphexMethodCall,
@@ -16,8 +16,11 @@ import {
   type ParamBindings,
   type ScopeFrame,
 } from "./shared.js";
-import { tryExtractInlineSubqueryAggregate } from "./subquery-transformer.js";
-import { toOuterDestructured } from "./where-transformer.js";
+import {
+  captureSubqueryRef,
+  isTyphexQueryChain,
+  type CapturedSubquery,
+} from "./subquery-transformer.js";
 
 // ---------------------------------------------------------------------------
 // Top-level arrow dispatch
@@ -32,6 +35,7 @@ function arrowToIrSelect(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   pb: ParamBindings,
   checker: ts.TypeChecker,
+  capturedSubqueries: CapturedSubquery[],
   outerScope: ScopeFrame[] = [],
 ): IrSelect | null {
   // Single-expression shorthand bodies: p => p, p => p.id, p => count(p.id)
@@ -42,7 +46,7 @@ function arrowToIrSelect(
 
   const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
-  return parseSelectObjectLiteral(obj, pb, checker, outerScope);
+  return parseSelectObjectLiteral(obj, pb, checker, capturedSubqueries, outerScope);
 }
 
 /**
@@ -117,12 +121,13 @@ function parseSelectObjectLiteral(
   obj: ts.ObjectLiteralExpression,
   pb: ParamBindings,
   checker: ts.TypeChecker,
+  capturedSubqueries: CapturedSubquery[],
   outerScope: ScopeFrame[] = [],
 ): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
   const aggregates: IrAggregate[] = [];
-  const subqueries: Array<{ alias: string; subquery: IrSubquery }> = [];
+  const subqueries: Array<{ alias: string; subquery: IrSubqueryRef }> = [];
   let rest = false;
 
   for (const prop of obj.properties) {
@@ -135,7 +140,14 @@ function parseSelectObjectLiteral(
     const keyName = getPropertyKeyName(prop);
     if (!keyName) return null;
 
-    const handled = parseSelectObjectProperty(prop, keyName, pb, checker, outerScope);
+    const handled = parseSelectObjectProperty(
+      prop,
+      keyName,
+      pb,
+      checker,
+      capturedSubqueries,
+      outerScope,
+    );
     if (!handled) return null;
 
     if (handled.kind === "path") {
@@ -179,7 +191,7 @@ function getPropertyKeyName(prop: ts.ObjectLiteralElementLike): string | null {
 type PropertyResult =
   | { kind: "path"; path: string[] }
   | { kind: "aggregate"; aggregate: IrAggregate }
-  | { kind: "subquery"; subquery: IrSubquery };
+  | { kind: "subquery"; subquery: IrSubqueryRef };
 
 /**
  * Classify a single select-object property as either a column path or an
@@ -191,6 +203,7 @@ function parseSelectObjectProperty(
   keyName: string,
   pb: ParamBindings,
   checker: ts.TypeChecker,
+  capturedSubqueries: CapturedSubquery[],
   outerScope: ScopeFrame[] = [],
 ): PropertyResult | null {
   // { id }  →  shorthand refers to destructured binding
@@ -220,19 +233,17 @@ function parseSelectObjectProperty(
     const parsed = parseTsAggregateCall(value, [pb.paramName]);
     if (parsed) return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
 
-    // { totalPosts: Post.query().count() } / { sales: Sale.query().where(…).sum(s => s.amount) }
+    // { totalPosts: Post.query().where(…).select(() => count()) }
     // Pass the outer select-arrow's row param so a correlated inner where
     // (e.g. `.where(p => p.authorId === a.id)`) resolves `a.id` correctly.
     // For destructured outer arrows, also pass the bindings so bare locals
     // like `id` resolve to IrMember on the outer row.
-    const sub = tryExtractInlineSubqueryAggregate(
-      value,
-      checker,
-      [pb.paramName],
-      toOuterDestructured(pb),
-      outerScope,
-    );
-    if (sub) return { kind: "subquery", subquery: sub };
+    if (isTyphexQueryChain(value, checker)) {
+      return {
+        kind: "subquery",
+        subquery: captureSubqueryRef(value, capturedSubqueries, [pb.paramName], outerScope),
+      };
+    }
   }
 
   return null;
@@ -252,12 +263,20 @@ export function transformSelectCall(
   if (!arrow) return null;
 
   const pb = getParamBindings(arrow.parameters[0]?.name);
-  const irSelect = arrowToIrSelect(arrow, pb, checker, outerScope);
+  const capturedSubqueries: CapturedSubquery[] = [];
+  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedSubqueries, outerScope);
   if (!irSelect) return null;
 
-  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [
-    irSelectToTsLiteral(irSelect),
-  ]);
+  const args: ts.Expression[] = [irSelectToTsLiteral(irSelect)];
+  if (capturedSubqueries.length > 0) args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
+}
+
+function buildSubqueryParamsLiteral(capturedSubqueries: CapturedSubquery[]): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  return f.createObjectLiteralExpression(
+    capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),
+  );
 }
 
 export { irAggregateToTsLiteral };

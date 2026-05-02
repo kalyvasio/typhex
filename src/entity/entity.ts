@@ -212,6 +212,7 @@ export function Entity<
       pkColumns: pkCols,
       whereIr: null,
       whereParams: {} as Record<string, unknown>,
+      subqueryParams: {} as Record<string, unknown>,
       orderBy: [] as any[],
       limitNum: null,
       offsetNum: null,

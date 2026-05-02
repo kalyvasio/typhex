@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import type { Expr, GroupByItem } from "../../src/orm/expr.js";
 import {
   createPostgresDriver,
   postgresDialect,
@@ -45,13 +47,13 @@ describe("dbs/postgres", () => {
     });
 
     it("compiles WHERE with $N placeholders", () => {
-      const ir = {
-        kind: "binary" as const,
-        op: "===" as const,
-        left: { kind: "member" as const, param: "u", path: ["age"] },
-        right: { kind: "const" as const, value: 18 },
+      const expr: Expr = {
+        kind: "binary",
+        op: "===",
+        left: { kind: "column", alias: "t0", column: "age" },
+        right: { kind: "const", value: 18 },
       };
-      const result = postgresDialect.compileWhere(ir, {});
+      const result = compileWhereExpr(expr, postgresDialect);
       expect(result.sql).toContain("$1");
       expect(result.params).toEqual([18]);
     });
@@ -187,7 +189,7 @@ describe("dbs/postgres", () => {
     });
 
     it("compileCount produces SELECT COUNT", () => {
-      const { sql, params } = postgresDialect.compileCount("users", '"t0"."age" = $1', [18]);
+      const { sql, params } = postgresDialect.compileCount("users", "t0", '"t0"."age" = $1', [18]);
       expect(sql).toContain("SELECT COUNT(*) AS c");
       expect(sql).toContain('FROM "users"');
       expect(params).toEqual([18]);
@@ -237,15 +239,17 @@ describe("dbs/postgres", () => {
 
     it("compileSelect: HAVING params are numbered after WHERE params", () => {
       // WHERE has 2 params ($1, $2); HAVING arrives pre-numbered from $3
+      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: "category" }];
       const { sql, params } = postgresDialect.compileSelect({
         table: "orders",
+        tableAlias: "t0",
         selectList: '"t0"."category", COUNT(*) AS "total"',
         whereSql: '("t0"."status" = $1 AND "t0"."price" > $2)',
         whereParams: ["active", 10],
         orderBySql: "",
         limitNum: null,
         offsetNum: null,
-        groupBy: [["category"]],
+        groupBy,
         havingSql: "(COUNT(*) > $3)",
         havingParams: [5],
       });
@@ -264,15 +268,17 @@ describe("dbs/postgres", () => {
     });
 
     it("compileSelect: HAVING + LIMIT/OFFSET placeholder sequence is contiguous", () => {
+      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: "category" }];
       const { sql, params } = postgresDialect.compileSelect({
         table: "orders",
+        tableAlias: "t0",
         selectList: 'COUNT(*) AS "total"',
         whereSql: '("t0"."active" = $1)',
         whereParams: [true],
         orderBySql: "",
         limitNum: 10,
         offsetNum: 20,
-        groupBy: [["category"]],
+        groupBy,
         havingSql: "(COUNT(*) > $2)",
         havingParams: [3],
       });
@@ -286,6 +292,7 @@ describe("dbs/postgres", () => {
     it("compileSelect produces SELECT with LIMIT/OFFSET", () => {
       const { sql, params } = postgresDialect.compileSelect({
         table: "users",
+        tableAlias: "t0",
         selectList: '"t0"."id", "t0"."name"',
         whereSql: "1=1",
         whereParams: [],

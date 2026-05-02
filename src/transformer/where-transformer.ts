@@ -3,7 +3,20 @@
  */
 
 import * as ts from "typescript";
-import type { IrNode, IrExists, IrCall, IrBinary, IrIn, IrConst, IrSubquery } from "../ir/types.js";
+import type {
+  IrNode,
+  IrExists,
+  IrCall,
+  IrBinary,
+  IrIn,
+  IrConst,
+  IrSubqueryRef,
+} from "../ir/types.js";
+import {
+  captureSubqueryRef as captureSubqueryRefShared,
+  isTyphexQueryChain,
+  type CapturedSubquery,
+} from "./subquery-transformer.js";
 import {
   getArrowExpressionBody,
   isTyphexType,
@@ -16,12 +29,6 @@ import {
   type ParamBindings,
   type ScopeFrame,
 } from "./shared.js";
-import {
-  assembleIrSubquery,
-  extractSubquerySelectIr,
-  tryExtractInlineSubqueryAggregate,
-  walkSubqueryChain,
-} from "./subquery-transformer.js";
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
 
@@ -43,6 +50,7 @@ export function toOuterDestructured(pb: ParamBindings): OuterDestructured | unde
 interface WhereCtx {
   paramNames: string[];
   freeVars: Set<string>;
+  capturedSubqueries: CapturedSubquery[];
   checker?: ts.TypeChecker;
   outerDestructured?: OuterDestructured;
   /** Stack of enclosing arrow ScopeFrames (paramName + optional destructured
@@ -50,91 +58,6 @@ interface WhereCtx {
    *  as `IrMember` against the named outer row (correlated reference) rather
    *  than as closure captures. */
   outerScope?: ScopeFrame[];
-}
-
-// ---------------------------------------------------------------------------
-// Inline subquery helpers
-// ---------------------------------------------------------------------------
-
-/** Extract a single column name from a `(p) => p.colName` arrow function. */
-function extractSelectColumn(fn: ts.ArrowFunction | ts.FunctionExpression): string | null {
-  if (fn.parameters.length !== 1) return null;
-  const paramName = fn.parameters[0]?.name;
-  if (!paramName || !ts.isIdentifier(paramName)) return null;
-  const body = ts.isBlock(fn.body)
-    ? fn.body.statements.length === 1 && ts.isReturnStatement(fn.body.statements[0])
-      ? ((fn.body.statements[0] as ts.ReturnStatement).expression ?? null)
-      : null
-    : fn.body;
-  if (!body) return null;
-  if (
-    ts.isPropertyAccessExpression(body) &&
-    ts.isIdentifier(body.expression) &&
-    body.expression.text === paramName.text
-  ) {
-    return body.name.text;
-  }
-  return null;
-}
-
-/** Read the static `tableName` string literal from an entity class expression via the type checker. */
-export function extractTableName(
-  entityExpr: ts.Expression,
-  checker: ts.TypeChecker,
-): string | null {
-  try {
-    const type = checker.getTypeAtLocation(entityExpr);
-    const prop = checker.getPropertyOfType(type, "tableName");
-    if (!prop) return null;
-    const propType = checker.getTypeOfSymbolAtLocation(prop, entityExpr);
-    return propType.isStringLiteral() ? propType.value : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Try to convert a call-chain expression of the form
- *   EntityClass.query().where(p => ...).select(p => p.col)
- *   EntityClass.query().select(p => p.col)
- * into an IrSubquery node. Returns null if the pattern doesn't match.
- * Free variables inside the inner where predicate make it a correlated subquery
- * which is not yet supported — return null in that case.
- */
-function tryExtractInlineSubquery(
-  expr: ts.Expression,
-  checker: ts.TypeChecker,
-  outerParamNames: string[] = [],
-  outerDestructured?: OuterDestructured,
-  outerScope: ScopeFrame[] = [],
-): IrSubquery | null {
-  if (!ts.isCallExpression(expr)) return null;
-  if (!ts.isPropertyAccessExpression(expr.expression)) return null;
-  if (expr.expression.name.text !== "select") return null;
-  if (expr.arguments.length !== 1) return null;
-
-  // Reuse the shared select-extractor: accepts either a fresh `.select(arrow)`
-  // or an already-rewritten `.select(<IrSelect literal>)` (post inside-out).
-  const selectIr = extractSubquerySelectIr(expr);
-  if (!selectIr) return null;
-  // IN form requires single-column path projection (not aggregate).
-  if (selectIr.paths.length !== 1 || (selectIr.aggregates && selectIr.aggregates.length > 0)) {
-    return null;
-  }
-
-  const chain = walkSubqueryChain(
-    expr.expression.expression,
-    checker,
-    outerParamNames,
-    outerDestructured,
-    outerScope,
-  );
-  if (!chain) return null;
-
-  const tableName = extractTableName(chain.entityExpr, checker);
-  if (!tableName) return null;
-
-  return assembleIrSubquery(tableName, chain, selectIr);
 }
 
 // ---------------------------------------------------------------------------
@@ -188,45 +111,29 @@ function binaryExprToIr(expr: ts.BinaryExpression, ctx: WhereCtx): IrNode | null
     if (!left) return null;
     // Pass paramNames so the inline subquery's inner where can reference
     // the outer arrow's row params (correlated IN subquery).
-    const sub = tryExtractInlineSubquery(
-      expr.right,
-      ctx.checker,
-      ctx.paramNames,
-      ctx.outerDestructured,
-      ctx.outerScope,
-    );
-    if (sub) return { kind: "in", left, right: sub } as IrIn;
+    const sub = isTyphexQueryChain(expr.right, ctx.checker);
+    if (sub) return { kind: "in", left, right: captureSubqueryRef(expr.right, ctx) } as IrIn;
     const right = exprToIr(expr.right, ctx);
     if (!right) return null;
     return { kind: "in", left, right } as IrIn;
   }
 
-  const left =
-    exprToIr(expr.left, ctx) ??
-    (ctx.checker
-      ? tryExtractInlineSubqueryAggregate(
-          expr.left,
-          ctx.checker,
-          ctx.paramNames,
-          ctx.outerDestructured,
-          ctx.outerScope,
-        )
-      : null);
-  const right =
-    exprToIr(expr.right, ctx) ??
-    (ctx.checker
-      ? tryExtractInlineSubqueryAggregate(
-          expr.right,
-          ctx.checker,
-          ctx.paramNames,
-          ctx.outerDestructured,
-          ctx.outerScope,
-        )
-      : null);
+  const left = exprToIr(expr.left, ctx) ?? tryExtractSubqueryRef(expr.left, ctx);
+  const right = exprToIr(expr.right, ctx) ?? tryExtractSubqueryRef(expr.right, ctx);
   if (!left || !right) return null;
 
   if (opStr === "in") return { kind: "in", left, right } as IrIn;
   return { kind: "binary", op: opStr, left, right } as IrBinary;
+}
+
+function tryExtractSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRef | null {
+  if (!ctx.checker) return null;
+  const sub = isTyphexQueryChain(expr, ctx.checker);
+  return sub ? captureSubqueryRef(expr, ctx) : null;
+}
+
+function captureSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRef {
+  return captureSubqueryRefShared(expr, ctx.capturedSubqueries, ctx.paramNames, ctx.outerScope);
 }
 
 /** Handle `!<expr>` — wraps the inner IR in an IrUnary with `!`. */
@@ -411,6 +318,7 @@ function tryParseSomeEvery(
   const innerWhere = exprToIr(innerExpr, {
     paramNames: [innerParam],
     freeVars: new Set(),
+    capturedSubqueries: [],
     checker: ctx.checker,
   });
   if (!innerWhere) return null;
@@ -452,17 +360,25 @@ function arrowToIr(
   extraParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
   outerScope?: ScopeFrame[],
-): { ir: IrNode; freeVars: string[] } | null {
+): { ir: IrNode; freeVars: string[]; capturedSubqueries: CapturedSubquery[] } | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
 
   const paramNames = [...extractParamNames(fn), ...extraParamNames];
   const freeVars = new Set<string>();
+  const capturedSubqueries: CapturedSubquery[] = [];
 
-  const ir = exprToIr(expr, { paramNames, freeVars, checker, outerDestructured, outerScope });
+  const ir = exprToIr(expr, {
+    paramNames,
+    freeVars,
+    capturedSubqueries,
+    checker,
+    outerDestructured,
+    outerScope,
+  });
   if (!ir) return null;
 
-  return { ir, freeVars: [...freeVars] };
+  return { ir, freeVars: [...freeVars], capturedSubqueries };
 }
 
 // ---------------------------------------------------------------------------
@@ -490,16 +406,25 @@ function transformArrowCall(
   const result = arrowToIr(arrow, checker, [], toOuterDestructured(pb), outerScope);
   if (!result) return null;
 
-  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [
+  const args: ts.Expression[] = [
     irNodeToTsLiteral(result.ir),
-    buildFreeVarsLiteral(result.freeVars),
-  ]);
+    buildParamsLiteral(result.freeVars, result.capturedSubqueries),
+  ];
+  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
 
-/** Build the `{ foo, bar }` literal passed as the second argument of the rewritten call. */
-function buildFreeVarsLiteral(freeVars: string[]): ts.ObjectLiteralExpression {
+/** Build the `{ foo, _sub0: Query.query()... }` params literal for the rewritten call. */
+function buildParamsLiteral(
+  freeVars: string[],
+  capturedSubqueries: CapturedSubquery[],
+): ts.ObjectLiteralExpression {
   const f = ts.factory;
-  const props = freeVars.map((v) => f.createShorthandPropertyAssignment(f.createIdentifier(v)));
+  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
+    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
+  );
+  for (const sub of capturedSubqueries) {
+    props.push(f.createPropertyAssignment(sub.key, sub.expr));
+  }
   return f.createObjectLiteralExpression(props);
 }
 

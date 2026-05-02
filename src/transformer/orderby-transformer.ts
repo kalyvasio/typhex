@@ -12,12 +12,16 @@ import {
   irOrderByToTsLiteral,
   type ScopeFrame,
 } from "./shared.js";
-import { tryExtractInlineSubqueryAggregate } from "./subquery-transformer.js";
+import {
+  captureSubqueryRef,
+  isTyphexQueryChain,
+  type CapturedSubquery,
+} from "./subquery-transformer.js";
 
 type Direction = "asc" | "desc";
 
 /**
- * Rewrite a `.orderBy(p => p.col | Entity.query()...count(), "asc"|"desc")`
+ * Rewrite a `.orderBy(p => p.col | Entity.query()...select(() => count()), "asc"|"desc")`
  * call on a Typhex Table/QueryBuilder into an IrOrderBy literal. Returns
  * null when the call shape isn't supported — the runtime parser handles it
  * then.
@@ -33,32 +37,42 @@ export function transformOrderByCall(
   const paramName = getFirstIdentifierParamName(fn);
   if (!paramName) return null;
 
-  const expr = extractOrderByExpr(fn.body, paramName, checker, outerScope);
+  const capturedSubqueries: CapturedSubquery[] = [];
+  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedSubqueries, outerScope);
   if (!expr) return null;
 
   const direction = parseDirectionArg(call.arguments);
   if (direction === null) return null;
 
-  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, [
-    irOrderByToTsLiteral({ expr, direction }),
-  ]);
+  const args: ts.Expression[] = [irOrderByToTsLiteral({ expr, direction })];
+  if (capturedSubqueries.length > 0) args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
 
 /** Extract the sort-key expression from an orderBy lambda body — either a
- *  plain `p.col` member access or an inline `Entity.query()...count()` chain. */
+ *  plain `p.col` member access or an inline `Entity.query()...select(() => count())` chain. */
 function extractOrderByExpr(
   body: ts.ConciseBody,
   paramName: string,
   checker: ts.TypeChecker,
+  capturedSubqueries: CapturedSubquery[],
   outerScope: ScopeFrame[] = [],
 ): IrNode | null {
   const path = extractColumnPath(body, paramName);
   if (path) return { kind: "member", param: paramName, path };
   if (ts.isExpression(body)) {
-    const sub = tryExtractInlineSubqueryAggregate(body, checker, [paramName], undefined, outerScope);
-    if (sub) return sub;
+    if (isTyphexQueryChain(body, checker)) {
+      return captureSubqueryRef(body, capturedSubqueries, [paramName], outerScope);
+    }
   }
   return null;
+}
+
+function buildSubqueryParamsLiteral(capturedSubqueries: CapturedSubquery[]): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  return f.createObjectLiteralExpression(
+    capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),
+  );
 }
 
 /** Return the first parameter's name if it's a plain identifier; null otherwise. */

@@ -2,9 +2,8 @@
  * Relation resolver: top-level orchestrator for relation loading.
  */
 
-import type { IrSelect } from "../../../ir/types.js";
 import type { QueryExecutor } from "../../db.js";
-import type { RelationContext } from "./relation-context-builder.js";
+import type { QueryPlan } from "../../query-plan.js";
 import { fetchRelations } from "./relation-fetcher.js";
 import { assembleJoined, assembleFetched } from "./relation-assembler.js";
 
@@ -13,12 +12,11 @@ import { assembleJoined, assembleFetched } from "./relation-assembler.js";
  *  2. Reconstruct JOIN columns into nested objects on rows that used a JOIN (relation-assembler).
  *  3. Attach the fetched rows onto each parent row (relation-assembler). */
 export async function resolveRelations(
-  ctx: RelationContext,
-  selectIr: IrSelect | null,
+  plan: QueryPlan,
   qe: QueryExecutor,
   rows: Record<string, unknown>[],
 ): Promise<void> {
-  const fetched = await fetchRelations(qe, rows, ctx.relationFetches, ctx.skipLoadFor);
-  if (ctx.hasReusableRelationInSelect) assembleJoined(rows, ctx.reusableJoinKeys, selectIr!);
-  assembleFetched(rows, ctx.relationFetches, fetched, ctx.skipLoadFor);
+  const fetched = await fetchRelations(qe, rows, plan.relationFetches, plan.skipLoadFor);
+  if (plan.joinedProjections.length > 0) assembleJoined(rows, plan.joinedProjections);
+  assembleFetched(rows, plan.relationFetches, fetched, plan.skipLoadFor);
 }

@@ -18,7 +18,6 @@ import type {
   IrIn,
   IrCall,
   IrExists,
-  IrSubquery,
   IrSelect,
   IrSelectRelation,
   IrAggregate,
@@ -333,9 +332,8 @@ function walkBinaryLike(node: N, params: string[], paramKeys: string[], paramVal
     if (rhs.type === "Identifier") {
       const name = (rhs.name as string) ?? "";
       const val = paramValues?.[name];
-      if (val && typeof (val as { toSubqueryIr?: unknown }).toSubqueryIr === "function") {
-        const sub = (val as { toSubqueryIr: () => IrSubquery }).toSubqueryIr();
-        return { kind: "in", left, right: sub } as IrIn;
+      if (isQueryBuilderParam(val)) {
+        return { kind: "in", left, right: { kind: "subqueryRef", key: name } } as IrIn;
       }
     }
     const right = walk(rhs, params, paramKeys, paramValues);
@@ -347,6 +345,12 @@ function walkBinaryLike(node: N, params: string[], paramKeys: string[], paramVal
   const op = BINARY_OPS[node.operator];
   if (!op) throw new Error("Unsupported binary operator: " + node.operator);
   return { kind: "binary", op, left, right } as IrBinary;
+}
+
+function isQueryBuilderParam(value: unknown): boolean {
+  if (value == null || typeof value !== "object") return false;
+  const state = (value as { state?: { tableName?: unknown; selectIr?: unknown } }).state;
+  return state != null && typeof state.tableName === "string" && "selectIr" in state;
 }
 
 /** Handle `!expr` — only logical-not is supported; collapses `!(x in y)`. */

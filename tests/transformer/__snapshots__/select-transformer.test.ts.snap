@@ -5,7 +5,7 @@ exports[`select transformer > transforms ({ id }) destructured outer with correl
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subquery", tableName: "posts", selectIr: { param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["u"] } }] });
+authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -24,7 +24,7 @@ exports[`select transformer > transforms ({ id: authorId }) aliased destructured
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subquery", tableName: "posts", selectIr: { param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["u"] } }] });
+authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -98,21 +98,12 @@ exports[`select transformer > transforms groupConcat(p.name, ', ') single aggreg
 "
 `;
 
-exports[`select transformer > transforms inline subquery with .distinct() chain segment for SUM 1`] = `
-"class Post {
-    static tableName: "posts" = "posts";
-    static query(): any { return null as any; }
-}
-authors.select({ param: "a", paths: [], subqueries: [{ alias: "s", subquery: { kind: "subquery", tableName: "posts", selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["score"] }, alias: "sum" }] }, whereIr: null, distinct: { col: "score" } } }] });
-"
-`;
-
 exports[`select transformer > transforms inline subquery with .limit() chain segment 1`] = `
 "class Post {
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "a", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subquery", tableName: "posts", selectIr: { param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["a"], limitNum: 10 } }] });
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, {}).limit(10).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -121,6 +112,6 @@ exports[`select transformer > transforms inline subquery with .orderBy().limit()
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subquery", tableName: "posts", selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }, whereIr: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, innerParamNames: ["p"], outerCorrelatedParams: ["a"], orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }], limitNum: 1 } }] });
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, {}).orderBy({ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }).limit(1).select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }) });
 "
 `;

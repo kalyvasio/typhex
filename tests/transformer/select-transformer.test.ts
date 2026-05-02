@@ -133,14 +133,6 @@ authors.select((a: any) => ({ c: Post.query().where((p: any) => p.authorId === a
     expect(transformWithChecker(source)).toMatchSnapshot();
   });
 
-  it("transforms inline subquery with .distinct() chain segment for SUM", () => {
-    const source = `
-class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
-authors.select((a: any) => ({ s: Post.query().distinct((p: any) => p.score).select((p: any) => sum(p.score)) }));
-`;
-    expect(transformWithChecker(source)).toMatchSnapshot();
-  });
-
   it("transforms inline subquery with .orderBy().limit() top-N chain", () => {
     const source = `
 class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }

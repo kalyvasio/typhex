@@ -5,34 +5,24 @@
 
 import { describe, it, expect } from "vitest";
 import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
-import type { IrBinary, IrSubquery } from "../../src/ir/types.js";
+import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import type { Expr } from "../../src/orm/expr.js";
+import { col, konst, selectPlan, countPostsSelect } from "./subquery-ref-helpers.js";
 
-const correlatedPostCount: IrSubquery = {
-  kind: "subquery",
-  tableName: "posts",
-  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-  whereIr: {
-    kind: "binary",
-    op: "===",
-    left: { kind: "member", param: "p", path: ["authorId"] },
-    right: { kind: "member", param: "a", path: ["id"] },
-  },
-  whereParams: {},
-  innerParamNames: ["p"],
-};
+const correlatedPostCount = selectPlan({
+  selectItems: countPostsSelect,
+  where: { kind: "binary", op: "===", left: col("t1", "authorId"), right: col("t0", "id") },
+});
 
 describe("Aggregate subquery comparison in WHERE", () => {
   it("SQLite: subquery on the left of `>`", () => {
-    const ir: IrBinary = {
+    const expr: Expr = {
       kind: "binary",
       op: ">",
-      left: correlatedPostCount,
-      right: { kind: "const", value: 5 },
+      left: { kind: "subquery", plan: correlatedPostCount },
+      right: konst(5),
     };
-    const result = sqliteDialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const result = compileWhereExpr(expr, sqliteDialect);
     expect(result.sql).toBe(
       `((SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) > ?)`,
     );
@@ -40,16 +30,13 @@ describe("Aggregate subquery comparison in WHERE", () => {
   });
 
   it("PostgreSQL: same shape with $1", () => {
-    const ir: IrBinary = {
+    const expr: Expr = {
       kind: "binary",
       op: ">",
-      left: correlatedPostCount,
-      right: { kind: "const", value: 5 },
+      left: { kind: "subquery", plan: correlatedPostCount },
+      right: konst(5),
     };
-    const result = postgresDialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const result = compileWhereExpr(expr, postgresDialect);
     expect(result.sql).toBe(
       `((SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) > $1)`,
     );
@@ -57,16 +44,13 @@ describe("Aggregate subquery comparison in WHERE", () => {
   });
 
   it("subquery on the right side of comparison", () => {
-    const ir: IrBinary = {
+    const expr: Expr = {
       kind: "binary",
       op: "<",
-      left: { kind: "const", value: 10 },
-      right: correlatedPostCount,
+      left: konst(10),
+      right: { kind: "subquery", plan: correlatedPostCount },
     };
-    const result = sqliteDialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const result = compileWhereExpr(expr, sqliteDialect);
     expect(result.sql).toBe(
       `(? < (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")))`,
     );
@@ -74,23 +58,17 @@ describe("Aggregate subquery comparison in WHERE", () => {
   });
 
   it("non-correlated subquery comparison (no innerParamNames)", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-      whereIr: null,
-      whereParams: {},
-    };
-    const ir: IrBinary = {
+    const sub = selectPlan({
+      selectItems: countPostsSelect,
+      where: null,
+    });
+    const expr: Expr = {
       kind: "binary",
       op: ">=",
-      left: sub,
-      right: { kind: "const", value: 1 },
+      left: { kind: "subquery", plan: sub },
+      right: konst(1),
     };
-    const result = postgresDialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const result = compileWhereExpr(expr, postgresDialect);
     expect(result.sql).toBe(`((SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1) >= $1)`);
     expect(result.params).toEqual([1]);
   });

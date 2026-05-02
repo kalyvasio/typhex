@@ -3,37 +3,68 @@
  * SQLite. The runtime parser only supports the params-based WHERE IN form
  * end-to-end; the other three shapes (scalar SELECT, WHERE aggregate
  * compare, ORDER BY) are transformer-only paths. To exercise them, we
- * construct the same IR the transformer would emit, compile it via the
- * dialect's public compile primitives, and execute via `db.query()`. This
- * catches dialect quirks, schema mismatches, planner surprises, AND
- * compiler regressions — if `compileSubqueryExpr` changes its emission, a
- * scenario whose result depends on the new SQL will fail loudly.
+ * construct the same Expr the planner would emit, compile it via the
+ * dialect's compile primitives, and execute via `db.query()`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 import { sqliteDialect } from "../../src/dbs/index.js";
-import type { IrNode, IrOrderBy, IrSelect, IrSubquery } from "../../src/ir/types.js";
+import {
+  compileOrderByExpr,
+  compileSelectListExpr,
+  compileWhereExpr,
+} from "../../src/dbs/shared-dialect.js";
+import type { DialectImpl } from "../../src/dbs/types.js";
+import type {
+  Expr,
+  ExprAggregate,
+  OrderItem,
+  SelectItem,
+} from "../../src/orm/expr.js";
+import type { IrNode } from "../../src/ir/types.js";
 import { freshDb } from "../helpers.js";
+import {
+  bin,
+  col,
+  countPostsSelect,
+  eq,
+  konst,
+  selectPlan,
+} from "../dbs/subquery-ref-helpers.js";
+import type { QueryPlan } from "../../src/orm/query-plan.js";
 
-/** Drive the same compile pipeline QueryBuilder uses, but with hand-built
- *  IR — so the test exercises IR → compiler → SQLite end-to-end. */
-function runIrQuery(
+function aggCompiler(dialect: DialectImpl) {
+  return dialect.compileAggregate
+    ? (agg: ExprAggregate, fn: (n: Expr, p: unknown[]) => string, p: unknown[]) =>
+        dialect.compileAggregate!(agg, fn, p)
+    : undefined;
+}
+
+/** Drive the same compile pipeline QueryBuilder uses, but with hand-built Expr. */
+function runExprQuery(
   db: Db,
   table: string,
   columnNames: string[],
-  select: IrSelect,
-  whereIr: IrNode | null,
-  orderBy: IrOrderBy[],
-  rowParam: string,
+  selectItems: SelectItem[],
+  selectAll: boolean,
+  whereExpr: Expr | null,
+  orderBy: OrderItem[],
 ): Promise<Record<string, unknown>[]> {
-  const opts = { tableAlias: "t0", paramToAlias: { [rowParam]: "t0" } };
-  const selectListResult = sqliteDialect.compileSelectList(select, columnNames, opts);
-  const whereResult = sqliteDialect.compileWhere(whereIr, opts);
-  const orderByResult = sqliteDialect.compileOrderBy(orderBy, opts);
+  const selectListResult = compileSelectListExpr(
+    selectItems,
+    selectAll,
+    "t0",
+    columnNames,
+    sqliteDialect,
+    aggCompiler(sqliteDialect),
+  );
+  const whereResult = compileWhereExpr(whereExpr, sqliteDialect);
+  const orderByResult = compileOrderByExpr(orderBy, sqliteDialect);
   const { sql, params } = sqliteDialect.compileSelect({
     table,
+    tableAlias: "t0",
     selectList: selectListResult.sql,
     selectListParams: selectListResult.params,
     whereSql: whereResult.sql,
@@ -71,8 +102,6 @@ describe("subquery scenarios (SQLite)", () => {
     db = freshDb();
     await db.migrate();
 
-    // Alice: 3 posts (2 active scoring 10+20, 1 inactive scoring 30).
-    // Bob: 1 active post scoring 50. Carol: 0 posts.
     const alice = (await Author.query().insert({ name: "Alice" })) as { id: number };
     const bob = (await Author.query().insert({ name: "Bob" })) as { id: number };
     await Author.query().insert({ name: "Carol" });
@@ -87,47 +116,20 @@ describe("subquery scenarios (SQLite)", () => {
     await db.close();
   });
 
-  // Subquery shape: COUNT of posts where p.authorId === outer a.id.
-  const correlatedPostCount: IrSubquery = {
-    kind: "subquery",
-    tableName: "posts",
-    selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-    whereIr: {
-      kind: "binary",
-      op: "===",
-      left: { kind: "member", param: "p", path: ["authorId"] },
-      right: { kind: "member", param: "a", path: ["id"] },
-    },
-    whereParams: {},
-    innerParamNames: ["p"],
-  };
+  // Subquery: SELECT COUNT(*) FROM posts AS t1 WHERE t1.authorId = t0.id
+  const correlatedPostCount: QueryPlan = selectPlan({
+    selectItems: countPostsSelect,
+    where: eq(col("t1", "authorId"), col("t0", "id")),
+  });
 
   it("non-correlated scalar count() in SELECT returns the same value per row", async () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-      whereIr: null,
-      whereParams: {},
-    };
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "totalPosts", subquery: sub }],
-    };
-    const orderBy: IrOrderBy[] = [
-      { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
+    const sub: QueryPlan = selectPlan({ selectItems: countPostsSelect });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: sub }, alias: "totalPosts" },
     ];
-    const rows = (await runIrQuery(
-      db,
-      "authors",
-      AUTHOR_COLS,
-      select,
-      null,
-      orderBy,
-      "a",
-    )) as Array<{
+    const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+    const rows = (await runExprQuery(db, "authors", AUTHOR_COLS, items, false, null, orderBy)) as Array<{
       name: string;
       totalPosts: number;
     }>;
@@ -136,24 +138,12 @@ describe("subquery scenarios (SQLite)", () => {
   });
 
   it("correlated count() in SELECT yields per-author post counts", async () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "postCount", subquery: correlatedPostCount }],
-    };
-    const orderBy: IrOrderBy[] = [
-      { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: correlatedPostCount }, alias: "postCount" },
     ];
-    const rows = (await runIrQuery(
-      db,
-      "authors",
-      AUTHOR_COLS,
-      select,
-      null,
-      orderBy,
-      "a",
-    )) as Array<{
+    const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+    const rows = (await runExprQuery(db, "authors", AUTHOR_COLS, items, false, null, orderBy)) as Array<{
       name: string;
       postCount: number;
     }>;
@@ -164,95 +154,128 @@ describe("subquery scenarios (SQLite)", () => {
     ]);
   });
 
-  it("WHERE aggregate compare: authors with more than 1 post", async () => {
-    const select: IrSelect = { param: "a", paths: [], rest: true };
-    const whereIr: IrNode = {
+  it("captured subqueryRef in SELECT yields per-author post counts", async () => {
+    const innerWhere: IrNode = {
       kind: "binary",
-      op: ">",
-      left: correlatedPostCount,
-      right: { kind: "const", value: 1 },
+      op: "===",
+      left: { kind: "member", param: "p", path: ["authorId"] },
+      right: { kind: "member", param: "a", path: ["id"] },
     };
-    const orderBy: IrOrderBy[] = [
-      { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
-    ];
-    const rows = (await runIrQuery(
+    const postCount = (Post.query() as any)
+      .where(innerWhere, {})
+      .select({
+        param: "u",
+        paths: [],
+        aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+      });
+
+    const rows = (await (Author.query() as any)
+      .select(
+        {
+          param: "a",
+          paths: [["name"]],
+          aliases: ["name"],
+          subqueries: [
+            {
+              alias: "postCount",
+              subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] },
+            },
+          ],
+        },
+        { _sub0: postCount },
+      )
+      .orderBy("id", "asc")
+      .toArray()) as Array<{ name: string; postCount: number }>;
+
+    expect(rows.map((r) => [r.name, Number(r.postCount)])).toEqual([
+      ["Alice", 3],
+      ["Bob", 1],
+      ["Carol", 0],
+    ]);
+  });
+
+  it("WHERE aggregate compare: authors with more than 1 post", async () => {
+    const items: SelectItem[] = AUTHOR_COLS.map((c) => ({ expr: col("t0", c) }));
+    const where: Expr = bin(">", { kind: "subquery", plan: correlatedPostCount }, konst(1));
+    const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+    const rows = (await runExprQuery(
       db,
       "authors",
       AUTHOR_COLS,
-      select,
-      whereIr,
+      items,
+      false,
+      where,
       orderBy,
-      "a",
-    )) as Array<{
-      name: string;
-    }>;
+    )) as Array<{ name: string }>;
+    expect(rows.map((r) => r.name)).toEqual(["Alice"]);
+  });
+
+  it("QueryBuilder keeps outer aliases for correlated WHERE subqueries", async () => {
+    const innerWhere: IrNode = {
+      kind: "binary",
+      op: "===",
+      left: { kind: "member", param: "p", path: ["authorId"] },
+      right: { kind: "member", param: "a", path: ["id"] },
+    };
+    const postCount = (Post.query() as any)
+      .where(innerWhere, {})
+      .select({
+        param: "u",
+        paths: [],
+        aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+      });
+
+    const whereIr: IrNode = {
+      kind: "binary",
+      op: ">",
+      left: { kind: "subqueryRef", key: "count", localParamNames: ["p"] },
+      right: { kind: "const", value: 1 },
+    };
+
+    const rows = (await Author.query()
+      .where(whereIr, { count: postCount })
+      .orderBy("id", "asc")
+      .toArray()) as Array<{ name: string }>;
+
     expect(rows.map((r) => r.name)).toEqual(["Alice"]);
   });
 
   it("ORDER BY correlated count() sorts authors by post count desc", async () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-    };
-    const orderBy: IrOrderBy[] = [
-      { expr: correlatedPostCount, direction: "desc" },
-      { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
+    const items: SelectItem[] = [{ expr: col("t0", "name"), alias: "name" }];
+    const orderBy: OrderItem[] = [
+      { expr: { kind: "subquery", plan: correlatedPostCount }, direction: "desc" },
+      { expr: col("t0", "id"), direction: "asc" },
     ];
-    const rows = (await runIrQuery(
-      db,
-      "authors",
-      AUTHOR_COLS,
-      select,
-      null,
-      orderBy,
-      "a",
-    )) as Array<{
+    const rows = (await runExprQuery(db, "authors", AUTHOR_COLS, items, false, null, orderBy)) as Array<{
       name: string;
     }>;
     expect(rows.map((r) => r.name)).toEqual(["Alice", "Bob", "Carol"]);
   });
 
   it("top-N IN subquery: authors whose id is among the top 2 active-post scorers", async () => {
-    // Build: SELECT * FROM authors WHERE id IN (
-    //   SELECT authorId FROM posts WHERE active=1 ORDER BY score DESC LIMIT 2
-    // )
     // Top 2 active scores: B1 (50, Bob), A2 (20, Alice). → Alice + Bob.
-    const innerWhere: IrNode = {
-      kind: "binary",
-      op: "===",
-      left: { kind: "member", param: "p", path: ["active"] },
-      right: { kind: "const", value: 1 },
-    };
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [["authorId"]] },
-      whereIr: innerWhere,
-      whereParams: {},
-      orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],
+    const sub: QueryPlan = selectPlan({
+      selectItems: [{ expr: col("t1", "authorId") }],
+      where: eq(col("t1", "active"), konst(1)),
+      orderBy: [{ expr: col("t1", "score"), direction: "desc" }],
       limitNum: 2,
-    };
-    const whereIr: IrNode = {
+    });
+    const where: Expr = {
       kind: "in",
-      left: { kind: "member", param: "a", path: ["id"] },
-      right: sub,
+      left: col("t0", "id"),
+      right: { kind: "subquery", plan: sub },
     };
-    const select: IrSelect = { param: "a", paths: [], rest: true };
-    const orderBy: IrOrderBy[] = [
-      { expr: { kind: "member", param: "a", path: ["id"] }, direction: "asc" },
-    ];
-    const rows = (await runIrQuery(
+    const items: SelectItem[] = AUTHOR_COLS.map((c) => ({ expr: col("t0", c) }));
+    const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
+    const rows = (await runExprQuery(
       db,
       "authors",
       AUTHOR_COLS,
-      select,
-      whereIr,
+      items,
+      false,
+      where,
       orderBy,
-      "a",
-    )) as Array<{
-      name: string;
-    }>;
+    )) as Array<{ name: string }>;
     expect(rows.map((r) => r.name).sort()).toEqual(["Alice", "Bob"]);
   });
 
@@ -267,5 +290,17 @@ describe("subquery scenarios (SQLite)", () => {
       .toArray()) as Array<{ name: string }>;
 
     expect(rows.map((r) => r.name)).toEqual(["Alice", "Bob"]);
+  });
+
+  it("WHERE IN subquery (params-based) also works for count()", async () => {
+    const activeAuthorIds = Post.query()
+      .where((p: any) => p.active === 1)
+      .select((p: any) => ({ authorId: p.authorId }));
+
+    const count = await Author.query()
+      .where((a: any) => a.id in activeAuthorIds, { activeAuthorIds })
+      .count();
+
+    expect(count).toBe(2);
   });
 });

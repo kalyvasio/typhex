@@ -5,7 +5,7 @@
 import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
 import { isIrNode, isIrSelect, isIrOrderBy } from "../ir/types.js";
 import { parseArrowToIr, parseArrowToIrSelect, parseArrowToGroupByPaths } from "./parse-arrow.js";
-import { DEFAULT_ROW_PARAM } from "../orm/compile-context.js";
+import { DEFAULT_ROW_PARAM } from "../orm/query-plan.js";
 
 /** Resolve a where input (pre-built IR node or arrow fn) to an IrNode. */
 export function resolveWhereIr(

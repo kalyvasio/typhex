@@ -2,25 +2,20 @@
  * PostgreSQL dialect: compilation and schema translation.
  */
 
-import { JOIN_SQL_KEYWORDS } from "../../ir/types.js";
-import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../../ir/types.js";
 import type {
-  CompileOptions,
   CompileResult,
   ColumnDef,
   DialectImpl,
   CompileSelectOpts,
-  ResolvedOpts,
   OnConflictClause,
 } from "../types.js";
 import type { RelationJoinInfo } from "../../orm/helpers/relations/relation-joins.js";
+import type { Expr, ExprAggregate } from "../../orm/expr.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
+  JOIN_SQL_KEYWORDS,
   quoteId,
-  resolveOpts,
-  makeCompileNode,
-  compileOrderBy,
-  compileSelectList,
+  compilePlan as compilePlanShared,
   compileAggregate,
   compileConcatAggregate,
   compileStandardAggregate,
@@ -28,19 +23,17 @@ import {
 } from "../shared-dialect.js";
 
 function postgresCompileAggregate(
-  agg: IrAggregate,
-  opts?: ResolvedOpts,
-  compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
+  agg: ExprAggregate,
+  compileNodeFn?: (node: Expr, params: unknown[]) => string,
   params?: unknown[],
 ): string {
-  // Map GROUP_CONCAT → STRING_AGG (cross-dialect compatibility)
   if (agg.func === "GROUP_CONCAT" || agg.func === "STRING_AGG") {
-    return compileConcatAggregate("STRING_AGG", agg, "','", opts, compileNodeFn, params);
+    return compileConcatAggregate("STRING_AGG", agg, "','", compileNodeFn, params);
   }
   if (agg.func === "ARRAY_AGG" || agg.func === "JSON_AGG") {
-    return compileStandardAggregate(agg.func, agg, opts, compileNodeFn, params);
+    return compileStandardAggregate(agg.func, agg, compileNodeFn, params);
   }
-  return compileAggregate(agg, opts, compileNodeFn, params);
+  return compileAggregate(agg, compileNodeFn, params);
 }
 
 function appendOnConflict(
@@ -98,23 +91,8 @@ export const postgresDialect: DialectImpl = {
     return { sql: newSql, params: newParams };
   },
 
-  compileWhere(node: IrNode | null, options: CompileOptions = {}): CompileResult {
-    const opts = resolveOpts(options);
-    const params: unknown[] = [];
-    const sql = node ? compileNode(node, opts, params) : "1=1";
-    return { sql, params };
-  },
-
-  compileOrderBy(orders: IrOrderBy[], options: CompileOptions = {}) {
-    return compileOrderBy(orders, options, postgresDialect);
-  },
-
-  compileSelectList(
-    select: IrSelect | null,
-    columns: string[],
-    options: CompileOptions = {},
-  ): { sql: string; params: unknown[] } {
-    return compileSelectList(select, columns, options, postgresCompileAggregate, postgresDialect);
+  compilePlan(plan, opts = {}) {
+    return compilePlanShared(plan, opts, postgresDialect);
   },
 
   toColumnDef(def: ColumnDef): string {
@@ -182,12 +160,13 @@ export const postgresDialect: DialectImpl = {
 
   compileCount(
     table: string,
+    tableAlias: string,
     whereSql: string,
     whereParams: unknown[],
     joinsSql?: string,
   ): CompileResult {
     return {
-      sql: `SELECT COUNT(*) AS c FROM ${quoteId(table)} AS t0${joinsSql ?? ""} WHERE ${whereSql}`,
+      sql: `SELECT COUNT(*) AS c FROM ${quoteId(table)} AS ${quoteId(tableAlias)}${joinsSql ?? ""} WHERE ${whereSql}`,
       params: whereParams,
     };
   },
@@ -235,9 +214,7 @@ export const postgresDialect: DialectImpl = {
     const esc = quoteId;
     const params = [...(opts.selectListParams ?? []), ...opts.whereParams];
     const groupByClause =
-      opts.groupBy && opts.groupBy.length > 0
-        ? ` GROUP BY ${compileGroupBy(opts.groupBy, resolveOpts(opts.compileOpts ?? {}))}`
-        : "";
+      opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${compileGroupBy(opts.groupBy)}` : "";
     let havingClause = "";
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
@@ -246,7 +223,7 @@ export const postgresDialect: DialectImpl = {
     if (opts.orderByParams && opts.orderByParams.length > 0) {
       params.push(...opts.orderByParams);
     }
-    let paramIdx = params.length + 1;
+    let paramIdx = (opts.paramStartIndex ?? 1) + params.length;
     const ph = () => `$${paramIdx++}`;
     let limitClause = "";
     let offsetClause = "";
@@ -259,7 +236,7 @@ export const postgresDialect: DialectImpl = {
       params.push(opts.offsetNum);
     }
     const orderClause = opts.orderBySql ? ` ORDER BY ${opts.orderBySql}` : "";
-    const sql = `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS t0${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`;
+    const sql = `SELECT ${opts.selectList} FROM ${esc(opts.table)} AS ${esc(opts.tableAlias)}${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`;
     return { sql, params };
   },
 
@@ -288,18 +265,15 @@ export const postgresDialect: DialectImpl = {
 
   compileAggregate: postgresCompileAggregate,
 
-  buildJoinClause(join: RelationJoinInfo): string {
-    // Postgres does not allow CROSS JOIN with an ON clause; map to INNER JOIN instead.
+  buildJoinClause(join: RelationJoinInfo, mainAlias: string): string {
     const kw =
       join.joinType === "cross" ? "INNER JOIN" : (JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
     const on = join.foreignKeys
       .map(
         (fk, i) =>
-          `${quoteId("t0")}.${quoteId(fk)} = ${quoteId(join.alias)}.${quoteId(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`,
+          `${quoteId(mainAlias)}.${quoteId(fk)} = ${quoteId(join.alias)}.${quoteId(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`,
       )
       .join(" AND ");
     return ` ${kw} ${quoteId(join.targetTable)} AS ${quoteId(join.alias)} ON ${on}`;
   },
 };
-
-const compileNode = makeCompileNode(postgresDialect);

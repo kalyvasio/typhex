@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { compileWhereExpr, compileSelectListExpr } from "../../src/dbs/shared-dialect.js";
 import {
   createSqliteDriver,
   sqliteDialect,
@@ -8,6 +9,7 @@ import {
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
+import type { Expr, SelectItem } from "../../src/orm/expr.js";
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {
@@ -87,27 +89,27 @@ describe("dbs/sqlite", () => {
     });
 
     it("compiles WHERE with ? placeholders", () => {
-      const ir = {
-        kind: "binary" as const,
-        op: "===" as const,
-        left: { kind: "member" as const, param: "u", path: ["age"] },
-        right: { kind: "const" as const, value: 18 },
+      const expr: Expr = {
+        kind: "binary",
+        op: "===",
+        left: { kind: "column", alias: "t0", column: "age" },
+        right: { kind: "const", value: 18 },
       };
-      const result = sqliteDialect.compileWhere(ir, {});
+      const result = compileWhereExpr(expr, sqliteDialect);
       expect(result.sql).toContain("?");
       expect(result.params).toEqual([18]);
     });
 
-    it("compiles WHERE with relation path when relationPathToAlias provided", () => {
-      const ir = {
-        kind: "binary" as const,
-        op: "===" as const,
-        left: { kind: "member" as const, param: "c", path: ["company", "name"] },
-        right: { kind: "const" as const, value: "Acme" },
+    it("compiles WHERE with relation alias on column", () => {
+      // Relation paths are alias-resolved by the planner; here we render the
+      // resolved ExprColumn directly.
+      const expr: Expr = {
+        kind: "binary",
+        op: "===",
+        left: { kind: "column", alias: "t1", column: "name" },
+        right: { kind: "const", value: "Acme" },
       };
-      const result = sqliteDialect.compileWhere(ir, {
-        relationPathToAlias: { "c.company": "t1" },
-      });
+      const result = compileWhereExpr(expr, sqliteDialect);
       expect(result.sql).toContain('"t1"."name"');
       expect(result.params).toEqual(["Acme"]);
     });
@@ -115,6 +117,7 @@ describe("dbs/sqlite", () => {
     it("compileSelect emits LEFT JOIN for relation joins", () => {
       const result = sqliteDialect.compileSelect({
         table: "contacts",
+        tableAlias: "t0",
         selectList: '"t0"."id", "t1"."name" AS "company_name"',
         whereSql: "1=1",
         whereParams: [],
@@ -127,15 +130,18 @@ describe("dbs/sqlite", () => {
       expect(result.sql).toContain('"companies"');
     });
 
-    it("compileSelectList uses relation alias for relation paths", () => {
-      const select = {
-        param: "c",
-        paths: [["id"], ["company", "name"]] as string[][],
-        aliases: ["id", "company_name"],
-      };
-      const result = sqliteDialect.compileSelectList(select, ["id", "name", "companyId"], {
-        relationPathToAlias: { "c.company": "t1" },
-      });
+    it("compileSelectList renders relation-aliased columns", () => {
+      const items: SelectItem[] = [
+        { expr: { kind: "column", alias: "t0", column: "id" }, alias: "id" },
+        { expr: { kind: "column", alias: "t1", column: "name" }, alias: "company_name" },
+      ];
+      const result = compileSelectListExpr(
+        items,
+        false,
+        "t0",
+        ["id", "name", "companyId"],
+        sqliteDialect,
+      );
       expect(result.sql).toContain('"t1"."name"');
       expect(result.sql).toContain("company_name");
     });

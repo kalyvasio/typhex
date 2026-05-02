@@ -4,7 +4,7 @@
  */
 
 import type { QueryExecutor } from "../../db.js";
-import type { RelationFetchMetadata } from "./relation-context-builder.js";
+import type { RelationFetchMetadata } from "../../query-plan.js";
 import type { IrSelectRelation } from "../../../ir/types.js";
 import { whereAnd, makeCompositeKey, buildFetchByIdIr } from "../../query-helpers.js";
 import { getEntityByTableName } from "../../../entity/global-driver.js";

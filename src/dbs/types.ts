@@ -2,10 +2,11 @@
  * Multi-database types: Driver, Dialect, DialectImpl.
  */
 
-import type { IrNode, IrOrderBy, IrSelect, IrAggregate } from "../ir/types.js";
 import type { Connection, ExecuteResult } from "../driver/types.js";
 import type { RelationJoinInfo } from "../orm/helpers/relations/relation-joins.js";
 import type { Dialect } from "../dialect.js";
+import type { Expr, ExprAggregate, GroupByItem } from "../orm/expr.js";
+import type { QueryPlan } from "../orm/query-plan.js";
 
 export type { Dialect };
 
@@ -24,18 +25,6 @@ export interface OnConflictClause {
   conflictColumns: string[];
   action: "update" | "nothing";
   updateColumns?: string[];
-}
-
-export interface CompileOptions {
-  tableAlias?: string;
-  paramToAlias?: Record<string, string>;
-  /** Map "param.relationKey" (e.g. "p.author") to joined table alias (e.g. "t1") */
-  relationPathToAlias?: Record<string, string>;
-  /** One-to-many relations in where: compile as EXISTS. Key "param.relationKey" -> EXISTS subquery info. */
-  oneToManyExists?: Record<
-    string,
-    { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }
-  >;
 }
 
 export interface DbColumnInfo {
@@ -74,23 +63,35 @@ export type { TransactionOptions, Driver } from "../driver/types.js";
 /** Options for compileSelect. */
 export interface CompileSelectOpts {
   table: string;
+  tableAlias: string;
   selectList: string;
-  /** Params bound to placeholders in `selectList` (subquery columns). Emitted
-   *  before whereParams in the final params array so positional/numbered
-   *  placeholders line up with the assembled SQL. */
+  /** Params bound to placeholders in `selectList` (subquery columns). */
   selectListParams?: unknown[];
   whereSql: string;
   whereParams: unknown[];
   orderBySql: string;
-  /** Params bound to placeholders in `orderBySql` (subquery sort keys). */
   orderByParams?: unknown[];
   limitNum: number | null;
   offsetNum: number | null;
   joinsSql?: string;
-  groupBy?: Array<string[] | number>;
-  compileOpts?: CompileOptions;
+  groupBy?: GroupByItem[];
   havingSql?: string;
   havingParams?: unknown[];
+  /** Absolute index for the next placeholder. */
+  paramStartIndex?: number;
+}
+
+export type QueryOperation =
+  | { kind: "select" }
+  | { kind: "count" }
+  | { kind: "update"; set: Record<string, unknown>; returning?: boolean }
+  | { kind: "delete"; returning?: boolean };
+
+export interface CompileQueryOpts {
+  /** Wrap the assembled SELECT in `( … )` and return flat positional params,
+   *  for use as a subquery. */
+  wrap?: boolean;
+  paramStartIndex?: number;
 }
 
 /** Sentinel that tells a dialect to emit the column's DB default rather than a value. */
@@ -123,17 +124,6 @@ export interface DialectInsertCapabilities {
   supportsSequences: boolean;
 }
 
-/** Resolved (non-optional) compile options, produced by resolveOpts(). */
-export type ResolvedOpts = {
-  tableAlias: string;
-  paramToAlias: Record<string, string>;
-  relationPathToAlias?: Record<string, string>;
-  oneToManyExists?: Record<
-    string,
-    { targetTable: string; fkColumns: string[]; mainPk: string[]; alias: string }
-  >;
-};
-
 /** Dialect: SQL compilation and schema translation. */
 export interface DialectImpl {
   readonly name: Dialect;
@@ -156,18 +146,12 @@ export interface DialectImpl {
   ): string;
   compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string;
   compileAggregate?(
-    agg: IrAggregate,
-    opts?: ResolvedOpts,
-    compileNodeFn?: (node: IrNode, opts: ResolvedOpts, params: unknown[]) => string,
+    agg: ExprAggregate,
+    compileNodeFn?: (node: Expr, params: unknown[]) => string,
     params?: unknown[],
   ): string;
-  compileWhere(node: IrNode | null, opts: CompileOptions): CompileResult;
-  compileOrderBy(orders: IrOrderBy[], opts: CompileOptions): { sql: string; params: unknown[] };
-  compileSelectList(
-    select: IrSelect | null,
-    columns: string[],
-    opts: CompileOptions,
-  ): { sql: string; params: unknown[] };
+  /** Top-level entry point: build SQL for a fully-resolved QueryPlan. */
+  compilePlan(plan: QueryPlan, opts?: CompileQueryOpts): CompileResult;
   toColumnDef(def: ColumnDef): string;
   compileInsert(
     table: string,
@@ -185,6 +169,7 @@ export interface DialectImpl {
   ): CompileResult;
   compileCount(
     table: string,
+    tableAlias: string,
     whereSql: string,
     whereParams: unknown[],
     joinsSql?: string,
@@ -204,7 +189,7 @@ export interface DialectImpl {
     options?: { returning?: boolean },
   ): CompileResult;
   compileSelect(opts: CompileSelectOpts): CompileResult;
-  buildJoinClause(join: RelationJoinInfo): string;
+  buildJoinClause(join: RelationJoinInfo, mainAlias: string): string;
 }
 
 /** Resolve column definition for a dialect. */

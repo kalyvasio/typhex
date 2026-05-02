@@ -1,38 +1,27 @@
 /**
- * Unit tests for WHERE IN subquery IR compilation (SQLite and PostgreSQL dialects).
+ * Unit tests for WHERE IN subquery compilation (SQLite and PostgreSQL dialects).
  */
 
 import { describe, it, expect } from "vitest";
 import { getDialect } from "../../src/dbs/index.js";
-import type { IrIn } from "../../src/ir/types.js";
-import type { IrSubquery } from "../../src/ir/types.js";
+import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import type { Expr } from "../../src/orm/expr.js";
+import { col, eq, konst, selectPlan } from "./subquery-ref-helpers.js";
 
-describe("IrSubquery compilation", () => {
-  const subquery: IrSubquery = {
-    kind: "subquery",
-    tableName: "posts",
-    selectIr: { param: "p", paths: [["id"]] },
-    whereIr: {
-      kind: "binary",
-      op: "===",
-      left: { kind: "member", param: "p", path: ["active"] },
-      right: { kind: "const", value: true },
-    },
-    whereParams: {},
-  };
+describe("IN subquery compilation", () => {
+  const subPlan = selectPlan({
+    selectItems: [{ expr: col("t1", "id") }],
+    where: eq(col("t1", "active"), konst(true)),
+  });
 
-  const ir: IrIn = {
+  const expr: Expr = {
     kind: "in",
-    left: { kind: "member", param: "a", path: ["postId"] },
-    right: subquery,
+    left: col("t0", "postId"),
+    right: { kind: "subquery", plan: subPlan },
   };
 
   it("SQLite: compiles IN subquery correctly", () => {
-    const dialect = getDialect("sqlite");
-    const result = dialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const result = compileWhereExpr(expr, getDialect("sqlite"));
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = ?))`,
     );
@@ -40,11 +29,7 @@ describe("IrSubquery compilation", () => {
   });
 
   it("PostgreSQL: compiles IN subquery correctly", () => {
-    const dialect = getDialect("postgres");
-    const result = dialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const result = compileWhereExpr(expr, getDialect("postgres"));
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = $1))`,
     );
@@ -52,12 +37,8 @@ describe("IrSubquery compilation", () => {
   });
 
   it("SQLite: compiles NOT IN subquery correctly (negated)", () => {
-    const negatedIr: IrIn = { ...ir, negated: true };
-    const dialect = getDialect("sqlite");
-    const result = dialect.compileWhere(negatedIr, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const negated: Expr = { ...expr, negated: true } as Expr;
+    const result = compileWhereExpr(negated, getDialect("sqlite"));
     expect(result.sql).toBe(
       `"t0"."postId" NOT IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = ?))`,
     );
@@ -65,13 +46,20 @@ describe("IrSubquery compilation", () => {
   });
 
   it("avoids alias collision when outer query already uses t1 (e.g. via JOIN)", () => {
-    // Outer query has a JOIN that occupies t1 — subquery must pick t2.
-    const dialect = getDialect("sqlite");
-    const result = dialect.compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-      relationPathToAlias: { "a.posts": "t1" },
+    // Subquery is built with t2 — the planner allocates fresh aliases.
+    const t2Plan = selectPlan({
+      tableAlias: "t2",
+      selectItems: [{ expr: col("t2", "id") }],
+      where: eq(col("t2", "active"), konst(true)),
     });
+    const result = compileWhereExpr(
+      {
+        kind: "in",
+        left: col("t0", "postId"),
+        right: { kind: "subquery", plan: t2Plan },
+      },
+      getDialect("sqlite"),
+    );
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t2"."id" FROM "posts" AS "t2" WHERE ("t2"."active" = ?))`,
     );
@@ -79,29 +67,15 @@ describe("IrSubquery compilation", () => {
   });
 
   it("supports a custom outer param name (no u/p/e/t heuristic)", () => {
-    // Subquery uses param name `author` rather than the legacy u/p/e/t set.
-    const customSubquery: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [["id"]] },
-      whereIr: {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "author", path: ["active"] },
-        right: { kind: "const", value: true },
+    // Outer column is just an alias — naming is irrelevant in Expr-land.
+    const result = compileWhereExpr(
+      {
+        kind: "in",
+        left: col("t0", "postId"),
+        right: { kind: "subquery", plan: subPlan },
       },
-      whereParams: {},
-    };
-    const customIr: IrIn = {
-      kind: "in",
-      left: { kind: "member", param: "outer", path: ["postId"] },
-      right: customSubquery,
-    };
-    const dialect = getDialect("sqlite");
-    const result = dialect.compileWhere(customIr, {
-      tableAlias: "t0",
-      paramToAlias: { outer: "t0" },
-    });
+      getDialect("sqlite"),
+    );
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = ?))`,
     );
@@ -109,40 +83,29 @@ describe("IrSubquery compilation", () => {
   });
 
   it("nested IN subqueries get distinct aliases", () => {
-    // a.postId IN (SELECT id FROM posts WHERE authorId IN (SELECT id FROM users WHERE active = true))
-    const innerSub: IrSubquery = {
-      kind: "subquery",
+    const innerPlan = selectPlan({
       tableName: "users",
-      selectIr: { param: "p", paths: [["id"]] },
-      whereIr: {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "u", path: ["active"] },
-        right: { kind: "const", value: true },
-      },
-      whereParams: {},
-    };
-    const middleSub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [["id"]] },
-      whereIr: {
-        kind: "in",
-        left: { kind: "member", param: "p", path: ["authorId"] },
-        right: innerSub,
-      },
-      whereParams: {},
-    };
-    const nestedIr: IrIn = {
-      kind: "in",
-      left: { kind: "member", param: "a", path: ["postId"] },
-      right: middleSub,
-    };
-    const dialect = getDialect("sqlite");
-    const result = dialect.compileWhere(nestedIr, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
+      tableAlias: "t2",
+      selectItems: [{ expr: col("t2", "id") }],
+      where: eq(col("t2", "active"), konst(true)),
     });
+    const middlePlan = selectPlan({
+      tableAlias: "t1",
+      selectItems: [{ expr: col("t1", "id") }],
+      where: {
+        kind: "in",
+        left: col("t1", "authorId"),
+        right: { kind: "subquery", plan: innerPlan },
+      },
+    });
+    const result = compileWhereExpr(
+      {
+        kind: "in",
+        left: col("t0", "postId"),
+        right: { kind: "subquery", plan: middlePlan },
+      },
+      getDialect("sqlite"),
+    );
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE "t1"."authorId" IN (SELECT "t2"."id" FROM "users" AS "t2" WHERE ("t2"."active" = ?)))`,
     );
@@ -150,73 +113,39 @@ describe("IrSubquery compilation", () => {
   });
 
   it("compiles top-N IN subquery: SELECT col ORDER BY ... LIMIT n", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [["id"]] },
-      whereIr: null,
-      whereParams: {},
-      orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],
+    const sub = selectPlan({
+      selectItems: [{ expr: col("t1", "id") }],
+      where: null,
+      orderBy: [{ expr: col("t1", "score"), direction: "desc" }],
       limitNum: 3,
-    };
-    const ir: IrIn = {
-      kind: "in",
-      left: { kind: "member", param: "a", path: ["postId"] },
-      right: sub,
-    };
-    const result = getDialect("sqlite").compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
     });
-    expect(result.sql).toBe(
-      `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE 1=1 ORDER BY "t1"."score" DESC LIMIT 3)`,
+    const result = compileWhereExpr(
+      {
+        kind: "in",
+        left: col("t0", "postId"),
+        right: { kind: "subquery", plan: sub },
+      },
+      getDialect("sqlite"),
     );
-    expect(result.params).toEqual([]);
+    expect(result.sql).toBe(
+      `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE 1=1 ORDER BY "t1"."score" DESC LIMIT ?)`,
+    );
+    expect(result.params).toEqual([3]);
   });
 
-  it("compiles IN subquery with DISTINCT and LIMIT", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [["authorId"]] },
-      whereIr: null,
-      whereParams: {},
-      distinct: true,
-      limitNum: 10,
-    };
-    const ir: IrIn = {
-      kind: "in",
-      left: { kind: "member", param: "a", path: ["id"] },
-      right: sub,
-    };
-    const result = getDialect("sqlite").compileWhere(ir, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
+  it("compiles subquery with no WHERE", () => {
+    const sub = selectPlan({
+      selectItems: [{ expr: col("t1", "id") }],
+      where: null,
     });
-    expect(result.sql).toBe(
-      `"t0"."id" IN (SELECT DISTINCT "t1"."authorId" FROM "posts" AS "t1" WHERE 1=1 LIMIT 10)`,
+    const result = compileWhereExpr(
+      {
+        kind: "in",
+        left: col("t0", "postId"),
+        right: { kind: "subquery", plan: sub },
+      },
+      getDialect("sqlite"),
     );
-    expect(result.params).toEqual([]);
-  });
-
-  it("compiles subquery with no WHERE (whereIr is null)", () => {
-    const noWhereSubquery: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [["id"]] },
-      whereIr: null,
-      whereParams: {},
-    };
-    const noWhereIr: IrIn = {
-      kind: "in",
-      left: { kind: "member", param: "a", path: ["postId"] },
-      right: noWhereSubquery,
-    };
-    const dialect = getDialect("sqlite");
-    const result = dialect.compileWhere(noWhereIr, {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
     expect(result.sql).toBe(`"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE 1=1)`);
     expect(result.params).toEqual([]);
   });

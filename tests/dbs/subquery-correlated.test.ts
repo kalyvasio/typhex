@@ -1,60 +1,51 @@
-/**
- * Unit tests for correlated scalar subqueries: subqueries whose inner WHERE
- * references the outer query's row params.
- */
+import { describe, expect, it } from "vitest";
+import { postgresDialect, sqliteDialect } from "../../src/dbs/index.js";
+import { compileSelectListExpr, compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import type { Expr, ExprAggregate, SelectItem } from "../../src/orm/expr.js";
+import { col, eq, konst, selectPlan, countPostsSelect, bin } from "./subquery-ref-helpers.js";
 
-import { describe, it, expect } from "vitest";
-import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
-import type { IrSelect, IrSubquery, IrIn } from "../../src/ir/types.js";
-
-/** posts where authorId === a.id — `a` is an outer row param. */
-const correlatedActivePosts: IrSubquery = {
-  kind: "subquery",
-  tableName: "posts",
-  selectIr: {
-    param: "p",
-    paths: [],
-    aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
-  },
-  whereIr: {
-    kind: "binary",
-    op: "===",
-    left: { kind: "member", param: "p", path: ["authorId"] },
-    right: { kind: "member", param: "a", path: ["id"] },
-  },
-  whereParams: {},
-  innerParamNames: ["p"],
-};
+const correlatedActivePosts = selectPlan({
+  selectItems: countPostsSelect,
+  where: eq(col("t1", "authorId"), col("t0", "id")),
+});
 
 describe("Correlated scalar subquery in SELECT", () => {
   it("SQLite: outer param ref resolves to outer table alias", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "postCount", subquery: correlatedActivePosts }],
-    };
-    const { sql, params } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: correlatedActivePosts }, alias: "postCount" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      sqliteDialect.compileAggregate
+        ? (agg, fn, p) => sqliteDialect.compileAggregate!(agg, fn, p)
+        : undefined,
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "postCount"`,
     );
     expect(params).toEqual([]);
   });
 
-  it("PostgreSQL: same shape with $-style placeholders absent (no literals)", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "postCount", subquery: correlatedActivePosts }],
-    };
-    const { sql, params } = postgresDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+  it("PostgreSQL: same shape with $-style placeholders absent", () => {
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: correlatedActivePosts }, alias: "postCount" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      postgresDialect,
+      postgresDialect.compileAggregate
+        ? (agg, fn, p) => postgresDialect.compileAggregate!(agg, fn, p)
+        : undefined,
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "postCount"`,
     );
@@ -62,48 +53,32 @@ describe("Correlated scalar subquery in SELECT", () => {
   });
 
   it("correlated SUM with literal predicate mixes outer ref and bind param", () => {
-    const sumActivePostsForAuthor: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: {
-        param: "p",
-        paths: [],
-        aggregates: [
-          {
-            kind: "aggregate",
-            func: "SUM",
-            arg: { kind: "member", param: "p", path: ["score"] },
-          },
-        ],
-      },
-      whereIr: {
-        kind: "binary",
-        op: "&&",
-        left: {
-          kind: "binary",
-          op: "===",
-          left: { kind: "member", param: "p", path: ["authorId"] },
-          right: { kind: "member", param: "a", path: ["id"] },
-        },
-        right: {
-          kind: "binary",
-          op: "===",
-          left: { kind: "member", param: "p", path: ["active"] },
-          right: { kind: "const", value: true },
-        },
-      },
-      whereParams: {},
-      innerParamNames: ["p"],
+    const sumAgg: ExprAggregate = {
+      kind: "aggregate",
+      func: "SUM",
+      arg: col("t1", "score"),
     };
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "score", subquery: sumActivePostsForAuthor }],
-    };
-    const { sql, params } = postgresDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
+    const sumPlan = selectPlan({
+      selectItems: [{ expr: sumAgg }],
+      where: bin(
+        "&&",
+        eq(col("t1", "authorId"), col("t0", "id")),
+        eq(col("t1", "active"), konst(true)),
+      ),
     });
+    const items: SelectItem[] = [
+      { expr: { kind: "subquery", plan: sumPlan }, alias: "score" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      postgresDialect,
+      postgresDialect.compileAggregate
+        ? (agg, fn, p) => postgresDialect.compileAggregate!(agg, fn, p)
+        : undefined,
+    );
     expect(sql).toBe(
       `(SELECT SUM("t1"."score") FROM "posts" AS "t1" WHERE (("t1"."authorId" = "t0"."id") AND ("t1"."active" = $1))) AS "score"`,
     );
@@ -113,35 +88,23 @@ describe("Correlated scalar subquery in SELECT", () => {
 
 describe("Correlated scalar subquery from destructured outer arrow", () => {
   it("destructured `id` resolves to the outer row, matching the non-destructured shape", () => {
-    // Shape produced by the transformer when the outer select-arrow is
-    // `({ id }) => ({ c: Post.query().where(p => p.authorId === id).count() })`.
-    // The destructured local `id` is plumbed to IrMember{ param: "u", path: ["id"] }.
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: {
-        param: "p",
-        paths: [],
-        aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
-      },
-      whereIr: {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "p", path: ["authorId"] },
-        right: { kind: "member", param: "u", path: ["id"] },
-      },
-      whereParams: {},
-      innerParamNames: ["p"],
-    };
-    const select: IrSelect = {
-      param: "u",
-      paths: [],
-      subqueries: [{ alias: "c", subquery: sub }],
-    };
-    const { sql, params } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
+    const sub = selectPlan({
+      selectItems: countPostsSelect,
+      where: eq(col("t1", "authorId"), col("t0", "id")),
     });
+    const items: SelectItem[] = [
+      { expr: { kind: "subquery", plan: sub }, alias: "c" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      sqliteDialect.compileAggregate
+        ? (agg, fn, p) => sqliteDialect.compileAggregate!(agg, fn, p)
+        : undefined,
+    );
     expect(sql).toBe(
       `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "c"`,
     );
@@ -151,28 +114,16 @@ describe("Correlated scalar subquery from destructured outer arrow", () => {
 
 describe("Correlated IN subquery", () => {
   it("compiles correlated WHERE IN with outer param reference", () => {
-    const correlatedIn: IrIn = {
-      kind: "in",
-      left: { kind: "member", param: "u", path: ["id"] },
-      right: {
-        kind: "subquery",
-        tableName: "posts",
-        selectIr: { param: "p", paths: [["authorId"]] },
-        whereIr: {
-          kind: "binary",
-          op: "===",
-          left: { kind: "member", param: "p", path: ["category"] },
-          right: { kind: "member", param: "u", path: ["preferredCategory"] },
-        },
-        whereParams: {},
-        innerParamNames: ["p"],
-      },
-    };
-    const dialect = sqliteDialect;
-    const result = dialect.compileWhere(correlatedIn, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
+    const sub = selectPlan({
+      selectItems: [{ expr: col("t1", "authorId") }],
+      where: eq(col("t1", "category"), col("t0", "preferredCategory")),
     });
+    const expr: Expr = {
+      kind: "in",
+      left: col("t0", "id"),
+      right: { kind: "subquery", plan: sub },
+    };
+    const result = compileWhereExpr(expr, sqliteDialect);
     expect(result.sql).toBe(
       `"t0"."id" IN (SELECT "t1"."authorId" FROM "posts" AS "t1" WHERE ("t1"."category" = "t0"."preferredCategory"))`,
     );

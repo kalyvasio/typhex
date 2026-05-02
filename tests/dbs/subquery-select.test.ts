@@ -1,57 +1,47 @@
-/**
- * Unit tests for scalar subquery columns in SELECT lists (sqlite + postgres).
- */
+import { describe, expect, it } from "vitest";
+import { postgresDialect, sqliteDialect } from "../../src/dbs/index.js";
+import { compileSelectListExpr } from "../../src/dbs/shared-dialect.js";
+import type { DialectImpl } from "../../src/dbs/types.js";
+import type { ExprAggregate, SelectItem } from "../../src/orm/expr.js";
+import { col, eq, konst, selectPlan, countPostsSelect } from "./subquery-ref-helpers.js";
 
-import { describe, it, expect } from "vitest";
-import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
-import type { IrSelect, IrSubquery } from "../../src/ir/types.js";
+function aggFn(dialect: DialectImpl) {
+  return dialect.compileAggregate
+    ? (agg: ExprAggregate, fn: (n: import("../../src/orm/expr.js").Expr, p: unknown[]) => string, p: unknown[]) =>
+        dialect.compileAggregate!(agg, fn, p)
+    : undefined;
+}
 
-const countAllPosts: IrSubquery = {
-  kind: "subquery",
-  tableName: "posts",
-  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-  whereIr: null,
-  whereParams: {},
-};
+const countAllPosts = selectPlan({
+  selectItems: countPostsSelect,
+});
 
-const countActivePosts: IrSubquery = {
-  kind: "subquery",
-  tableName: "posts",
-  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-  whereIr: {
-    kind: "binary",
-    op: "===",
-    left: { kind: "member", param: "p", path: ["active"] },
-    right: { kind: "const", value: true },
-  },
-  whereParams: {},
-};
+const countActivePosts = selectPlan({
+  selectItems: countPostsSelect,
+  where: eq(col("t1", "active"), konst(true)),
+});
 
-const sumActivePostScores: IrSubquery = {
-  kind: "subquery",
-  tableName: "posts",
-  selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["score"] } }] },
-  whereIr: {
-    kind: "binary",
-    op: "===",
-    left: { kind: "member", param: "p", path: ["active"] },
-    right: { kind: "const", value: true },
-  },
-  whereParams: {},
-};
+const sumActivePostScores = selectPlan({
+  selectItems: [
+    { expr: { kind: "aggregate", func: "SUM", arg: col("t1", "score") } as ExprAggregate },
+  ],
+  where: eq(col("t1", "active"), konst(true)),
+});
 
 describe("Scalar subquery columns in SELECT", () => {
   it('SQLite: emits (SELECT COUNT(*) FROM ...) AS "<alias>" with no params', () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "totalPosts", subquery: countAllPosts }],
-    };
-    const { sql, params } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: countAllPosts }, alias: "totalPosts" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1) AS "totalPosts"`,
     );
@@ -59,16 +49,18 @@ describe("Scalar subquery columns in SELECT", () => {
   });
 
   it("SQLite: subquery with WHERE pushes params and emits placeholders", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "activePosts", subquery: countActivePosts }],
-    };
-    const { sql, params } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: countActivePosts }, alias: "activePosts" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = ?)) AS "activePosts"`,
     );
@@ -76,16 +68,18 @@ describe("Scalar subquery columns in SELECT", () => {
   });
 
   it("PostgreSQL: subquery with WHERE numbers placeholders starting at $1", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "activePosts", subquery: countActivePosts }],
-    };
-    const { sql, params } = postgresDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: countActivePosts }, alias: "activePosts" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      postgresDialect,
+      aggFn(postgresDialect),
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = $1)) AS "activePosts"`,
     );
@@ -93,15 +87,17 @@ describe("Scalar subquery columns in SELECT", () => {
   });
 
   it('emits SUM("alias"."col") for non-COUNT aggregates', () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "totalScore", subquery: sumActivePostScores }],
-    };
-    const { sql, params } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: { kind: "subquery", plan: sumActivePostScores }, alias: "totalScore" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
     expect(sql).toBe(
       `(SELECT SUM("t1"."score") FROM "posts" AS "t1" WHERE ("t1"."active" = ?)) AS "totalScore"`,
     );
@@ -109,19 +105,19 @@ describe("Scalar subquery columns in SELECT", () => {
   });
 
   it("multiple subquery columns share params in order", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [
-        { alias: "active", subquery: countActivePosts },
-        { alias: "totalScore", subquery: sumActivePostScores },
-      ],
-    };
-    const { sql, params } = postgresDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: countActivePosts }, alias: "active" },
+      { expr: { kind: "subquery", plan: sumActivePostScores }, alias: "totalScore" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      postgresDialect,
+      aggFn(postgresDialect),
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", ` +
         `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = $1)) AS "active", ` +
@@ -131,144 +127,123 @@ describe("Scalar subquery columns in SELECT", () => {
   });
 
   it("subquery alias avoids outer JOIN alias collision", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      subqueries: [{ alias: "active", subquery: countActivePosts }],
-    };
-    const { sql } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-      relationPathToAlias: { "a.posts": "t1" },
+    // When the outer query has a JOIN that occupies t1, the planner allocates
+    // t2 for the subquery. Here we hand-build the inner plan with tableAlias "t2".
+    const t2Plan = selectPlan({
+      tableAlias: "t2",
+      selectItems: [
+        { expr: { kind: "aggregate", func: "COUNT", arg: null } as ExprAggregate },
+      ],
+      where: eq(col("t2", "active"), konst(true)),
     });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      { expr: { kind: "subquery", plan: t2Plan }, alias: "active" },
+    ];
+    const { sql } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
     expect(sql).toContain(`AS "t2"`);
     expect(sql).not.toMatch(/FROM "posts" AS "t1"/);
   });
 
   it("regular aggregates and subqueries coexist in select list", () => {
-    const select: IrSelect = {
-      param: "a",
-      paths: [["name"]],
-      aliases: ["name"],
-      aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "rowCount" }],
-      subqueries: [{ alias: "totalPosts", subquery: countAllPosts }],
-    };
-    const { sql } = sqliteDialect.compileSelectList(select, ["id", "name"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
+    const items: SelectItem[] = [
+      { expr: col("t0", "name"), alias: "name" },
+      {
+        expr: {
+          kind: "aggregate",
+          func: "COUNT",
+          arg: null,
+          alias: "rowCount",
+        } as ExprAggregate,
+      },
+      { expr: { kind: "subquery", plan: countAllPosts }, alias: "totalPosts" },
+    ];
+    const { sql } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id", "name"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
     expect(sql).toBe(
       `"t0"."name" AS "name", COUNT(*) AS "rowCount", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1) AS "totalPosts"`,
     );
   });
 
   it("emits LIMIT inside the subquery for COUNT(*) with limitNum", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-      whereIr: null,
-      whereParams: {},
-      limitNum: 10,
-    };
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "c", subquery: sub }],
-    };
-    const { sql } = sqliteDialect.compileSelectList(select, ["id"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
-    expect(sql).toBe(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1 LIMIT 10) AS "c"`);
+    const sub = selectPlan({ selectItems: countPostsSelect, limitNum: 10 });
+    const items: SelectItem[] = [
+      { expr: { kind: "subquery", plan: sub }, alias: "c" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
+    expect(sql).toBe(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1 LIMIT ?) AS "c"`);
+    expect(params).toEqual([10]);
   });
 
   it("emits ORDER BY ... LIMIT for top-N subquery in SELECT", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] } }] },
-      whereIr: null,
-      whereParams: {},
-      orderBy: [{ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }],
+    const sub = selectPlan({
+      selectItems: [
+        {
+          expr: {
+            kind: "aggregate",
+            func: "MAX",
+            arg: col("t1", "score"),
+          } as ExprAggregate,
+        },
+      ],
+      orderBy: [{ expr: col("t1", "score"), direction: "desc" }],
       limitNum: 1,
-    };
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "topScore", subquery: sub }],
-    };
-    const { sql } = sqliteDialect.compileSelectList(select, ["id"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
     });
-    expect(sql).toBe(
-      `(SELECT MAX("t1"."score") FROM "posts" AS "t1" WHERE 1=1 ORDER BY "t1"."score" DESC LIMIT 1) AS "topScore"`,
+    const items: SelectItem[] = [
+      { expr: { kind: "subquery", plan: sub }, alias: "topScore" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
     );
+    expect(sql).toBe(
+      `(SELECT MAX("t1"."score") FROM "posts" AS "t1" WHERE 1=1 ORDER BY "t1"."score" DESC LIMIT ?) AS "topScore"`,
+    );
+    expect(params).toEqual([1]);
   });
 
   it("emits LIMIT and OFFSET inside the subquery", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }] },
-      whereIr: null,
-      whereParams: {},
+    const sub = selectPlan({
+      selectItems: countPostsSelect,
       limitNum: 5,
       offsetNum: 2,
-    };
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "c", subquery: sub }],
-    };
-    const { sql } = sqliteDialect.compileSelectList(select, ["id"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
     });
-    expect(sql).toBe(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1 LIMIT 5 OFFSET 2) AS "c"`);
-  });
-
-  it("emits SUM(DISTINCT col) when distinct.col is set", () => {
-    const sub: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["score"] } }] },
-      whereIr: null,
-      whereParams: {},
-      distinct: { col: "score" },
-    };
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "s", subquery: sub }],
-    };
-    const { sql } = sqliteDialect.compileSelectList(select, ["id"], {
-      tableAlias: "t0",
-      paramToAlias: { a: "t0" },
-    });
-    expect(sql).toBe(`(SELECT SUM(DISTINCT "t1"."score") FROM "posts" AS "t1" WHERE 1=1) AS "s"`);
-  });
-
-  it("throws when SUM subquery is missing valueCol", () => {
-    const broken: IrSubquery = {
-      kind: "subquery",
-      tableName: "posts",
-      selectIr: { param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: null }] },
-      whereIr: null,
-      whereParams: {},
-    };
-    const select: IrSelect = {
-      param: "a",
-      paths: [],
-      subqueries: [{ alias: "x", subquery: broken }],
-    };
-    expect(() =>
-      sqliteDialect.compileSelectList(select, ["id"], {
-        tableAlias: "t0",
-        paramToAlias: { a: "t0" },
-      }),
-    ).toThrow(/SUM subquery requires a column/);
+    const items: SelectItem[] = [
+      { expr: { kind: "subquery", plan: sub }, alias: "c" },
+    ];
+    const { sql, params } = compileSelectListExpr(
+      items,
+      false,
+      "t0",
+      ["id"],
+      sqliteDialect,
+      aggFn(sqliteDialect),
+    );
+    expect(sql).toBe(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1 LIMIT ? OFFSET ?) AS "c"`);
+    expect(params).toEqual([5, 2]);
   });
 });

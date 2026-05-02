@@ -5,6 +5,8 @@ import type { RelationDef } from "../../src/entity/relations.js";
 import { sqliteDialect } from "../../src/dbs/sqlite/dialect.js";
 import type { IrOrderBy } from "../../src/ir/types.js";
 import { type MockDb, createMockDb } from "../helpers.js";
+import { compileOrderByExpr } from "../../src/dbs/shared-dialect.js";
+import type { OrderItem } from "../../src/orm/expr.js";
 
 // ---------------------------------------------------------------------------
 // Unit tests: orderBy lambda parsing
@@ -117,57 +119,49 @@ describe("orderBy — lambda and dot-notation support", () => {
 // Unit tests: compileOrderBy with relationPathToAlias
 // ---------------------------------------------------------------------------
 
-describe("compileOrderBy — relation path resolution", () => {
-  it("resolves relation alias for path ['company', 'name']", () => {
-    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "asc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
+describe("compileOrderByExpr — relation path resolution", () => {
+  // Note: relation alias resolution happens in QueryPlanBuilder, not the dialect.
+  // These tests now verify dialect-level rendering of pre-resolved ExprColumn.
+  it("renders relation alias for column { alias: 't1', column: 'name' }", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t1", column: "name" }, direction: "asc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t1"."name" ASC');
   });
 
-  it("resolves relation alias for desc direction", () => {
-    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "desc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
+  it("renders relation alias for desc direction", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t1", column: "name" }, direction: "desc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t1"."name" DESC');
   });
 
-  it("falls back to table alias when no relation path alias matches", () => {
-    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-    });
+  it("renders main-table alias when no relation rewrite", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t0", column: "name" }, direction: "asc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t0"."name" ASC');
   });
 
-  it("does not resolve single-segment paths (non-relation columns)", () => {
-    const orders: IrOrderBy[] = [{ expr: { kind: "member", param: "u", path: ["company"] }, direction: "asc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
-    // single-segment path: no resolution (path.length < 2)
+  it("single-segment relation-name path stays on main table", () => {
+    // Planner with minPathLenForRewrite=2 keeps `u.company` (length 1 after param)
+    // on the main alias. Mimic the planner's resolved output here.
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t0", column: "company" }, direction: "asc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t0"."company" ASC');
   });
 
   it("compiles multiple orders including a relation column", () => {
-    const orders: IrOrderBy[] = [
-      { expr: { kind: "member", param: "u", path: ["company", "name"] }, direction: "asc" },
-      { expr: { kind: "member", param: "u", path: ["name"] }, direction: "desc" },
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t1", column: "name" }, direction: "asc" },
+      { expr: { kind: "column", alias: "t0", column: "name" }, direction: "desc" },
     ];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
+    const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t1"."name" ASC, "t0"."name" DESC');
   });
 });

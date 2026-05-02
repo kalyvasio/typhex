@@ -65,6 +65,45 @@ await Author.query()
   .toArray();
 ```
 
+#### Scalar, comparison, and ORDER BY subqueries (transformer-only)
+
+Beyond `WHERE IN`, the transformer also supports subqueries as scalar values — in `.select()` projections, in `.where()` comparisons, and as `.orderBy()` sort keys. The inner chain ends in `.select(() => count())` (or another aggregate) to produce a single-row scalar; correlation against the outer row works through closure capture.
+
+```ts
+// Scalar subquery in SELECT — per-author post count, correlated.
+await Author.query()
+  .select((a) => ({
+    name: a.name,
+    postCount: Post.query()
+      .where((p) => p.authorId === a.id)
+      .select(() => count()),
+  }))
+  .toArray();
+
+// Subquery aggregate in WHERE — authors with more than 1 post.
+await Author.query()
+  .where(
+    (a) =>
+      Post.query()
+        .where((p) => p.authorId === a.id)
+        .select(() => count()) > 1,
+  )
+  .toArray();
+
+// Subquery in ORDER BY — sort authors by post count descending.
+await Author.query()
+  .orderBy(
+    (a) =>
+      Post.query()
+        .where((p) => p.authorId === a.id)
+        .select(() => count()),
+    "desc",
+  )
+  .toArray();
+```
+
+These shapes require the transformer — the runtime parser only handles the `WHERE IN` form above.
+
 ### Two Modes: Runtime Parsing or Compile-Time Transformation
 
 **Runtime mode** (works everywhere):
