@@ -9,8 +9,7 @@
 
 import * as ts from "typescript";
 import type { IrNode, IrOrderBy, IrSubquery, IrSubqueryAggregate } from "../ir/types.js";
-import { collectParamNamesFromWhere } from "../ir/types.js";
-import { buildIrSubquery } from "../ir/subquery-builder.js";
+import { computeOuterCorrelatedParams, validateIrSubquery } from "../ir/types.js";
 import {
   parseWhereArrowToIr,
   extractTableName,
@@ -70,19 +69,6 @@ interface ChainResult {
   limitNum?: number;
   offsetNum?: number;
   distinctCol?: string;
-}
-
-/** Inspect whereIr; return the subset of param names present that are NOT in
- *  `innerParamNames` (i.e. the correlated outer references). */
-export function computeOuterCorrelatedParams(
-  whereIr: IrNode | null,
-  innerParamNames: string[],
-): string[] {
-  if (!whereIr) return [];
-  const seen = new Set<string>();
-  collectParamNamesFromWhere(whereIr, seen);
-  const inner = new Set(innerParamNames);
-  return [...seen].filter((n) => !inner.has(n));
 }
 
 /** Read `.orderBy(arrow, "asc"|"desc"?)` and yield an IrOrderBy entry whose
@@ -225,7 +211,11 @@ function walkSubqueryChain(
     whereIr: state.whereIr,
     innerParamNames: state.innerParamNames,
   };
-  const outerCorrelated = computeOuterCorrelatedParams(state.whereIr, state.innerParamNames);
+  const outerCorrelated = computeOuterCorrelatedParams(
+    state.whereIr,
+    state.innerParamNames,
+    orderBy,
+  );
   if (outerCorrelated.length > 0) result.outerCorrelatedParams = outerCorrelated;
   if (orderBy.length > 0) result.orderBy = orderBy;
   if (state.limitNum !== undefined) result.limitNum = state.limitNum;
@@ -270,18 +260,34 @@ export function tryExtractInlineSubqueryAggregate(
 
   const aggregate: IrSubqueryAggregate = { func: aggFunc };
   if (valueCol !== undefined) aggregate.valueCol = valueCol;
-  return buildIrSubquery({
-    tableName,
-    aggregate,
-    whereIr: chain.whereIr,
-    innerParamNames: chain.innerParamNames,
-    orderBy: chain.orderBy,
-    limitNum: chain.limitNum,
-    offsetNum: chain.offsetNum,
-    distinct: chain.distinctCol !== undefined ? { col: chain.distinctCol } : undefined,
-  });
+  return assembleIrSubquery(tableName, chain, { aggregate });
+}
+
+/** Build an IrSubquery from a chain result and a form-specific head
+ *  (`{ selectCol }` or `{ aggregate }`). Used by both the IN form (in
+ *  where-transformer.ts) and the aggregate form here, so the two call sites
+ *  share the chain → IrSubquery assembly + validation. */
+export function assembleIrSubquery(
+  tableName: string,
+  chain: ChainResult,
+  head: { selectCol: string } | { aggregate: IrSubqueryAggregate },
+): IrSubquery {
+  const sub: IrSubquery = { kind: "subquery", tableName, whereIr: chain.whereIr, ...head };
+  if (chain.innerParamNames.length > 0) sub.innerParamNames = chain.innerParamNames;
+  if (chain.outerCorrelatedParams && chain.outerCorrelatedParams.length > 0) {
+    sub.outerCorrelatedParams = chain.outerCorrelatedParams;
+  }
+  if (chain.orderBy && chain.orderBy.length > 0) sub.orderBy = chain.orderBy;
+  if (chain.limitNum !== undefined) sub.limitNum = chain.limitNum;
+  if (chain.offsetNum !== undefined) sub.offsetNum = chain.offsetNum;
+  if (chain.distinctCol !== undefined) {
+    sub.distinct = "selectCol" in head ? true : { col: chain.distinctCol };
+  }
+  validateIrSubquery(sub);
+  return sub;
 }
 
 /** Exported for the IN-form extractor in where-transformer.ts so the same
  *  chain-walking logic covers both subquery shapes. */
 export { walkSubqueryChain };
+export type { ChainResult };

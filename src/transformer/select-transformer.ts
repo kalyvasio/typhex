@@ -15,7 +15,7 @@ import {
   getParamBindings,
   type ParamBindings,
 } from "./shared.js";
-import { tryExtractInlineSubqueryAggregate } from "./subquery-extract.js";
+import { tryExtractInlineSubqueryAggregate } from "./subquery-transformer.js";
 import { toOuterDestructured } from "./where-transformer.js";
 
 // ---------------------------------------------------------------------------

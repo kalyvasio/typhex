@@ -4,7 +4,6 @@
 
 import * as ts from "typescript";
 import type { IrNode, IrExists, IrCall, IrBinary, IrIn, IrConst, IrSubquery } from "../ir/types.js";
-import { buildIrSubquery } from "../ir/subquery-builder.js";
 import {
   getArrowExpressionBody,
   isTyphexType,
@@ -16,7 +15,11 @@ import {
   getParamBindings,
   type ParamBindings,
 } from "./shared.js";
-import { tryExtractInlineSubqueryAggregate, walkSubqueryChain } from "./subquery-extract.js";
+import {
+  assembleIrSubquery,
+  tryExtractInlineSubqueryAggregate,
+  walkSubqueryChain,
+} from "./subquery-transformer.js";
 
 const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
 
@@ -120,16 +123,7 @@ function tryExtractInlineSubquery(
   // For the IN form `.distinct(p => p.col)` only makes sense if the column
   // matches `selectCol`; otherwise the chain is malformed. Either way, the
   // SELECT list is single-column, so a bare `DISTINCT` flag is sufficient.
-  return buildIrSubquery({
-    tableName,
-    selectCol,
-    whereIr: chain.whereIr,
-    innerParamNames: chain.innerParamNames,
-    orderBy: chain.orderBy,
-    limitNum: chain.limitNum,
-    offsetNum: chain.offsetNum,
-    distinct: chain.distinctCol !== undefined ? true : undefined,
-  });
+  return assembleIrSubquery(tableName, chain, { selectCol });
 }
 
 // ---------------------------------------------------------------------------

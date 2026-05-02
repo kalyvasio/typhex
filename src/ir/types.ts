@@ -107,6 +107,27 @@ export interface IrSubquery {
   distinct?: { col: string } | true;
 }
 
+/** Inspect `whereIr` (and optionally `orderBy` exprs); return param names
+ *  referenced that are NOT in `innerParamNames` — i.e. the correlated outer
+ *  references. Used to mark which IrParam/IrMember names should resolve in
+ *  the outer query's scope rather than the subquery's own. */
+export function computeOuterCorrelatedParams(
+  whereIr: IrNode | null,
+  innerParamNames: string[],
+  orderBy?: IrOrderBy[],
+): string[] {
+  const seen = new Set<string>();
+  if (whereIr) collectParamNamesFromWhere(whereIr, seen);
+  if (orderBy) {
+    for (const ob of orderBy) collectParamNamesFromWhere(ob.expr, seen);
+  }
+  if (seen.size === 0) return [];
+  const inner = new Set(innerParamNames);
+  const out: string[] = [];
+  for (const n of seen) if (!inner.has(n)) out.push(n);
+  return out;
+}
+
 /** Validate an IrSubquery's invariants. Throws when malformed.
  *  - Exactly one of `selectCol` / `aggregate` must be set.
  *  - Aggregates other than COUNT require `valueCol` (or a DISTINCT col in `distinct`). */
@@ -222,6 +243,41 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "aggregate" ||
     k === "subquery"
   );
+}
+
+/** Inline `IrParam` nodes in a tree to `IrConst` using `values` (key → value).
+ *  Pure rewrite: returns a fresh tree, original is untouched. The right-hand
+ *  side of an `IrSubquery` is left as-is — its params live in their own scope. */
+export function inlineParams(ir: IrNode, values: Record<string, unknown>): IrNode {
+  switch (ir.kind) {
+    case "param":
+      return { kind: "const", value: values[ir.key] };
+    case "binary":
+      return {
+        ...ir,
+        left: inlineParams(ir.left, values),
+        right: inlineParams(ir.right, values),
+      };
+    case "unary":
+      return { ...ir, operand: inlineParams(ir.operand, values) };
+    case "in":
+      return {
+        ...ir,
+        left: inlineParams(ir.left, values),
+        right:
+          ir.right.kind === "subquery" || ir.right.kind === "param" || ir.right.kind === "const"
+            ? ir.right
+            : inlineParams(ir.right, values),
+      };
+    case "call":
+      return {
+        ...ir,
+        receiver: inlineParams(ir.receiver, values),
+        args: ir.args.map((a) => inlineParams(a, values)),
+      };
+    default:
+      return ir;
+  }
 }
 
 /** Recursively gather every row-parameter name referenced inside an IrWhere tree

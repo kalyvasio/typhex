@@ -6,7 +6,7 @@
 import * as ts from "typescript";
 import type { IrNode } from "../ir/types.js";
 import { isTyphexType, matchTyphexMethodCall, memberPath, irOrderByToTsLiteral } from "./shared.js";
-import { tryExtractInlineSubqueryAggregate } from "./subquery-extract.js";
+import { tryExtractInlineSubqueryAggregate } from "./subquery-transformer.js";
 
 type Direction = "asc" | "desc";
 

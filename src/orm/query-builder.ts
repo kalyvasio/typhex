@@ -14,8 +14,12 @@ import {
   type JoinHint,
   type JoinType,
 } from "../ir/types.js";
-import { collectParamNamesFromWhere } from "../ir/types.js";
-import { buildIrSubquery } from "../ir/subquery-builder.js";
+import {
+  collectParamNamesFromWhere,
+  computeOuterCorrelatedParams,
+  inlineParams,
+  validateIrSubquery,
+} from "../ir/types.js";
 import type { QueryExecutor } from "./db.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
@@ -69,6 +73,28 @@ export interface QueryState<T = unknown> {
   havingIr?: IrNode | null;
   havingParams?: Record<string, unknown>;
   entity?: AnyEntityClass;
+}
+
+/** Extract a single top-level column name from `selectIr` (used by toSubqueryIr).
+ *  Throws when the selection isn't a single bare column — that shape can't be
+ *  used as the RHS of an IN subquery. */
+function extractSingleColumn(selectIr: IrSelect | null | undefined): string {
+  if (!selectIr || selectIr.paths.length !== 1 || selectIr.paths[0].length !== 1) {
+    throw new Error(
+      "QueryBuilder used as a subquery must select exactly one top-level column via .select(p => p.colName) — nested paths and multi-column selects are not supported as subquery results.",
+    );
+  }
+  return selectIr.paths[0][0];
+}
+
+/** Collect param names referenced inside the QB's where lambda + orderBy
+ *  exprs. QB-built subqueries are non-correlated, so every member param
+ *  name belongs to the subquery's own (inner) scope. */
+function collectInnerParamNames(state: QueryState): string[] {
+  const seen = new Set<string>();
+  if (state.whereIr) collectParamNamesFromWhere(state.whereIr, seen);
+  for (const ob of state.orderBy) collectParamNamesFromWhere(ob.expr, seen);
+  return [...seen];
 }
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
@@ -166,34 +192,25 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Return an IrSubquery for use as the right-hand side of a WHERE IN clause. */
   toSubqueryIr(): IrSubquery {
-    const { selectIr } = this.state;
-    if (!selectIr || selectIr.paths.length !== 1 || selectIr.paths[0].length !== 1) {
-      throw new Error(
-        "QueryBuilder used as a subquery must select exactly one top-level column via .select(p => p.colName) — nested paths and multi-column selects are not supported as subquery results.",
-      );
-    }
-    // Param names referenced inside the QB's where lambda are all "inner" —
-    // QB-built subqueries are non-correlated (no shared scope with an outer
-    // query). Treat every member param name as an inner one.
-    const whereIr = this.state.whereIr ?? null;
-    const seen = new Set<string>();
-    if (whereIr) collectParamNamesFromWhere(whereIr, seen);
-    // orderBy expressions reference the subquery's own row too — fold their
-    // param names in so the subquery alias resolves correctly.
-    for (const ob of this.state.orderBy) {
-      if (ob.expr.kind === "member") seen.add(ob.expr.param);
-    }
-    const innerParamNames = [...seen];
-    return buildIrSubquery({
+    const innerParamNames = collectInnerParamNames(this.state);
+    const whereIr = this.state.whereIr
+      ? inlineParams(this.state.whereIr, this.state.whereParams)
+      : null;
+    const orderBy = this.state.orderBy.length > 0 ? this.state.orderBy : undefined;
+    const sub: IrSubquery = {
+      kind: "subquery",
       tableName: this.state.tableName,
-      selectCol: selectIr.paths[0][0],
+      selectCol: extractSingleColumn(this.state.selectIr),
       whereIr,
-      whereParams: this.state.whereParams,
-      innerParamNames,
-      orderBy: this.state.orderBy.length > 0 ? this.state.orderBy : undefined,
-      limitNum: this.state.limitNum,
-      offsetNum: this.state.offsetNum,
-    });
+    };
+    if (innerParamNames.length > 0) sub.innerParamNames = innerParamNames;
+    const outerCorrelated = computeOuterCorrelatedParams(whereIr, innerParamNames, orderBy);
+    if (outerCorrelated.length > 0) sub.outerCorrelatedParams = outerCorrelated;
+    if (orderBy) sub.orderBy = orderBy;
+    if (this.state.limitNum != null) sub.limitNum = this.state.limitNum;
+    if (this.state.offsetNum != null) sub.offsetNum = this.state.offsetNum;
+    validateIrSubquery(sub);
+    return sub;
   }
 
   /** Set the maximum number of rows to return. */
