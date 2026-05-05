@@ -1,6 +1,6 @@
 # Typhex
 
-A TypeScript/JavaScript ORM that brings **arrow-function query predicates** to Node.js. Write queries using arrow functions like `users.where(u => u.age > 18)` — Typhex compiles them to safe, parameterized SQL.
+A TypeScript/JavaScript ORM that brings **arrow-function query predicates** to Node.js. Write queries using arrow functions like `User.query().where(u => u.age > 18)` — Typhex compiles them to safe, parameterized SQL.
 
 ## Why Typhex?
 
@@ -8,11 +8,11 @@ Typhex lets you write database queries using familiar JavaScript/TypeScript synt
 
 ```ts
 // Instead of SQL strings or query builders...
-const adults = users.where((u) => u.age > 18).toArray();
+const adults = await User.query().where((u) => u.age > 18).toArray();
 
 // Use closure variables naturally (with transformer)
 const country = "US";
-const fromUS = users.where((u) => u.country === country).toArray();
+const fromUS = await User.query().where((u) => u.country === country).toArray();
 ```
 
 **Key benefits:**
@@ -30,12 +30,12 @@ const fromUS = users.where((u) => u.country === country).toArray();
 Write queries using arrow functions that feel like JavaScript:
 
 ```ts
-users.where((u) => u.age > 18 && u.active).toArray();
-users
+await User.query().where((u) => u.age > 18 && u.active).toArray();
+await User.query()
   .where((u) => u.name.startsWith("A"))
   .orderBy("age", "desc")
   .first();
-users.where((u) => u.id in [1, 2, 3]).count();
+await User.query().where((u) => u.id in [1, 2, 3]).count();
 ```
 
 Subqueries are supported on the right-hand side of `in` / `!(... in ...)`. Build the inner query with `.select(p => p.colName)` (a single column) and reference it from the outer query:
@@ -140,49 +140,49 @@ npm install typhex better-sqlite3
 ### Basic Usage (Runtime Parsing)
 
 ```ts
-import { Db, createSqliteDriver } from "typhex";
+import { Db, Entity, createSqliteDriver } from "typhex";
 
-const driver = createSqliteDriver({ path: "./app.db" });
-const db = new Db(driver);
-
-// Define your schema
-const users = db.defineTable("users", {
+// Define your schema as an Entity
+const User = Entity("users", {
   id: "integer primary key autoincrement",
   name: "text not null",
   age: "integer",
   country: "text",
 });
 
+const db = new Db(createSqliteDriver({ path: "./app.db" }));
+
 // Create tables
-db.migrate();
+await db.migrate();
 
 // Insert data
-users.insert({ name: "Alice", age: 30, country: "US" });
-users.insert({ name: "Bob", age: 25, country: "UK" });
+await User.query().insert({ name: "Alice", age: 30, country: "US" });
+await User.query().insert({ name: "Bob", age: 25, country: "UK" });
 
 // Query with arrow functions
-const adults = users.where((u) => u.age > 18).toArray();
+const adults = await User.query().where((u) => u.age > 18).toArray();
 console.log(adults); // [{ id: 1, name: "Alice", ... }, ...]
 
-// Use closure variables (pass values explicitly)
+// Use closure variables (pass values explicitly in runtime mode)
 const country = "US";
-const fromUS = users.where((u) => u.country === country, { country }).toArray();
+const fromUS = await User.query()
+  .where((u) => u.country === country, { country })
+  .toArray();
 
 // Fluent queries
-const first = users
+const first = await User.query()
   .where((u) => u.age >= 25)
   .orderBy("name", "asc")
-  .limit(1)
   .first();
 
 // Count
-const n = users.where((u) => u.country === "US").count();
+const n = await User.query().where((u) => u.country === "US").count();
 
-// Update
-users.update((u) => u.name === "Bob", { age: 26 });
+// Update — chain .where(...).update(set)
+await User.query().where((u) => u.name === "Bob").update({ age: 26 });
 
-// Delete
-users.delete((u) => u.country === "UK");
+// Delete — chain .where(...).delete()
+await User.query().where((u) => u.country === "UK").delete();
 ```
 
 ### With Transformer (Auto-Capture Closure Variables)
@@ -218,7 +218,9 @@ For TypeScript projects, use the compile-time transformer to automatically captu
    const minAge = 25;
 
    // No second argument needed! Transformer auto-captures `country` and `minAge`
-   const results = users.where((u) => u.country === country && u.age >= minAge).toArray();
+   const results = await User.query()
+     .where((u) => u.country === country && u.age >= minAge)
+     .toArray();
    ```
 
 The transformer rewrites `.where((u) => u.country === country)` to `.where(ir, { country })` at compile time, so you get the convenience without runtime overhead.
@@ -236,16 +238,20 @@ The runtime parser supports a limited but practical subset of JavaScript:
 - Member access: `u.name`, `u.profile.age` (nested properties)
 - Literals: numbers, strings, `true`, `false`, `null`
 - Array literals: `[1, 2, 3]`
-- `in` operator: `u.id in [1, 2, 3]`
+- `in` operator: `u.id in [1, 2, 3]` and the WHERE-IN subquery form (passing an inner builder via the params object)
 - String methods: `u.name.startsWith("A")`, `.endsWith()`, `.includes()`
-- Closure variables: Pass as second argument: `.where((u) => u.country === country, { country })`
+- Aggregates (in `.select()` / `.having()`): `count()`, `sum()`, `avg()`, `min()`, `max()`, plus `distinct(...)` and `groupConcat()` / `STRING_AGG()` / `ARRAY_AGG()` / `JSON_AGG()`
+- Relation existential predicates: `d.employees.some(e => e.name === "Alice")` and `.every(...)`
+- Relation query chains in `.select()`: `.query().where(...).orderBy(...).limit(...).offset(...).select(...)`
+- Closure variables: pass as second argument — `.where((u) => u.country === country, { country })`
 
 **❌ Not supported (runtime):**
 
-- Function calls (except `.startsWith`, `.endsWith`, `.includes`)
-- Loops, ternaries, assignments
-- `await`, `new`, `instanceof`
-- Complex expressions
+- Arithmetic and bitwise operators (`+`, `-`, `*`, `/`, `%`, `&`, `|`, …)
+- Ternary / conditional expressions (`a ? b : c`)
+- Optional chaining (`?.`) and nullish coalescing (`??`)
+- Function calls other than the string methods, aggregates, and relation chains listed above
+- Loops, assignments, `await`, `new`, `instanceof`
 
 **💡 Tip:** The transformer supports a broader subset since it operates on TypeScript's AST. Use the transformer for more complex predicates.
 
@@ -255,37 +261,47 @@ The runtime parser supports a limited but practical subset of JavaScript:
 
 ```ts
 // Simple filter
-const activeUsers = users.where((u) => u.active).toArray();
+const activeUsers = await User.query().where((u) => u.active).toArray();
 
 // Multiple conditions
-const filtered = users
+const filtered = await User.query()
   .where((u) => u.age > 18 && u.country === "US")
   .orderBy("age", "desc")
   .limit(10)
   .toArray();
 
 // String matching
-const matching = users.where((u) => u.name.startsWith("A")).toArray();
+const matching = await User.query().where((u) => u.name.startsWith("A")).toArray();
 
 // Array membership
 const ids = [1, 2, 3];
-const selected = users.where((u) => u.id in ids, { ids }).toArray();
+const selected = await User.query().where((u) => u.id in ids, { ids }).toArray();
 ```
 
 ### CRUD Operations
 
 ```ts
 // Insert
-const newId = users.insert({ name: "Charlie", age: 28, country: "CA" });
+const inserted = await User.query().insert({ name: "Charlie", age: 28, country: "CA" });
 
-// Update
-const updated = users.update((u) => u.name === "Alice", { age: 31 });
+// Update — chain .where(...).update(set)
+const updated = await User.query()
+  .where((u) => u.name === "Alice")
+  .update({ age: 31 });
 
-// Delete
-const deleted = users.delete((u) => u.country === "UK");
+// Delete — chain .where(...).delete()
+const deleted = await User.query().where((u) => u.country === "UK").delete();
 
 // Find by ID
-const user = users.findById(1);
+const user = await User.query().findById(1);
+```
+
+You can also create an instance directly and persist it:
+
+```ts
+const dave = new User({ name: "Dave", age: 35, country: "US" });
+await dave.query().save();        // INSERT, populates dave.id
+await dave.query().delete();      // DELETE WHERE id = dave.id
 ```
 
 ### Relations (Manual Joins)
@@ -293,7 +309,7 @@ const user = users.findById(1);
 Typhex doesn't have built-in relations yet, but you can query related data:
 
 ```ts
-const posts = db.defineTable("posts", {
+const Post = Entity("posts", {
   id: "integer primary key",
   userId: "integer",
   title: "text",
@@ -301,7 +317,9 @@ const posts = db.defineTable("posts", {
 
 // Get posts for a user
 const userId = 1;
-const userPosts = posts.where((p) => p.userId === userId, { userId }).toArray();
+const userPosts = await Post.query()
+  .where((p) => p.userId === userId, { userId })
+  .toArray();
 ```
 
 Future versions will add `.include()` and relation helpers.
@@ -422,52 +440,62 @@ This architecture enables:
 
 ## API Reference
 
-### Database & Tables
+### Database & Entities
 
 ```ts
 const db = new Db(driver);
-const table = db.defineTable<T>("tableName", {
+
+const User = Entity("users", {
   column: "type constraints",
   // or
   column: { type: "type", primaryKey: true, nullable: false },
 });
-db.migrate(); // Create tables
+
+await db.migrate(); // Create tables
 ```
 
 ### Query Builder
 
+All queries start from `Entity.query()` and return promises.
+
 ```ts
-table
+await User.query()
   .where((entity) => predicate)
-  .select(["col1", "col2"]) // Optional: select specific columns
+  .select(["col1", "col2"]) // optional: select specific columns
   .orderBy("column", "asc" | "desc")
   .limit(n)
   .offset(n)
-  .toArray() // Execute and return array
-  .first() // Execute and return first result
-  .count() // Execute and return count
-  .update(set) // Update matching rows
-  .delete(); // Delete matching rows
+  .toArray(); // → entity[]
+
+await User.query().where(...).first();   // → entity | undefined
+await User.query().where(...).count();   // → number
+await User.query().where(...).update(set);   // → number of rows updated
+await User.query().where(...).delete();      // → number of rows deleted
 ```
 
 ### CRUD
 
 ```ts
-table.insert({ col1: value1, col2: value2 }); // Returns lastInsertRowid
-table.update((e) => predicate, { col: value }); // Returns number of rows updated
-table.delete((e) => predicate); // Returns number of rows deleted
-table.findById(id); // Returns entity or undefined
+await User.query().insert({ col1: value1, col2: value2 }); // → inserted entity
+await User.query().findById(id);                            // → entity | null
+```
+
+Instance form (works on entities created with `new User({...})`):
+
+```ts
+const u = new User({ name: "Dave", age: 35 });
+await u.query().save();    // INSERT, populates u.id
+await u.query().delete();  // DELETE WHERE id = u.id
 ```
 
 ## Contributing
 
-Contributions welcome! Areas for improvement:
+Contributions welcome! Open areas:
 
-- Additional database drivers (PostgreSQL, MySQL, etc.)
-- Built-in relations and joins
-- More predicate operators
-- Query optimization
-- Migration system enhancements
+- Additional database drivers (MySQL — SQLite and PostgreSQL ship today)
+- Broader predicate syntax (arithmetic, ternaries, optional chaining, nullish coalescing)
+- More scalar subquery shapes and runtime-parser support for the transformer-only forms
+- Query optimization (planner improvements, plan caching)
 
 ## License
 
