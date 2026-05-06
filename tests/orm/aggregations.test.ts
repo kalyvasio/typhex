@@ -33,7 +33,14 @@ function compileItems(
   dialect: DialectImpl,
   tableAlias = "t0",
 ): { sql: string; params: unknown[] } {
-  return compileSelectListExpr(items, false, tableAlias, columnNames, dialect, aggCompiler(dialect));
+  return compileSelectListExpr(
+    items,
+    false,
+    tableAlias,
+    columnNames,
+    dialect,
+    aggCompiler(dialect),
+  );
 }
 
 const orderSchema = {
@@ -94,12 +101,12 @@ describe("Aggregations", () => {
 
     it("SUM(price) in select compiles correctly", () => {
       const items: SelectItem[] = [
-        { expr: { kind: "column", alias: "t0", column: "category" }, alias: "category" },
+        { expr: { kind: "column", alias: "t0", column: ["category"] }, alias: "category" },
         {
           expr: {
             kind: "aggregate",
             func: "SUM",
-            arg: { kind: "column", alias: "t0", column: "price" },
+            arg: { kind: "column", alias: "t0", column: ["price"] },
             alias: "totalPrice",
           } as ExprAggregate,
         },
@@ -119,7 +126,7 @@ describe("Aggregations", () => {
             expr: {
               kind: "aggregate",
               func,
-              arg: { kind: "column", alias: "t0", column: "price" },
+              arg: { kind: "column", alias: "t0", column: ["price"] },
               alias: "result",
             } as ExprAggregate,
           },
@@ -136,7 +143,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "COUNT",
-            arg: { kind: "column", alias: "t0", column: "category" },
+            arg: { kind: "column", alias: "t0", column: ["category"] },
             alias: "uniqueCategories",
             distinct: true,
           } as ExprAggregate,
@@ -300,7 +307,7 @@ describe("Aggregations", () => {
 
   describe("compileSelect GROUP BY and HAVING integration", () => {
     it("SQLite: GROUP BY and HAVING appear in correct order in SQL", () => {
-      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: "category" }];
+      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["category"] }];
       const result = sqliteDialect.compileSelect({
         table: "orders",
         tableAlias: "t0",
@@ -326,7 +333,7 @@ describe("Aggregations", () => {
     });
 
     it("SQLite: LIMIT and OFFSET appear after HAVING", () => {
-      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: "category" }];
+      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["category"] }];
       const result = sqliteDialect.compileSelect({
         table: "orders",
         tableAlias: "t0",
@@ -385,7 +392,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "COUNT",
-            arg: { kind: "column", alias: "t0", column: "category" },
+            arg: { kind: "column", alias: "t0", column: ["category"] },
             alias: "unique",
             distinct: true,
           } as ExprAggregate,
@@ -403,7 +410,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "SUM",
-            arg: { kind: "column", alias: "t0", column: "price" },
+            arg: { kind: "column", alias: "t0", column: ["price"] },
             alias: "total",
             distinct: true,
           } as ExprAggregate,
@@ -420,7 +427,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "AVG",
-            arg: { kind: "column", alias: "t0", column: "price" },
+            arg: { kind: "column", alias: "t0", column: ["price"] },
             alias: "avg",
             distinct: true,
           } as ExprAggregate,
@@ -448,7 +455,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "GROUP_CONCAT",
-            arg: { kind: "column", alias: "t0", column: "name" },
+            arg: { kind: "column", alias: "t0", column: ["name"] },
             alias: "names",
           } as ExprAggregate,
         },
@@ -465,7 +472,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "GROUP_CONCAT",
-            arg: { kind: "column", alias: "t0", column: "name" },
+            arg: { kind: "column", alias: "t0", column: ["name"] },
             alias: "names",
             separator: ", ",
           } as ExprAggregate,
@@ -482,7 +489,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "GROUP_CONCAT",
-            arg: { kind: "column", alias: "t0", column: "name" },
+            arg: { kind: "column", alias: "t0", column: ["name"] },
             alias: "names",
             separator: ", ",
           } as ExprAggregate,
@@ -511,7 +518,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "STRING_AGG",
-            arg: { kind: "column", alias: "t0", column: "name" },
+            arg: { kind: "column", alias: "t0", column: ["name"] },
             alias: "names",
             separator: ", ",
           } as ExprAggregate,
@@ -529,7 +536,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "ARRAY_AGG",
-            arg: { kind: "column", alias: "t0", column: "id" },
+            arg: { kind: "column", alias: "t0", column: ["id"] },
             alias: "ids",
           } as ExprAggregate,
         },
@@ -546,7 +553,7 @@ describe("Aggregations", () => {
           expr: {
             kind: "aggregate",
             func: "JSON_AGG",
-            arg: { kind: "column", alias: "t0", column: "category" },
+            arg: { kind: "column", alias: "t0", column: ["category"] },
             alias: "cats",
           } as ExprAggregate,
         },
@@ -611,7 +618,7 @@ describe("compileAggregate uses ExprColumn alias directly", () => {
     const agg: ExprAggregate = {
       kind: "aggregate",
       func: "SUM",
-      arg: { kind: "column", alias: "t1", column: "price" } as ExprColumn,
+      arg: { kind: "column", alias: "t1", column: ["price"] } as ExprColumn,
       alias: "total",
     };
     const sql = compileAggregate(agg);
@@ -623,7 +630,7 @@ describe("compileAggregate uses ExprColumn alias directly", () => {
     const agg: ExprAggregate = {
       kind: "aggregate",
       func: "SUM",
-      arg: { kind: "column", alias: "t1", column: "amount" } as ExprColumn,
+      arg: { kind: "column", alias: "t1", column: ["amount"] } as ExprColumn,
       alias: "total",
     };
     const sql = compileAggregate(agg);
@@ -637,7 +644,7 @@ describe("compileAggregate uses ExprColumn alias directly", () => {
         expr: {
           kind: "aggregate",
           func: "GROUP_CONCAT",
-          arg: { kind: "column", alias: "t2", column: "name" },
+          arg: { kind: "column", alias: "t2", column: ["name"] },
           alias: "names",
         } as ExprAggregate,
       },
@@ -653,7 +660,7 @@ describe("compileAggregate uses ExprColumn alias directly", () => {
         expr: {
           kind: "aggregate",
           func: "STRING_AGG",
-          arg: { kind: "column", alias: "t2", column: "name" },
+          arg: { kind: "column", alias: "t2", column: ["name"] },
           alias: "names",
           separator: ", ",
         } as ExprAggregate,
@@ -672,7 +679,7 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag", () => {
         expr: {
           kind: "aggregate",
           func: "JSON_AGG",
-          arg: { kind: "column", alias: "t0", column: "category" },
+          arg: { kind: "column", alias: "t0", column: ["category"] },
           alias: "cats",
           distinct: true,
         } as ExprAggregate,
@@ -688,7 +695,7 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag", () => {
         expr: {
           kind: "aggregate",
           func: "JSON_AGG",
-          arg: { kind: "column", alias: "t0", column: "category" },
+          arg: { kind: "column", alias: "t0", column: ["category"] },
           alias: "cats",
         } as ExprAggregate,
       },
@@ -773,7 +780,7 @@ describe("Bug fix: GROUP BY paths via GroupByItem", () => {
       orderBySql: "",
       limitNum: null,
       offsetNum: null,
-      groupBy: [{ kind: "column", alias: "t0", column: "category" }],
+      groupBy: [{ kind: "column", alias: "t0", column: ["category"] }],
     });
     expect(result.sql).toContain('"t0"."category"');
     expect(result.sql).not.toContain('"t0"."category"."category"');
@@ -789,7 +796,7 @@ describe("Bug fix: GROUP BY paths via GroupByItem", () => {
       orderBySql: "",
       limitNum: null,
       offsetNum: null,
-      groupBy: [{ kind: "column", alias: "t1", column: "col" }],
+      groupBy: [{ kind: "column", alias: "t1", column: ["col"] }],
     });
     expect(result.sql).toContain('"t1"."col"');
   });
@@ -872,7 +879,7 @@ describe("GROUP BY: positional references (GROUP BY 1, 2)", () => {
       limitNum: null,
       offsetNum: null,
       groupBy: [
-        { kind: "column", alias: "t0", column: "category" },
+        { kind: "column", alias: "t0", column: ["category"] },
         { kind: "index", index: 2 },
       ],
     });
@@ -922,18 +929,18 @@ describe("GROUP BY: positional references (GROUP BY 1, 2)", () => {
 
 describe("compileGroupBy with GroupByItem[]", () => {
   it("renders ExprColumn-based GROUP BY", () => {
-    const items: GroupByItem[] = [{ kind: "column", alias: "t1", column: "name" }];
+    const items: GroupByItem[] = [{ kind: "column", alias: "t1", column: ["name"] }];
     expect(compileGroupBy(items)).toBe('"t1"."name"');
   });
 
   it("renders main-table column when no relation alias", () => {
-    const items: GroupByItem[] = [{ kind: "column", alias: "t0", column: "name" }];
+    const items: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["name"] }];
     expect(compileGroupBy(items)).toBe('"t0"."name"');
   });
 
   it("mixes column ref and index", () => {
     const items: GroupByItem[] = [
-      { kind: "column", alias: "t1", column: "name" },
+      { kind: "column", alias: "t1", column: ["name"] },
       { kind: "index", index: 2 },
     ];
     expect(compileGroupBy(items)).toBe('"t1"."name", 2');

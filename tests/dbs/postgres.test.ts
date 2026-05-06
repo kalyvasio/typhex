@@ -50,7 +50,7 @@ describe("dbs/postgres", () => {
       const expr: Expr = {
         kind: "binary",
         op: "===",
-        left: { kind: "column", alias: "t0", column: "age" },
+        left: { kind: "column", alias: "t0", column: ["age"] },
         right: { kind: "const", value: 18 },
       };
       const result = compileWhereExpr(expr, postgresDialect);
@@ -239,7 +239,7 @@ describe("dbs/postgres", () => {
 
     it("compileSelect: HAVING params are numbered after WHERE params", () => {
       // WHERE has 2 params ($1, $2); HAVING arrives pre-numbered from $3
-      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: "category" }];
+      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["category"] }];
       const { sql, params } = postgresDialect.compileSelect({
         table: "orders",
         tableAlias: "t0",
@@ -268,7 +268,7 @@ describe("dbs/postgres", () => {
     });
 
     it("compileSelect: HAVING + LIMIT/OFFSET placeholder sequence is contiguous", () => {
-      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: "category" }];
+      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["category"] }];
       const { sql, params } = postgresDialect.compileSelect({
         table: "orders",
         tableAlias: "t0",
@@ -320,9 +320,7 @@ describe("dbs/postgres", () => {
           if (sql.includes("information_schema.columns")) {
             expect(params).toEqual(["pg_test_users"]);
             return {
-              rows: [
-                { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 },
-              ],
+              rows: [{ name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 }],
               changes: 0,
             };
           }
@@ -445,7 +443,7 @@ describe("dbs/postgres", () => {
       });
       expect(dropTable).toContain('CREATE TABLE IF NOT EXISTS "pg_test_users"');
       expect(dropTable).toContain('"id" integer PRIMARY KEY');
-      expect(dropTable).toContain('"name" text NOT NULL DEFAULT \'anon\'');
+      expect(dropTable).toContain("\"name\" text NOT NULL DEFAULT 'anon'");
 
       const addColumn = postgresMigrations.generateDownSql({
         kind: "add_column",

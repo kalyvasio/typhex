@@ -15,21 +15,9 @@ import {
   compileWhereExpr,
 } from "../../src/dbs/shared-dialect.js";
 import type { DialectImpl } from "../../src/dbs/types.js";
-import type {
-  Expr,
-  ExprAggregate,
-  OrderItem,
-  SelectItem,
-} from "../../src/orm/expr.js";
-import type { QueryPlan } from "../../src/orm/query-plan.js";
-import {
-  bin,
-  col,
-  countPostsSelect,
-  eq,
-  konst,
-  selectPlan,
-} from "../dbs/subquery-ref-helpers.js";
+import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
+import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
+import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";

@@ -17,23 +17,11 @@ import {
   compileWhereExpr,
 } from "../../src/dbs/shared-dialect.js";
 import type { DialectImpl } from "../../src/dbs/types.js";
-import type {
-  Expr,
-  ExprAggregate,
-  OrderItem,
-  SelectItem,
-} from "../../src/orm/expr.js";
+import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
 import type { IrNode } from "../../src/ir/types.js";
 import { freshDb } from "../helpers.js";
-import {
-  bin,
-  col,
-  countPostsSelect,
-  eq,
-  konst,
-  selectPlan,
-} from "../dbs/subquery-ref-helpers.js";
-import type { QueryPlan } from "../../src/orm/query-plan.js";
+import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";
+import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
 
 function aggCompiler(dialect: DialectImpl) {
   return dialect.compileAggregate
@@ -129,7 +117,15 @@ describe("subquery scenarios (SQLite)", () => {
       { expr: { kind: "subquery", plan: sub }, alias: "totalPosts" },
     ];
     const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
-    const rows = (await runExprQuery(db, "authors", AUTHOR_COLS, items, false, null, orderBy)) as Array<{
+    const rows = (await runExprQuery(
+      db,
+      "authors",
+      AUTHOR_COLS,
+      items,
+      false,
+      null,
+      orderBy,
+    )) as Array<{
       name: string;
       totalPosts: number;
     }>;
@@ -143,7 +139,15 @@ describe("subquery scenarios (SQLite)", () => {
       { expr: { kind: "subquery", plan: correlatedPostCount }, alias: "postCount" },
     ];
     const orderBy: OrderItem[] = [{ expr: col("t0", "id"), direction: "asc" }];
-    const rows = (await runExprQuery(db, "authors", AUTHOR_COLS, items, false, null, orderBy)) as Array<{
+    const rows = (await runExprQuery(
+      db,
+      "authors",
+      AUTHOR_COLS,
+      items,
+      false,
+      null,
+      orderBy,
+    )) as Array<{
       name: string;
       postCount: number;
     }>;
@@ -161,13 +165,11 @@ describe("subquery scenarios (SQLite)", () => {
       left: { kind: "member", param: "p", path: ["authorId"] },
       right: { kind: "member", param: "a", path: ["id"] },
     };
-    const postCount = (Post.query() as any)
-      .where(innerWhere, {})
-      .select({
-        param: "u",
-        paths: [],
-        aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
-      });
+    const postCount = (Post.query() as any).where(innerWhere, {}).select({
+      param: "u",
+      paths: [],
+      aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+    });
 
     const rows = (await (Author.query() as any)
       .select(
@@ -217,13 +219,11 @@ describe("subquery scenarios (SQLite)", () => {
       left: { kind: "member", param: "p", path: ["authorId"] },
       right: { kind: "member", param: "a", path: ["id"] },
     };
-    const postCount = (Post.query() as any)
-      .where(innerWhere, {})
-      .select({
-        param: "u",
-        paths: [],
-        aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
-      });
+    const postCount = (Post.query() as any).where(innerWhere, {}).select({
+      param: "u",
+      paths: [],
+      aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+    });
 
     const whereIr: IrNode = {
       kind: "binary",
@@ -246,7 +246,15 @@ describe("subquery scenarios (SQLite)", () => {
       { expr: { kind: "subquery", plan: correlatedPostCount }, direction: "desc" },
       { expr: col("t0", "id"), direction: "asc" },
     ];
-    const rows = (await runExprQuery(db, "authors", AUTHOR_COLS, items, false, null, orderBy)) as Array<{
+    const rows = (await runExprQuery(
+      db,
+      "authors",
+      AUTHOR_COLS,
+      items,
+      false,
+      null,
+      orderBy,
+    )) as Array<{
       name: string;
     }>;
     expect(rows.map((r) => r.name)).toEqual(["Alice", "Bob", "Carol"]);

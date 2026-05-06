@@ -4,11 +4,11 @@
  */
 
 import type { Expr, ExprColumn, OrderItem, SelectItem } from "../../src/orm/expr.js";
-import type { QueryPlan } from "../../src/orm/query-plan.js";
+import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
 
 /** Build a column Expr (alias-resolved). */
 export function col(alias: string, column: string): ExprColumn {
-  return { kind: "column", alias, column };
+  return { kind: "column", alias, column: [column] };
 }
 
 /** Build a const Expr. */
@@ -21,7 +21,11 @@ export function eq(left: Expr, right: Expr): Expr {
   return { kind: "binary", op: "===", left, right };
 }
 
-export function bin(op: "&&" | "||" | "===" | "!==" | "==" | "!=" | ">" | ">=" | "<" | "<=", left: Expr, right: Expr): Expr {
+export function bin(
+  op: "&&" | "||" | "===" | "!==" | "==" | "!=" | ">" | ">=" | "<" | "<=",
+  left: Expr,
+  right: Expr,
+): Expr {
   return { kind: "binary", op, left, right };
 }
 

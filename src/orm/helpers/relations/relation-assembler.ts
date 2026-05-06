@@ -3,7 +3,7 @@
  * Handles both flat JOIN columns (assembleJoined) and pre-fetched maps (assembleFetched).
  */
 
-import type { JoinedProjection, RelationFetchMetadata } from "../../query-plan.js";
+import type { JoinedProjection, RelationFetchMetadata } from "../query-plan/query-plan.js";
 import { makeCompositeKey } from "../../query-helpers.js";
 
 /**

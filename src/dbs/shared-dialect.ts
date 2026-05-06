@@ -24,7 +24,7 @@ import type {
   OrderItem,
   SelectItem,
 } from "../orm/expr.js";
-import type { QueryPlan } from "../orm/query-plan.js";
+import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 import type { JoinType } from "../ir/types.js";
 
 export const JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
@@ -40,13 +40,8 @@ export function quoteId(name: string): string {
 }
 
 function renderColumn(col: ExprColumn): string {
-  if (col.column === "") return quoteId(col.alias);
-  // Multi-segment columns were emitted by the planner using `"."`-joined
-  // segments; preserve the existing rendering.
-  if (col.column.includes('"."')) {
-    return `${quoteId(col.alias)}.${col.column.split('"."').map(quoteId).join(".")}`;
-  }
-  return `${quoteId(col.alias)}.${quoteId(col.column)}`;
+  if (col.column.length === 0) return quoteId(col.alias);
+  return `${quoteId(col.alias)}.${col.column.map(quoteId).join(".")}`;
 }
 
 /** Resolve the SQL expression for an aggregate argument.
@@ -399,4 +394,3 @@ export function compilePlan(
       });
   }
 }
-

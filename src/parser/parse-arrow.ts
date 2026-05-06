@@ -258,7 +258,6 @@ function collectGroupByArrayElements(elements: N[], paramName: string): Array<st
 // ---------------------------------------------------------------------------
 
 export interface ParseOptions {
-  paramName?: string;
   paramNames?: string[];
   paramKeys?: string[];
   paramValues?: Record<string, unknown>;
@@ -283,7 +282,6 @@ export function parseArrowToIr(fn: (...args: any[]) => any, options: ParseOption
 /** Pick the effective parameter names from explicit options or inference. */
 function resolveParamsFromOptions(src: string, options: ParseOptions): string[] {
   if (options.paramNames) return options.paramNames;
-  if (options.paramName) return [options.paramName];
   return inferParamNames(src);
 }
 
@@ -295,7 +293,12 @@ function resolveParamsFromOptions(src: string, options: ParseOptions): string[] 
  * Recursively convert an acorn expression node into an IR node.
  * Dispatches to a per-kind handler; throws on unsupported shapes.
  */
-function walk(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
+function walk(
+  node: N,
+  params: string[],
+  paramKeys: string[],
+  paramValues?: Record<string, unknown>,
+): IrNode {
   switch (node.type) {
     case "BinaryExpression":
     case "LogicalExpression":
@@ -325,7 +328,12 @@ function walk(node: N, params: string[], paramKeys: string[], paramValues?: Reco
 }
 
 /** Handle BinaryExpression / LogicalExpression — includes `in` → IrIn. */
-function walkBinaryLike(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
+function walkBinaryLike(
+  node: N,
+  params: string[],
+  paramKeys: string[],
+  paramValues?: Record<string, unknown>,
+): IrNode {
   if (node.operator === "in") {
     const left = walk(node.left as N, params, paramKeys, paramValues);
     const rhs = node.right as N;
@@ -354,7 +362,12 @@ function isQueryBuilderParam(value: unknown): boolean {
 }
 
 /** Handle `!expr` — only logical-not is supported; collapses `!(x in y)`. */
-function walkUnary(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
+function walkUnary(
+  node: N,
+  params: string[],
+  paramKeys: string[],
+  paramValues?: Record<string, unknown>,
+): IrNode {
   if (node.operator !== "!") throw new Error("Unsupported unary: " + node.operator);
 
   const inner = walk((node.argument ?? node.operand) as N, params, paramKeys, paramValues);
@@ -382,7 +395,12 @@ function walkIdentifier(node: N, params: string[], paramKeys: string[]): IrNode 
 }
 
 /** Handle `[a, b, c]` — allowed only for IN right-hand-sides, contents must be constant. */
-function walkArrayLiteral(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrConst {
+function walkArrayLiteral(
+  node: N,
+  params: string[],
+  paramKeys: string[],
+  paramValues?: Record<string, unknown>,
+): IrConst {
   const elements = (node.elements ?? []) as N[];
   const values = elements.map((e) => {
     if (!e || e.type === "SpreadElement") throw new Error("Unsupported array element");
@@ -400,12 +418,23 @@ function walkArrayLiteral(node: N, params: string[], paramKeys: string[], paramV
  * functions; member callees may be `.some()/.every()` subqueries or one of
  * the allowed string methods. Throws on anything else.
  */
-function walkCall(node: N, params: string[], paramKeys: string[], paramValues?: Record<string, unknown>): IrNode {
+function walkCall(
+  node: N,
+  params: string[],
+  paramKeys: string[],
+  paramValues?: Record<string, unknown>,
+): IrNode {
   const callee = node.callee as N;
 
   // Identifier callee: only aggregates (SUM, COUNT, groupConcat, …) allowed.
   if (callee.type === "Identifier") {
-    const aggregate = tryParseAggregate(node, params, paramKeys, { strictDistinct: true }, paramValues);
+    const aggregate = tryParseAggregate(
+      node,
+      params,
+      paramKeys,
+      { strictDistinct: true },
+      paramValues,
+    );
     if (aggregate) return aggregate.ir;
     throw new Error("Unsupported call expression");
   }
@@ -520,7 +549,14 @@ function tryParseAggregate(
   if (!AGGREGATE_IR_FUNCS.has(funcName)) return null;
 
   const args = (callNode.arguments ?? []) as N[];
-  const { arg, distinct } = parseAggregateArg(args[0] ?? null, params, paramKeys, rawName, opts, paramValues);
+  const { arg, distinct } = parseAggregateArg(
+    args[0] ?? null,
+    params,
+    paramKeys,
+    rawName,
+    opts,
+    paramValues,
+  );
   const separator = parseAggregateSeparator(funcName, args);
 
   const ir: IrAggregate = {

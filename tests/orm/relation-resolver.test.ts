@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { QueryPlanBuilder } from "../../src/orm/query-plan.js";
-import type { JoinedProjection, RelationFetchMetadata } from "../../src/orm/query-plan.js";
+import { QueryPlanBuilder } from "../../src/orm/helpers/query-plan/query-plan.js";
+import type {
+  JoinedProjection,
+  RelationFetchMetadata,
+} from "../../src/orm/helpers/query-plan/query-plan.js";
 import {
   assembleFetched,
   assembleJoined,
@@ -362,7 +365,7 @@ describe("relation-resolver", () => {
       };
       const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
       const cols = plan.selectItems
-        .map((i) => (i.expr.kind === "column" ? i.expr.column : null))
+        .map((i) => (i.expr.kind === "column" ? i.expr.column[0] : null))
         .filter(Boolean);
       expect(cols).toContain("companyId");
     });
@@ -375,7 +378,7 @@ describe("relation-resolver", () => {
       };
       const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
       const companyIdCount = plan.selectItems.filter(
-        (i) => i.expr.kind === "column" && i.expr.column === "companyId",
+        (i) => i.expr.kind === "column" && i.expr.column[0] === "companyId",
       ).length;
       expect(companyIdCount).toBe(1);
     });
@@ -424,7 +427,7 @@ describe("relation-resolver", () => {
       };
       const plan = planFor({ selectIr: select, relations: mockRelationsToMany });
       const cols = plan.selectItems
-        .map((i) => (i.expr.kind === "column" ? i.expr.column : null))
+        .map((i) => (i.expr.kind === "column" ? i.expr.column[0] : null))
         .filter(Boolean);
       expect(cols).toContain("id");
     });
@@ -437,7 +440,7 @@ describe("relation-resolver", () => {
       };
       const plan = planFor({ selectIr: select, relations: mockRelationsToMany });
       const idCount = plan.selectItems.filter(
-        (i) => i.expr.kind === "column" && i.expr.column === "id",
+        (i) => i.expr.kind === "column" && i.expr.column[0] === "id",
       ).length;
       expect(idCount).toBe(1);
     });
@@ -454,7 +457,7 @@ describe("relation-resolver", () => {
         pkColumns: null,
       });
       const cols = plan.selectItems
-        .map((i) => (i.expr.kind === "column" ? i.expr.column : null))
+        .map((i) => (i.expr.kind === "column" ? i.expr.column[0] : null))
         .filter(Boolean);
       expect(cols).toContain("id");
     });

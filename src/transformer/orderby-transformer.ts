@@ -45,7 +45,10 @@ export function transformOrderByCall(
   if (direction === null) return null;
 
   const args: ts.Expression[] = [irOrderByToTsLiteral({ expr, direction })];
-  if (capturedSubqueries.length > 0) args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  if (capturedSubqueries.length > 0) {
+    args.push(ts.factory.createStringLiteral(direction));
+    args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
 
@@ -68,7 +71,9 @@ function extractOrderByExpr(
   return null;
 }
 
-function buildSubqueryParamsLiteral(capturedSubqueries: CapturedSubquery[]): ts.ObjectLiteralExpression {
+function buildSubqueryParamsLiteral(
+  capturedSubqueries: CapturedSubquery[],
+): ts.ObjectLiteralExpression {
   const f = ts.factory;
   return f.createObjectLiteralExpression(
     capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),

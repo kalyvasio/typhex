@@ -8,19 +8,9 @@
  */
 
 import type { JoinType } from "../ir/types.js";
-import type { QueryPlan } from "./query-plan.js";
+import type { QueryPlan } from "./helpers/query-plan/query-plan.js";
 
-export type BinaryOp =
-  | "&&"
-  | "||"
-  | "==="
-  | "!=="
-  | "=="
-  | "!="
-  | ">"
-  | ">="
-  | "<"
-  | "<=";
+export type BinaryOp = "&&" | "||" | "===" | "!==" | "==" | "!=" | ">" | ">=" | "<" | "<=";
 
 export type AggregateFn =
   | "SUM"
@@ -58,14 +48,15 @@ export interface ExprUnary {
   operand: Expr;
 }
 
-/** Resolved column reference. `alias` is the SQL table alias (e.g. "t0", "t1");
- *  `column` is the leaf column name. `topLevelOnly` marks length-1 member paths
- *  whose first segment is a relation key — kept as a column on the main table
- *  rather than rewritten to the join alias (preserves ORDER BY semantics). */
+/** Resolved column reference. `alias` is the SQL table alias (e.g. "t0", "t1").
+ *  `column` is the column path: empty array means the alias itself (rare —
+ *  used when a member path was fully consumed by relation rewrite); a single
+ *  element is a leaf column; multiple elements are a multi-segment path
+ *  rendered as quoted dotted segments. */
 export interface ExprColumn {
   kind: "column";
   alias: string;
-  column: string;
+  column: string[];
 }
 
 export interface ExprConst {

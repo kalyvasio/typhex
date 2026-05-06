@@ -3,7 +3,7 @@
  */
 
 import type { QueryExecutor } from "../../db.js";
-import type { QueryPlan } from "../../query-plan.js";
+import type { QueryPlan } from "../query-plan/query-plan.js";
 import { fetchRelations } from "./relation-fetcher.js";
 import { assembleJoined, assembleFetched } from "./relation-assembler.js";
 

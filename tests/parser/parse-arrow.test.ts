@@ -35,7 +35,7 @@ describe("parser/parse-arrow", () => {
   it("parses param (closure variable)", () => {
     const min = 10;
     const fn = (u: { age: number }) => u.age >= min;
-    const ir = parseArrowToIr(fn, { paramName: "u", paramKeys: ["min"] });
+    const ir = parseArrowToIr(fn, { paramNames: ["u"], paramKeys: ["min"] });
     expect(ir.kind).toBe("binary");
     if (ir.kind === "binary") {
       expect(ir.right).toEqual({ kind: "param", key: "min" });
@@ -298,6 +298,8 @@ describe("parser/parseArrowToIrSelect", () => {
       limitNum: 5,
     });
     expect(ir?.relations?.[0].whereIr).toBeDefined();
-    expect(ir?.relations?.[0].orderBy).toEqual([{ expr: { kind: "member", param: "u", path: ["title"] }, direction: "asc" }]);
+    expect(ir?.relations?.[0].orderBy).toEqual([
+      { expr: { kind: "member", param: "u", path: ["title"] }, direction: "asc" },
+    ]);
   });
 });

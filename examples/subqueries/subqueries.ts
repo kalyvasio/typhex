@@ -36,12 +36,36 @@ await Post.query().insert({ authorId: bob.id, title: "B1", active: 1 });
 // --- WHERE IN subquery (also works in runtime mode) ---
 
 const activeAuthorsByIn = await Author.query()
-  .where((a) =>
-    a.id in Post.query().where((p) => p.active === 1).select((p) => p.authorId),
+  .where(
+    (a) =>
+      a.id in
+      Post.query()
+        .where((p) => p.active === 1)
+        .select((p) => p.authorId),
   )
   .orderBy("id", "asc")
   .toArray();
 console.log("Authors with at least one active post:", activeAuthorsByIn);
+
+// --- Nested WHERE IN subquery ---
+
+const nestedAuthorsByIn = await Author.query()
+  .where(
+    (a) =>
+      a.id in
+      Post.query()
+        .where(
+          (p) =>
+            p.authorId in
+            Author.query()
+              .where((candidate) => candidate.name !== "Carol")
+              .select((candidate) => candidate.id),
+        )
+        .select((p) => p.authorId),
+  )
+  .orderBy("id", "asc")
+  .toArray();
+console.log("Authors matched through nested IN subqueries:", nestedAuthorsByIn);
 
 // --- Scalar subquery in SELECT (correlated) ---
 

@@ -6,7 +6,7 @@ import type { Connection, ExecuteResult } from "../driver/types.js";
 import type { RelationJoinInfo } from "../orm/helpers/relations/relation-joins.js";
 import type { Dialect } from "../dialect.js";
 import type { Expr, ExprAggregate, GroupByItem } from "../orm/expr.js";
-import type { QueryPlan } from "../orm/query-plan.js";
+import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 
 export type { Dialect };
 

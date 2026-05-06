@@ -124,7 +124,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
   // These tests now verify dialect-level rendering of pre-resolved ExprColumn.
   it("renders relation alias for column { alias: 't1', column: 'name' }", () => {
     const orders: OrderItem[] = [
-      { expr: { kind: "column", alias: "t1", column: "name" }, direction: "asc" },
+      { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "asc" },
     ];
     const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t1"."name" ASC');
@@ -132,7 +132,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
 
   it("renders relation alias for desc direction", () => {
     const orders: OrderItem[] = [
-      { expr: { kind: "column", alias: "t1", column: "name" }, direction: "desc" },
+      { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "desc" },
     ];
     const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t1"."name" DESC');
@@ -140,7 +140,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
 
   it("renders main-table alias when no relation rewrite", () => {
     const orders: OrderItem[] = [
-      { expr: { kind: "column", alias: "t0", column: "name" }, direction: "asc" },
+      { expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "asc" },
     ];
     const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t0"."name" ASC');
@@ -150,7 +150,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
     // Planner with minPathLenForRewrite=2 keeps `u.company` (length 1 after param)
     // on the main alias. Mimic the planner's resolved output here.
     const orders: OrderItem[] = [
-      { expr: { kind: "column", alias: "t0", column: "company" }, direction: "asc" },
+      { expr: { kind: "column", alias: "t0", column: ["company"] }, direction: "asc" },
     ];
     const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t0"."company" ASC');
@@ -158,8 +158,8 @@ describe("compileOrderByExpr — relation path resolution", () => {
 
   it("compiles multiple orders including a relation column", () => {
     const orders: OrderItem[] = [
-      { expr: { kind: "column", alias: "t1", column: "name" }, direction: "asc" },
-      { expr: { kind: "column", alias: "t0", column: "name" }, direction: "desc" },
+      { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "asc" },
+      { expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "desc" },
     ];
     const result = compileOrderByExpr(orders, sqliteDialect);
     expect(result.sql).toBe('"t1"."name" ASC, "t0"."name" DESC');

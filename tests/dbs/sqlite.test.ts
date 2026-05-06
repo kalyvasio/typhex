@@ -92,7 +92,7 @@ describe("dbs/sqlite", () => {
       const expr: Expr = {
         kind: "binary",
         op: "===",
-        left: { kind: "column", alias: "t0", column: "age" },
+        left: { kind: "column", alias: "t0", column: ["age"] },
         right: { kind: "const", value: 18 },
       };
       const result = compileWhereExpr(expr, sqliteDialect);
@@ -106,7 +106,7 @@ describe("dbs/sqlite", () => {
       const expr: Expr = {
         kind: "binary",
         op: "===",
-        left: { kind: "column", alias: "t1", column: "name" },
+        left: { kind: "column", alias: "t1", column: ["name"] },
         right: { kind: "const", value: "Acme" },
       };
       const result = compileWhereExpr(expr, sqliteDialect);
@@ -132,8 +132,8 @@ describe("dbs/sqlite", () => {
 
     it("compileSelectList renders relation-aliased columns", () => {
       const items: SelectItem[] = [
-        { expr: { kind: "column", alias: "t0", column: "id" }, alias: "id" },
-        { expr: { kind: "column", alias: "t1", column: "name" }, alias: "company_name" },
+        { expr: { kind: "column", alias: "t0", column: ["id"] }, alias: "id" },
+        { expr: { kind: "column", alias: "t1", column: ["name"] }, alias: "company_name" },
       ];
       const result = compileSelectListExpr(
         items,
@@ -359,7 +359,7 @@ describe("dbs/sqlite", () => {
       });
       expect(dropTable).toContain('CREATE TABLE IF NOT EXISTS "users"');
       expect(dropTable).toContain('"id" INTEGER PRIMARY KEY');
-      expect(dropTable).toContain('"name" TEXT NOT NULL DEFAULT \'anon\'');
+      expect(dropTable).toContain("\"name\" TEXT NOT NULL DEFAULT 'anon'");
 
       const addColumn = sqliteMigrations.generateDownSql({
         kind: "add_column",

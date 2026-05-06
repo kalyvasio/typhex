@@ -26,7 +26,11 @@ import {
 import { type OnConflictClause, type QueryOperation } from "../dbs/types.js";
 import { resolveRelations } from "./helpers/relations/relation-resolver.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
-import { DEFAULT_ROW_PARAM, QueryPlanBuilder, getDialectOrThrow } from "./query-plan.js";
+import {
+  DEFAULT_ROW_PARAM,
+  QueryPlanBuilder,
+  getDialectOrThrow,
+} from "./helpers/query-plan/query-plan.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 
 /** @internal — internal builder state */
@@ -95,10 +99,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   where(predicate: IrNode, params?: Record<string, unknown>): this;
   /** Set or replace the WHERE predicate. Accepts an arrow function that is parsed to IR at runtime. */
   where(predicate: (entity: T) => boolean, params?: Record<string, unknown>): this;
-  where(
-    predicate: IrNode | ((entity: T) => boolean),
-    params?: Record<string, unknown>,
-  ): this {
+  where(predicate: IrNode | ((entity: T) => boolean), params?: Record<string, unknown>): this {
     if (params) Object.assign(this.state.whereParams, params);
     this.state.whereIr = resolveWhereIr(
       predicate as IrNode | ((entity: unknown) => boolean),
@@ -109,18 +110,20 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   }
 
   /** @internal — used by the TypeScript transformer */
-  orderBy(ir: IrOrderBy, params?: Record<string, unknown>): this;
+  orderBy(
+    ir: IrOrderBy,
+    direction?: OrderDirection,
+    subqueryParams?: Record<string, unknown>,
+  ): this;
   /** Append an ORDER BY clause. Accepts a dot-separated column string or
    *  an arrow function parsed to a member path at runtime. */
   orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
   orderBy(
     colOrIr: IrOrderBy | string | ((row: T) => unknown),
-    directionOrParams: OrderDirection | Record<string, unknown> = "asc",
+    direction: OrderDirection = "asc",
+    subqueryParams?: Record<string, unknown>,
   ): this {
-    if (typeof directionOrParams === "object") {
-      Object.assign(this.state.subqueryParams, directionOrParams);
-    }
-    const direction = typeof directionOrParams === "string" ? directionOrParams : "asc";
+    if (subqueryParams) Object.assign(this.state.subqueryParams, subqueryParams);
     this.state.orderBy.push(
       resolveOrderBy(colOrIr as IrOrderBy | string | ((row: unknown) => unknown), direction),
     );
@@ -176,12 +179,12 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** Sets the SELECT projection using an explicit list of column names. */
   select(columns: string[]): QueryBuilder<C, T>;
   /** @internal — used by the TypeScript transformer */
-  select(ir: IrSelect, params?: Record<string, unknown>): QueryBuilder<C, T>;
+  select(ir: IrSelect, subqueryParams?: Record<string, unknown>): QueryBuilder<C, T>;
   select(
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>),
-    params?: Record<string, unknown>,
+    subqueryParams?: Record<string, unknown>,
   ): QueryBuilder<C, unknown> {
-    if (params) Object.assign(this.state.subqueryParams, params);
+    if (subqueryParams) Object.assign(this.state.subqueryParams, subqueryParams);
     this.state.selectIr = resolveSelectIr(
       columnsOrIr as string[] | IrSelect | ((row: unknown) => Record<string, unknown>),
     );
@@ -339,7 +342,9 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   async deleteReturning(): Promise<EntityInstance<C>[]> {
     const { qe, hydrate } = this.state;
     const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(this.buildPlan({ kind: "delete", returning: true }));
+    const { sql, params } = dialect.compilePlan(
+      this.buildPlan({ kind: "delete", returning: true }),
+    );
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = (await qe.query(sql, params)) as Record<string, unknown>[];
     if (!hydrate) return rows as EntityInstance<C>[];
