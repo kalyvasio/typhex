@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { fetchRelations } from "../../src/orm/helpers/relations/relation-fetcher.js";
+import { RelationFetcher } from "../../src/orm/helpers/relations/relation-fetcher.js";
 import type { RelationFetchMetadata } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 
@@ -35,7 +35,12 @@ describe("fetchRelations", () => {
   it("skips a relation that is in the skip set", async () => {
     const rows = [{ id: 1, companyId: 10 }];
     const { meta } = makeMeta([{ id: 10 }]);
-    const result = await fetchRelations(null as any, rows, [meta], new Set(["company"]));
+    const result = await new RelationFetcher(
+      null as any,
+      rows,
+      [meta],
+      new Set(["company"]),
+    ).fetch();
     expect(result.has("company")).toBe(false);
   });
 
@@ -44,16 +49,17 @@ describe("fetchRelations", () => {
     const { meta } = makeMeta([]);
     (meta as any).relationType = "one-to-many";
     (meta.relation as any).name = "posts";
-    const result = await fetchRelations(null as any, rows, [meta], new Set());
+    meta.parentPkColumns = ["id"];
+    const result = await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
     const postsMap = result.get("posts");
     expect(postsMap).toBeDefined();
     expect(postsMap!.size).toBe(0);
   });
 
   it("returns empty map for to-one when no rows have the fk column", async () => {
-    const rows = [{ id: 1 }]; // no "companyId" → buildFetchByIdIr returns null
+    const rows = [{ id: 1 }]; // no "companyId" -> buildRelationFetchWhereIr returns null
     const { meta } = makeMeta([]);
-    const result = await fetchRelations(null as any, rows, [meta], new Set());
+    const result = await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
     const companyMap = result.get("company");
     expect(companyMap).toBeDefined();
     expect(companyMap!.size).toBe(0);
@@ -70,7 +76,7 @@ describe("fetchRelations", () => {
     ];
     const { meta } = makeMeta(relatedRows);
 
-    const result = await fetchRelations(null as any, rows, [meta], new Set());
+    const result = await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
     const map = result.get("company") as Map<string, unknown>;
     expect(map.get("10")).toEqual({ id: 10, name: "Acme" });
     expect(map.get("20")).toEqual({ id: 20, name: "Globex" });
@@ -87,9 +93,10 @@ describe("fetchRelations", () => {
       relationType: "one-to-many",
       relation: { name: "posts", outputKey: "posts" },
       fkColumns: ["userId"],
+      parentPkColumns: ["id"],
     } as any);
 
-    const result = await fetchRelations(null as any, rows, [meta], new Set());
+    const result = await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
     const map = result.get("posts") as Map<string, unknown[]>;
     expect(map.get("5")).toHaveLength(2);
     expect(map.get("6")).toHaveLength(1);
@@ -102,7 +109,7 @@ describe("fetchRelations", () => {
       { expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" },
     ];
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     expect(chain.orderBy).toHaveBeenCalledWith("name", "asc");
   });
@@ -112,7 +119,7 @@ describe("fetchRelations", () => {
     const { meta, chain } = makeMeta([{ id: 10 }]);
     (meta.relation as any).limitNum = 5;
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     expect(chain.limit).toHaveBeenCalledWith(5);
   });
@@ -122,7 +129,7 @@ describe("fetchRelations", () => {
     const { meta, chain } = makeMeta([{ id: 10 }]);
     (meta.relation as any).offsetNum = 10;
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     expect(chain.offset).toHaveBeenCalledWith(10);
   });
@@ -132,7 +139,7 @@ describe("fetchRelations", () => {
     const { meta, chain } = makeMeta([{ id: 10, name: "Acme" }]);
     (meta.relation as any).subPaths = [["name"]];
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     // anchorColumn for to-one is targetPk ("id"), not in subPaths → must be appended
     expect(chain.select).toHaveBeenCalledWith(expect.arrayContaining(["name", "id"]));
@@ -143,7 +150,7 @@ describe("fetchRelations", () => {
     const { meta, chain } = makeMeta([{ id: 10, name: "Acme" }]);
     (meta.relation as any).subPaths = [["id"], ["name"]]; // "id" is the anchorColumn
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     const selectedCols: string[] = chain.select.mock.calls[0][0];
     expect(selectedCols.filter((c) => c === "id")).toHaveLength(1);
@@ -156,7 +163,7 @@ describe("fetchRelations", () => {
       { expr: { kind: "member", param: "u", path: [] }, direction: "desc" },
     ]; // path[0] is undefined → ?? ""
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     expect(chain.orderBy).toHaveBeenCalledWith("", "desc");
   });
@@ -166,7 +173,7 @@ describe("fetchRelations", () => {
     const { meta, chain } = makeMeta([{ id: 10, name: "Acme" }]);
     (meta.relation as any).subPaths = [[], ["name"]]; // [] entry → flatMap collapses it
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     const selectedCols: string[] = chain.select.mock.calls[0][0];
     expect(selectedCols).toContain("name");
@@ -175,10 +182,14 @@ describe("fetchRelations", () => {
   it("applies whereIr when relation has a where clause", async () => {
     const rows = [{ id: 1, companyId: 10 }];
     const { meta, chain } = makeMeta([{ id: 10 }]);
-    (meta.relation as any).whereIr = { kind: "const", value: true };
+    (meta.relation as any).whereIr = {
+      node: { kind: "const", value: true },
+      rootParam: "u",
+      localParamNames: ["u"],
+    };
     (meta.relation as any).whereParams = { active: true };
 
-    await fetchRelations(null as any, rows, [meta], new Set());
+    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
 
     // where should have been called with a combined (AND) whereIr
     expect(chain.where).toHaveBeenCalled();
@@ -222,7 +233,7 @@ describe("fetchRelations", () => {
       junction: { table: "user_tags", foreignKey: ["userId"], referenceKey: ["tagId"] },
     };
 
-    const result = await fetchRelations(qe as any, parentRows, [meta], new Set());
+    const result = await new RelationFetcher(qe as any, parentRows, [meta], new Set()).fetch();
     const map = result.get("tags") as Map<string, unknown[]>;
 
     // parent 1 → 2 tags; parent 2 → 1 tag

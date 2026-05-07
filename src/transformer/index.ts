@@ -53,9 +53,9 @@ function visit(
     const visited = ts.visitEachChild(node, (n) => visit(n, ctx, checker, scope), ctx);
 
     const rewritten =
-      transformSelectCall(visited, checker, scope) ||
+      transformSelectCall(visited, checker) ||
       transformWhereCall(visited, checker, scope) ||
-      transformOrderByCall(visited, checker, scope) ||
+      transformOrderByCall(visited, checker) ||
       transformJoinCall(visited, checker) ||
       transformHavingCall(visited, checker, scope);
 

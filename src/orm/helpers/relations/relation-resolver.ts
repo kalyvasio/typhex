@@ -4,19 +4,28 @@
 
 import type { QueryExecutor } from "../../db.js";
 import type { QueryPlan } from "../query-plan/query-plan.js";
-import { fetchRelations } from "./relation-fetcher.js";
-import { assembleJoined, assembleFetched } from "./relation-assembler.js";
+import { RelationFetcher } from "./relation-fetcher.js";
+import { RelationAssembler } from "./relation-assembler.js";
 
-/** Execute the full relation-loading pipeline for a set of result rows:
- *  1. Fetch related rows via WHERE IN queries (relation-fetcher).
- *  2. Reconstruct JOIN columns into nested objects on rows that used a JOIN (relation-assembler).
- *  3. Attach the fetched rows onto each parent row (relation-assembler). */
-export async function resolveRelations(
-  plan: QueryPlan,
-  qe: QueryExecutor,
-  rows: Record<string, unknown>[],
-): Promise<void> {
-  const fetched = await fetchRelations(qe, rows, plan.relationFetches, plan.skipLoadFor);
-  if (plan.joinedProjections.length > 0) assembleJoined(rows, plan.joinedProjections);
-  assembleFetched(rows, plan.relationFetches, fetched, plan.skipLoadFor);
+/** Executes the full relation-loading pipeline for a set of result rows. */
+export class RelationResolver {
+  constructor(
+    private readonly plan: QueryPlan,
+    private readonly qe: QueryExecutor,
+    private readonly rows: Record<string, unknown>[],
+  ) {}
+
+  async resolve(): Promise<void> {
+    const fetched = await new RelationFetcher(
+      this.qe,
+      this.rows,
+      this.plan.relationFetches,
+      this.plan.skipLoadFor,
+    ).fetch();
+    const assembler = new RelationAssembler(this.rows);
+    if (this.plan.joinedProjections.length > 0) {
+      assembler.assembleJoined(this.plan.joinedProjections);
+    }
+    assembler.assembleFetched(this.plan.relationFetches, fetched, this.plan.skipLoadFor);
+  }
 }

@@ -37,7 +37,10 @@ function newBuilder(db: MockDb) {
     pkColumns: ["id"],
     whereIr: null,
     whereParams: {},
+    subqueryParams: {},
     orderBy: [],
+    havingIr: null,
+    havingParams: {},
     limitNum: null,
     offsetNum: null,
     selectIr: null,
@@ -67,6 +70,12 @@ describe("orderBy — lambda and dot-notation support", () => {
       const q = newBuilder(db);
       q.orderBy((u) => u.company.name);
       expect(q).toBeInstanceOf(QueryBuilder);
+    });
+
+    it("throws when ordering by a relation object", async () => {
+      const q = newBuilder(db);
+      q.orderBy((u) => u.company);
+      await expect(q.toArray()).rejects.toThrow('relation "company" must reference a column');
     });
 
     it("stores correct path for u => u.name", async () => {
@@ -105,6 +114,12 @@ describe("orderBy — lambda and dot-notation support", () => {
       await q.toArray();
       expect(capturedSql).toContain('"mock_companies"');
       expect(capturedSql).toMatch(/ORDER BY\s+.+name/i);
+    });
+
+    it("throws when string orderBy targets a relation object", async () => {
+      const q = newBuilder(db);
+      q.orderBy("company");
+      await expect(q.toArray()).rejects.toThrow('relation "company" must reference a column');
     });
 
     it("chains and returns this (same reference)", () => {
@@ -146,9 +161,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
     expect(result.sql).toBe('"t0"."name" ASC');
   });
 
-  it("single-segment relation-name path stays on main table", () => {
-    // Planner with minPathLenForRewrite=2 keeps `u.company` (length 1 after param)
-    // on the main alias. Mimic the planner's resolved output here.
+  it("renders a supplied main-table column named company", () => {
     const orders: OrderItem[] = [
       { expr: { kind: "column", alias: "t0", column: ["company"] }, direction: "asc" },
     ];
@@ -260,7 +273,10 @@ describe("orderBy relation columns — integration", () => {
       pkColumns: ["id"],
       whereIr: null,
       whereParams: {},
+      subqueryParams: {},
       orderBy: [] as IrOrderBy[],
+      havingIr: null,
+      havingParams: {},
       limitNum: null,
       offsetNum: null,
       selectIr: null,

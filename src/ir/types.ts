@@ -15,6 +15,15 @@ export type IrNode =
   | IrAggregate
   | IrSubqueryRef;
 
+export interface IrPredicate {
+  node: IrNode;
+  rootParam: string;
+  localParamNames?: string[];
+}
+
+export type IrWhere = IrPredicate;
+export type IrHaving = IrPredicate;
+
 export interface IrBinary {
   kind: "binary";
   op: "&&" | "||" | "===" | "!==" | ">" | ">=" | "<" | "<=" | "==" | "!=";
@@ -75,7 +84,6 @@ export interface IrCall {
 export interface IrSubqueryRef {
   kind: "subqueryRef";
   key: string;
-  localParamNames?: string[];
 }
 
 export interface IrAggregate {
@@ -112,7 +120,7 @@ export interface IrSelectRelation {
   /** Columns to select from target; undefined = all columns. */
   subPaths?: string[][];
   /** Optional: filter for the relation sub-query. */
-  whereIr?: IrNode;
+  whereIr?: IrWhere;
   whereParams?: Record<string, unknown>;
   /** Optional: order for the relation sub-query. */
   orderBy?: IrOrderBy[];
@@ -151,6 +159,12 @@ export function isIrOrderBy(value: unknown): value is IrOrderBy {
   return isIrNode(v.expr) && (v.direction === "asc" || v.direction === "desc");
 }
 
+export function isIrWhere(value: unknown): value is IrWhere {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return isIrNode(v.node) && typeof v.rootParam === "string";
+}
+
 export function isIrNode(node: unknown): node is IrNode {
   if (node == null || typeof node !== "object") return false;
   const k = (node as { kind?: string }).kind;
@@ -166,36 +180,6 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "aggregate" ||
     k === "subqueryRef"
   );
-}
-
-/** Recursively gather every row-parameter name referenced inside an IrWhere tree
- *  (e.g. "u" from `u.name === "Alice"`). */
-export function collectParamNamesFromWhere(node: IrNode, out: Set<string>): void {
-  switch (node.kind) {
-    case "member":
-      out.add(node.param);
-      break;
-    case "binary":
-      collectParamNamesFromWhere(node.left, out);
-      collectParamNamesFromWhere(node.right, out);
-      break;
-    case "unary":
-      collectParamNamesFromWhere(node.operand, out);
-      break;
-    case "in":
-      collectParamNamesFromWhere(node.left, out);
-      collectParamNamesFromWhere(node.right, out);
-      break;
-    case "call":
-      collectParamNamesFromWhere(node.receiver, out);
-      for (const a of node.args) collectParamNamesFromWhere(a, out);
-      break;
-    case "exists":
-      out.add(node.rootParam);
-      break;
-    default:
-      break;
-  }
 }
 
 export function isIrSelect(node: unknown): node is IrSelect {
@@ -225,7 +209,7 @@ export function isIrSelect(node: unknown): node is IrSelect {
                 (p: unknown) =>
                   Array.isArray(p) && (p as unknown[]).every((s: unknown) => typeof s === "string"),
               ))) &&
-          (x.whereIr === undefined || isIrNode(x.whereIr)) &&
+          (x.whereIr === undefined || isIrWhere(x.whereIr)) &&
           (x.orderBy === undefined ||
             (Array.isArray(x.orderBy) &&
               x.orderBy.every(

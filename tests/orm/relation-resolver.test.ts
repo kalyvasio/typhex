@@ -4,11 +4,8 @@ import type {
   JoinedProjection,
   RelationFetchMetadata,
 } from "../../src/orm/helpers/query-plan/query-plan.js";
-import {
-  assembleFetched,
-  assembleJoined,
-} from "../../src/orm/helpers/relations/relation-assembler.js";
-import type { IrSelect, IrNode } from "../../src/ir/types.js";
+import { RelationAssembler } from "../../src/orm/helpers/relations/relation-assembler.js";
+import type { IrSelect, IrWhere } from "../../src/ir/types.js";
 import type { QueryState } from "../../src/orm/query-builder.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 
@@ -24,7 +21,10 @@ const mockRelations = {
 const mockRelationsWithTarget = {
   company: {
     _relType: "many-to-one",
-    _target: () => ({ query: () => ({}), table: { _table: "companies" } }),
+    _target: () => ({
+      query: () => ({}),
+      table: { _table: "companies", _schema: { id: "integer primary key" } },
+    }),
     _options: { foreignKey: "companyId" },
   },
 } as any;
@@ -32,18 +32,25 @@ const mockRelationsWithTarget = {
 const mockRelationsToMany = {
   posts: {
     _relType: "one-to-many",
-    _target: () => ({ query: () => ({}), table: { _table: "posts" } }),
+    _target: () => ({
+      query: () => ({}),
+      table: { _table: "posts", _schema: { id: "integer primary key" } },
+    }),
     _options: { foreignKey: "userId" },
   },
 } as any;
 
 // A WHERE IR that references company.name — makes getReusableJoinKeys produce {"company"}
 // when the select also references company and rootParam is "c".
-const companyJoinWhereIr: IrNode = {
-  kind: "binary",
-  op: "===",
-  left: { kind: "member", param: "c", path: ["company", "name"] },
-  right: { kind: "const", value: "Acme" },
+const companyJoinWhereIr: IrWhere = {
+  node: {
+    kind: "binary",
+    op: "===",
+    left: { kind: "member", param: "c", path: ["company", "name"] },
+    right: { kind: "const", value: "Acme" },
+  },
+  rootParam: "c",
+  localParamNames: ["c"],
 };
 
 function makeQe(): QueryExecutor {
@@ -57,18 +64,20 @@ function makeQe(): QueryExecutor {
 function buildState(args: {
   selectIr: IrSelect | null;
   relations?: any;
-  whereIr?: IrNode | null;
+  whereIr?: IrWhere | null;
   pkColumns?: string[] | null;
 }): QueryState<unknown> {
   return {
     tableName: "contacts",
     columnNames: ["id", "name", "companyId"],
     qe: makeQe(),
-    pkColumns: args.pkColumns ?? ["id"],
+    pkColumns: args.pkColumns === undefined ? ["id"] : (args.pkColumns ?? []),
     whereIr: args.whereIr ?? null,
     whereParams: {},
     subqueryParams: {},
     orderBy: [],
+    havingIr: null,
+    havingParams: {},
     limitNum: null,
     offsetNum: null,
     selectIr: args.selectIr,
@@ -76,7 +85,9 @@ function buildState(args: {
     resolveRelationTarget: args.relations
       ? (rel: any) => {
           const target = rel._target();
-          return target?.table ? { table: target.table._table, pk: ["id"] } : null;
+          return target?.table
+            ? { table: target.table._table, pk: ["id"], schema: target.table._schema }
+            : null;
         }
       : undefined,
   } as QueryState<unknown>;
@@ -85,7 +96,7 @@ function buildState(args: {
 function planFor(args: {
   selectIr: IrSelect | null;
   relations?: any;
-  whereIr?: IrNode | null;
+  whereIr?: IrWhere | null;
   pkColumns?: string[] | null;
 }) {
   const state = buildState(args);
@@ -132,7 +143,7 @@ describe("relation-resolver", () => {
           ],
         },
       ];
-      assembleJoined(rows, projections);
+      new RelationAssembler(rows).assembleJoined(projections);
       expect(rows[0].company).toEqual({ id: 1, name: "Acme" });
       expect(rows[0]).not.toHaveProperty("company_id");
       expect(rows[0]).not.toHaveProperty("company_name");
@@ -152,7 +163,7 @@ describe("relation-resolver", () => {
           ],
         },
       ];
-      assembleJoined(rows, projections);
+      new RelationAssembler(rows).assembleJoined(projections);
       expect(rows[0]).not.toHaveProperty("company");
       expect((rows[0] as any).employer).toEqual({ id: 1, name: "Acme" });
     });
@@ -162,7 +173,7 @@ describe("relation-resolver", () => {
       const projections: JoinedProjection[] = [
         { relationKey: "company", outputKey: "company", members: [] },
       ];
-      assembleJoined(rows, projections);
+      new RelationAssembler(rows).assembleJoined(projections);
       expect(rows[0]).not.toHaveProperty("company");
     });
   });
@@ -174,7 +185,7 @@ describe("relation-resolver", () => {
       const companyMap = new Map<string, unknown>([["10", { id: 10, name: "Acme" }]]);
       const fetched = new Map<string, any>([["company", companyMap]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].company).toEqual({ id: 10, name: "Acme" });
     });
@@ -184,7 +195,7 @@ describe("relation-resolver", () => {
       const fetch = makeToOneFetch();
       const fetched = new Map<string, any>([["company", new Map()]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].company).toBeNull();
     });
@@ -195,7 +206,7 @@ describe("relation-resolver", () => {
       const companyMap = new Map<string, unknown>();
       const fetched = new Map<string, any>([["company", companyMap]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].company).toBeNull();
     });
@@ -214,7 +225,7 @@ describe("relation-resolver", () => {
       ]);
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].posts).toEqual([
         { id: 1, userId: 5 },
@@ -228,7 +239,7 @@ describe("relation-resolver", () => {
       const postsMap = new Map<unknown, unknown[]>();
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].posts).toEqual([]);
     });
@@ -239,7 +250,7 @@ describe("relation-resolver", () => {
       const postsMap = new Map<unknown, unknown[]>([["5", [{ id: 1 }]]]);
       const fetched = new Map<string, any>([["posts", postsMap]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].posts).toEqual([]);
     });
@@ -249,7 +260,7 @@ describe("relation-resolver", () => {
       const fetch = makeToManyFetch();
       const fetched = new Map<string, any>([["posts", new Map()]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0].posts).toEqual([]);
     });
@@ -260,7 +271,7 @@ describe("relation-resolver", () => {
       const companyMap = new Map<unknown, unknown>([["10", { id: 10, name: "Acme" }]]);
       const fetched = new Map<string, any>([["company", companyMap]]);
 
-      assembleFetched(rows, [fetch], fetched, new Set(["company"]));
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set(["company"]));
 
       expect(rows[0]).not.toHaveProperty("company");
     });
@@ -270,7 +281,7 @@ describe("relation-resolver", () => {
       const fetch = makeToOneFetch();
       const fetched = new Map<string, any>();
 
-      assembleFetched(rows, [fetch], fetched, new Set());
+      new RelationAssembler(rows).assembleFetched([fetch], fetched, new Set());
 
       expect(rows[0]).not.toHaveProperty("company");
     });
@@ -334,11 +345,14 @@ describe("relation-resolver", () => {
       expect(plan.relationFetches[0].relation.name).toBe("company");
     });
 
-    it("excludes relation with unsupported type from fetches", () => {
+    it("throws for unsupported relation types", () => {
       const badRelations = {
         company: {
           _relType: "unknown-relation-kind",
-          _target: () => ({ query: () => ({}), table: { _table: "companies" } }),
+          _target: () => ({
+            query: () => ({}),
+            table: { _table: "companies", _schema: { id: "integer primary key" } },
+          }),
           _options: { foreignKey: "companyId" },
         },
       } as any;
@@ -347,8 +361,9 @@ describe("relation-resolver", () => {
         paths: [["id"], ["company"]],
         aliases: ["id", "company"],
       };
-      const plan = planFor({ selectIr: select, relations: badRelations });
-      expect(plan.relationFetches).toHaveLength(0);
+      expect(() => planFor({ selectIr: select, relations: badRelations })).toThrow(
+        "Unsupported relation type",
+      );
     });
 
     it("returns empty selectItems when select is null", () => {
@@ -395,7 +410,7 @@ describe("relation-resolver", () => {
       expect(plan.relationFetches[0].relation.name).toBe("company");
     });
 
-    it("deduplicates relations with same outputKey in select.relations", () => {
+    it("throws when select.relations reuse the same outputKey", () => {
       const select: IrSelect = {
         param: "c",
         paths: [["id"]],
@@ -405,18 +420,20 @@ describe("relation-resolver", () => {
           { name: "company", outputKey: "employer" },
         ],
       };
-      const plan = planFor({ selectIr: select, relations: mockRelationsWithTarget });
-      expect(plan.relationFetches).toHaveLength(1);
+      expect(() => planFor({ selectIr: select, relations: mockRelationsWithTarget })).toThrow(
+        'select relation output "employer" is duplicated',
+      );
     });
 
-    it("excludes from fetches when target entity has no query method", () => {
+    it("throws when relation target has no query method", () => {
       const select: IrSelect = {
         param: "c",
         paths: [["company"]],
         aliases: ["company"],
       };
-      const plan = planFor({ selectIr: select, relations: mockRelations });
-      expect(plan.relationFetches).toHaveLength(0);
+      expect(() => planFor({ selectIr: select, relations: mockRelations })).toThrow(
+        'relation "company" target is not a queryable entity',
+      );
     });
 
     it("appends PK column for to-many relation when not already selected", () => {
@@ -445,21 +462,19 @@ describe("relation-resolver", () => {
       expect(idCount).toBe(1);
     });
 
-    it("adds default 'id' PK column when pkColumns is null (to-many)", () => {
+    it("throws when a to-many relation is selected without parent primary keys", () => {
       const select: IrSelect = {
         param: "u",
         paths: [["name"], ["posts"]],
         aliases: ["name", "posts"],
       };
-      const plan = planFor({
-        selectIr: select,
-        relations: mockRelationsToMany,
-        pkColumns: null,
-      });
-      const cols = plan.selectItems
-        .map((i) => (i.expr.kind === "column" ? i.expr.column[0] : null))
-        .filter(Boolean);
-      expect(cols).toContain("id");
+      expect(() =>
+        planFor({
+          selectIr: select,
+          relations: mockRelationsToMany,
+          pkColumns: null,
+        }),
+      ).toThrow('select relation "posts" requires a primary key on the parent entity');
     });
 
     it("populates skipLoadFor / joinedProjections via paths when relation is reusable from join", () => {

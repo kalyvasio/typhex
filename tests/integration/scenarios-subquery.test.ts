@@ -18,9 +18,13 @@ import {
 } from "../../src/dbs/shared-dialect.js";
 import type { DialectImpl } from "../../src/dbs/types.js";
 import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
-import type { IrNode } from "../../src/ir/types.js";
+import type { IrNode, IrWhere } from "../../src/ir/types.js";
 import { freshDb } from "../helpers.js";
 import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";
+
+function where(node: IrNode, rootParam: string, localParamNames = [rootParam]): IrWhere {
+  return { node, rootParam, localParamNames };
+}
 import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
 
 function aggCompiler(dialect: DialectImpl) {
@@ -79,6 +83,13 @@ describe("subquery scenarios (SQLite)", () => {
     authorId: "integer not null",
   });
 
+  const Comment = Entity("comments", {
+    id: "integer primary key autoincrement",
+    body: "text not null",
+    postId: "integer not null",
+    authorId: "integer not null",
+  });
+
   const AUTHOR_COLS = ["id", "name"];
 
   let db: Db;
@@ -87,6 +98,7 @@ describe("subquery scenarios (SQLite)", () => {
     clearRegistry();
     registerEntity(Author);
     registerEntity(Post);
+    registerEntity(Comment);
     db = freshDb();
     await db.migrate();
 
@@ -94,10 +106,23 @@ describe("subquery scenarios (SQLite)", () => {
     const bob = (await Author.query().insert({ name: "Bob" })) as { id: number };
     await Author.query().insert({ name: "Carol" });
 
-    await Post.query().insert({ title: "A1", score: 10, active: 1, authorId: alice.id });
+    const a1 = (await Post.query().insert({
+      title: "A1",
+      score: 10,
+      active: 1,
+      authorId: alice.id,
+    })) as { id: number };
     await Post.query().insert({ title: "A2", score: 20, active: 1, authorId: alice.id });
     await Post.query().insert({ title: "A3", score: 30, active: 0, authorId: alice.id });
-    await Post.query().insert({ title: "B1", score: 50, active: 1, authorId: bob.id });
+    const b1 = (await Post.query().insert({
+      title: "B1",
+      score: 50,
+      active: 1,
+      authorId: bob.id,
+    })) as { id: number };
+
+    await Comment.query().insert({ body: "self", postId: a1.id, authorId: alice.id });
+    await Comment.query().insert({ body: "other", postId: b1.id, authorId: alice.id });
   });
 
   afterEach(async () => {
@@ -165,7 +190,7 @@ describe("subquery scenarios (SQLite)", () => {
       left: { kind: "member", param: "p", path: ["authorId"] },
       right: { kind: "member", param: "a", path: ["id"] },
     };
-    const postCount = (Post.query() as any).where(innerWhere, {}).select({
+    const postCount = (Post.query() as any).where(where(innerWhere, "p"), {}).select({
       param: "u",
       paths: [],
       aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
@@ -180,7 +205,7 @@ describe("subquery scenarios (SQLite)", () => {
           subqueries: [
             {
               alias: "postCount",
-              subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] },
+              subquery: { kind: "subqueryRef", key: "_sub0" },
             },
           ],
         },
@@ -219,7 +244,7 @@ describe("subquery scenarios (SQLite)", () => {
       left: { kind: "member", param: "p", path: ["authorId"] },
       right: { kind: "member", param: "a", path: ["id"] },
     };
-    const postCount = (Post.query() as any).where(innerWhere, {}).select({
+    const postCount = (Post.query() as any).where(where(innerWhere, "p"), {}).select({
       param: "u",
       paths: [],
       aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
@@ -228,12 +253,61 @@ describe("subquery scenarios (SQLite)", () => {
     const whereIr: IrNode = {
       kind: "binary",
       op: ">",
-      left: { kind: "subqueryRef", key: "count", localParamNames: ["p"] },
+      left: { kind: "subqueryRef", key: "count" },
       right: { kind: "const", value: 1 },
     };
 
     const rows = (await Author.query()
-      .where(whereIr, { count: postCount })
+      .where(where(whereIr, "u"), { count: postCount })
+      .orderBy("id", "asc")
+      .toArray()) as Array<{ name: string }>;
+
+    expect(rows.map((r) => r.name)).toEqual(["Alice"]);
+  });
+
+  it("QueryBuilder carries aliases through nested correlated subqueries", async () => {
+    const commentWhere: IrNode = {
+      kind: "binary",
+      op: "&&",
+      left: {
+        kind: "binary",
+        op: "===",
+        left: { kind: "member", param: "c", path: ["postId"] },
+        right: { kind: "member", param: "p", path: ["id"] },
+      },
+      right: {
+        kind: "binary",
+        op: "===",
+        left: { kind: "member", param: "c", path: ["authorId"] },
+        right: { kind: "member", param: "a", path: ["id"] },
+      },
+    };
+    const commentCount = (Comment.query() as any).where(where(commentWhere, "c"), {}).select({
+      param: "u",
+      paths: [],
+      aggregates: [{ kind: "aggregate", func: "COUNT", arg: null }],
+    });
+
+    const postWhere: IrNode = {
+      kind: "binary",
+      op: ">",
+      left: { kind: "subqueryRef", key: "commentCount" },
+      right: { kind: "const", value: 0 },
+    };
+    const postIds = (Post.query() as any).where(where(postWhere, "p"), { commentCount }).select({
+      param: "p",
+      paths: [["authorId"]],
+      aliases: ["authorId"],
+    });
+
+    const authorWhere: IrNode = {
+      kind: "in",
+      left: { kind: "member", param: "a", path: ["id"] },
+      right: { kind: "subqueryRef", key: "postIds" },
+    };
+
+    const rows = (await Author.query()
+      .where(where(authorWhere, "a"), { postIds })
       .orderBy("id", "asc")
       .toArray()) as Array<{ name: string }>;
 

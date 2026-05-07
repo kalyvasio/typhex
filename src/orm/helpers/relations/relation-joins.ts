@@ -4,7 +4,7 @@
  * instead of failing on non-existent column.
  */
 
-import type { IrNode, IrSelect, IrOrderBy, JoinHint, JoinType } from "../../../ir/types.js";
+import type { IrExists, JoinHint, JoinType } from "../../../ir/types.js";
 import type { RelationsMap, RelationDef, JunctionOptions } from "../../../entity/relations.js";
 import { toArray } from "../../../utils.js";
 
@@ -25,41 +25,6 @@ export interface OneToManyExistsInfo {
   alias: string;
 }
 
-/**
- * Build EXISTS metadata for one-to-many relations in the where clause.
- * One-to-many uses EXISTS subquery instead of JOIN to avoid row duplication.
- */
-export function buildOneToManyExists(
-  whereNode: IrNode | null,
-  relations: RelationsMap,
-  rootParam: string,
-  mainPk: string[],
-  resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null,
-  aliasPrefix = "ex",
-): Record<string, OneToManyExistsInfo> {
-  const keys = new Set<string>();
-  collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
-  const result: Record<string, OneToManyExistsInfo> = {};
-  let idx = 0;
-  for (const relKey of keys) {
-    const rel = relations[relKey] as RelationDef | undefined;
-    if (!rel || rel._relType !== "one-to-many") continue;
-    const opts = rel._options;
-    if ("junction" in opts) continue;
-    const target = resolveTarget(rel);
-    if (!target) continue;
-    const fkColumns = toArray("foreignKey" in opts ? opts.foreignKey : undefined);
-    if (fkColumns.length === 0) continue;
-    result[`${rootParam}.${relKey}`] = {
-      targetTable: target.table,
-      fkColumns,
-      mainPk,
-      alias: `${aliasPrefix}${idx++}`,
-    };
-  }
-  return result;
-}
-
 export interface RelationJoinContext {
   relations: RelationsMap;
   tableName: string;
@@ -68,185 +33,138 @@ export interface RelationJoinContext {
   resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null;
 }
 
-/** Walk an IR node tree and collect every relation key referenced via member access
- *  on the root parameter (e.g. `c.company.name` → adds "company" to `out`). */
-function collectRelationKeysFromNode(
-  node: IrNode | null,
-  relations: RelationsMap,
-  rootParam: string,
-  out: Set<string>,
-): void {
-  if (!node) return;
-  if (node.kind === "member") {
-    const m = node;
-    if (m.param === rootParam && m.path.length >= 1 && relations[m.path[0]]) {
-      out.add(m.path[0]);
-    }
-  }
-  if (node.kind === "binary") {
-    collectRelationKeysFromNode(node.left, relations, rootParam, out);
-    collectRelationKeysFromNode(node.right, relations, rootParam, out);
-  }
-  if (node.kind === "unary") {
-    collectRelationKeysFromNode(node.operand, relations, rootParam, out);
-  }
-  if (node.kind === "in") {
-    collectRelationKeysFromNode(node.left, relations, rootParam, out);
-    collectRelationKeysFromNode(node.right, relations, rootParam, out);
-  }
-  if (node.kind === "call") {
-    collectRelationKeysFromNode(node.receiver, relations, rootParam, out);
-    for (const a of node.args) collectRelationKeysFromNode(a, relations, rootParam, out);
-  }
-  if (node.kind === "exists") {
-    if (node.rootParam === rootParam) out.add(node.relationKey);
-  }
-}
+/**
+ * Builds EXISTS metadata for one-to-many relations in the where clause.
+ * One-to-many uses EXISTS instead of JOIN to avoid row duplication.
+ */
+export class OneToManyExistsBuilder {
+  private aliasIndex = 0;
 
-/** Collect relation keys referenced in a select IR — from dotted paths (e.g. ["company","name"])
- *  and from explicit relation entries in `select.relations`. */
-function collectRelationKeysFromSelect(
-  select: IrSelect | null,
-  relations: RelationsMap,
-): Set<string> {
-  const out = new Set<string>();
-  if (!select) return out;
-  for (const path of select.paths) {
-    if (path.length >= 1 && relations[path[0]]) {
-      out.add(path[0]);
+  constructor(
+    private readonly existsNodes: IrExists[],
+    private readonly relations: RelationsMap,
+    private readonly rootParam: string,
+    private readonly mainPk: string[],
+    private readonly resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null,
+    private readonly aliasPrefix = "ex",
+  ) {}
+
+  build(): Record<string, OneToManyExistsInfo> {
+    const result: Record<string, OneToManyExistsInfo> = {};
+
+    for (const node of this.existsNodes) {
+      if (node.rootParam !== this.rootParam) continue;
+      const key = `${this.rootParam}.${node.relationKey}`;
+      if (result[key]) continue;
+      result[key] = this.buildExistsInfo(node);
     }
+
+    return result;
   }
-  for (const r of select.relations ?? []) {
-    if (relations[r.name]) out.add(r.name);
+
+  private buildExistsInfo(node: IrExists): OneToManyExistsInfo {
+    const rel = this.relations[node.relationKey];
+    if (!rel) {
+      throw new Error(
+        `[typhex] where relation "${node.relationKey}" is not defined on this entity`,
+      );
+    }
+    if (rel._relType !== "one-to-many") {
+      throw new Error(
+        `[typhex] where relation "${node.relationKey}" must be one-to-many to use .some()/.every()`,
+      );
+    }
+    if (this.mainPk.length === 0) {
+      throw new Error(
+        `[typhex] where relation "${node.relationKey}" requires a primary key on the parent entity`,
+      );
+    }
+
+    const target = this.resolveTarget(rel)!;
+    const opts = rel._options;
+    return {
+      targetTable: target.table,
+      fkColumns: toArray(opts.foreignKey),
+      mainPk: this.mainPk,
+      alias: `${this.aliasPrefix}${this.aliasIndex++}`,
+    };
   }
-  return out;
 }
 
 /**
- * Relation keys that can reuse joined data for select (no whereIn needed).
- * A relation is reusable when it's in both where and select. Where joins the whole
- * relation table; there is no projection in where, so no projection comparison.
+ * Builds JOIN metadata for relations used in the where clause or orderBy.
+ * Relations used only in select are loaded via whereIn; select IR is not consulted here.
  */
-export function getReusableJoinKeys(
-  whereNode: IrNode | null,
-  selectNode: IrSelect | null,
-  relations: RelationsMap,
-  rootParam: string,
-): Set<string> {
-  const whereKeys = new Set<string>();
-  collectRelationKeysFromNode(
-    whereNode ?? { kind: "const", value: null },
-    relations,
-    rootParam,
-    whereKeys,
-  );
-  const selectKeys = collectRelationKeysFromSelect(selectNode, relations);
-  const reusable = new Set<string>();
-  for (const k of whereKeys) {
-    if (!selectKeys.has(k)) continue;
-    const rel = relations[k] as RelationDef | undefined;
-    if (rel?._relType === "one-to-many") continue;
-    reusable.add(k);
-  }
-  return reusable;
-}
+export class RelationJoinBuilder {
+  private aliasIndex = 1;
 
-function collectRelationKeysFromOrderBy(
-  orderBy: IrOrderBy[],
-  relations: RelationsMap,
-  out: Set<string>,
-): void {
-  for (const order of orderBy) {
-    if (order.expr.kind === "member" && order.expr.path.length > 1) {
-      const key = order.expr.path[0];
-      if (key in relations) out.add(key);
+  constructor(
+    private readonly ctx: RelationJoinContext,
+    private readonly relationKeys: Set<string>,
+    private readonly joinHints?: JoinHint[],
+  ) {}
+
+  build(): RelationJoinInfo[] {
+    const result: RelationJoinInfo[] = [];
+
+    for (const relKey of this.relationKeys) {
+      const join = this.buildJoin(relKey);
+      if (join) result.push(join);
     }
+
+    return result;
   }
-}
 
-function collectJoinableRelationKeys(
-  whereNode: IrNode | null,
-  relations: RelationsMap,
-  rootParam: string,
-  orderBy?: IrOrderBy[],
-  joinHints?: JoinHint[],
-): Set<string> {
-  const keys = new Set<string>();
-  collectRelationKeysFromNode(whereNode, relations, rootParam, keys);
-  if (orderBy?.length) collectRelationKeysFromOrderBy(orderBy, relations, keys);
-  if (joinHints) {
-    for (const hint of joinHints) {
-      if (hint.relationKey in relations) keys.add(hint.relationKey);
-    }
-  }
-  return keys;
-}
-
-/**
- * Build JOIN metadata for relations used in the where clause or orderBy.
- * Relations used only in select are loaded via whereIn (separate query); select IR is not consulted here.
- */
-export function buildRelationJoins(
-  ctx: RelationJoinContext,
-  whereNode: IrNode | null,
-  rootParam: string,
-  orderBy?: IrOrderBy[],
-  joinHints?: JoinHint[],
-): RelationJoinInfo[] {
-  const { relations } = ctx;
-  const keys = collectJoinableRelationKeys(whereNode, relations, rootParam, orderBy, joinHints);
-
-  const result: RelationJoinInfo[] = [];
-  let aliasIndex = 1;
-
-  for (const relKey of keys) {
-    const rel = relations[relKey] as RelationDef | undefined;
-    if (!rel) continue;
+  private buildJoin(relKey: string): RelationJoinInfo | null {
+    const rel = this.ctx.relations[relKey] as RelationDef | undefined;
+    if (!rel) return null;
 
     const opts = rel._options;
-    if ((opts as JunctionOptions).junction) continue;
+    if ((opts as JunctionOptions).junction) return null;
 
     const relType = rel._relType;
-    if (relType !== "many-to-one" && relType !== "one-to-one") continue;
+    if (relType !== "many-to-one" && relType !== "one-to-one") return null;
 
-    const target = ctx.resolveTarget(rel);
-    if (!target) continue;
+    const target = this.ctx.resolveTarget(rel);
+    if (!target) return null;
 
-    const fkRaw = opts.foreignKey ? opts.foreignKey : "";
-    const fkCols = Array.isArray(fkRaw) ? fkRaw : fkRaw ? [fkRaw] : [];
-    if (fkCols.length === 0) continue;
+    const foreignKeys = opts.foreignKey ? toArray(opts.foreignKey) : [];
+    if (foreignKeys.length === 0) return null;
 
-    const hint = joinHints
+    return {
+      relationKey: relKey,
+      alias: `t${this.aliasIndex++}`,
+      targetTable: target.table,
+      targetPkColumns: target.pk,
+      foreignKeys,
+      relType,
+      joinType: this.resolveJoinType(relKey),
+    };
+  }
+
+  private resolveJoinType(relKey: string): JoinType {
+    const hint = this.joinHints
       ?.slice()
       .reverse()
       .find((h) => h.relationKey === relKey);
-    const joinType: JoinType = hint?.joinType ?? "left";
-    result.push({
-      relationKey: relKey,
-      alias: `t${aliasIndex++}`,
-      targetTable: target.table,
-      targetPkColumns: target.pk,
-      foreignKeys: fkCols,
-      relType,
-      joinType,
-    });
+    return hint?.joinType ?? "left";
   }
-
-  return result;
 }
 
-/** Build a lookup from `${param}.${relationKey}` to the JOIN alias
- *  (e.g. `"c.company" → "t1"`), used when the dialect compiles column
- *  references in WHERE and SELECT clauses. */
-export function buildRelationPathToAlias(
-  joins: RelationJoinInfo[],
-  params: string[],
-): Record<string, string> {
-  const map: Record<string, string> = {};
-  for (const j of joins) {
-    for (const param of params) {
-      map[`${param}.${j.relationKey}`] = j.alias;
+/** Builds a lookup from `${param}.${relationKey}` to the JOIN alias. */
+export class RelationPathAliasBuilder {
+  constructor(
+    private readonly joins: RelationJoinInfo[],
+    private readonly params: string[],
+  ) {}
+
+  build(): Record<string, string> {
+    const map: Record<string, string> = {};
+    for (const join of this.joins) {
+      for (const param of this.params) {
+        map[`${param}.${join.relationKey}`] = join.alias;
+      }
     }
+    return map;
   }
-  return map;
 }

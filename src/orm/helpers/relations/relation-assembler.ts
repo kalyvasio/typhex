@@ -6,67 +6,58 @@
 import type { JoinedProjection, RelationFetchMetadata } from "../query-plan/query-plan.js";
 import { makeCompositeKey } from "../../query-helpers.js";
 
-/**
- * Reconstruct nested objects from flat JOIN columns
- * (e.g. author_name → row.author.name) using pre-extracted projections.
- */
-export function assembleJoined(
-  rows: Record<string, unknown>[],
-  projections: JoinedProjection[],
-): void {
-  for (const proj of projections) {
-    if (proj.members.length === 0) continue;
-    for (const row of rows) {
-      const obj: Record<string, unknown> = {};
-      for (const m of proj.members) obj[m.subPath] = row[m.alias];
-      row[proj.outputKey] = obj;
-      for (const m of proj.members) delete row[m.alias];
+export type RelationFetchedData = Map<string, Map<string, unknown> | Map<string, unknown[]>>;
+
+/** Attaches JOIN-projected and separately fetched relation data onto result rows. */
+export class RelationAssembler {
+  constructor(private readonly rows: Record<string, unknown>[]) {}
+
+  /**
+   * Reconstruct nested objects from flat JOIN columns
+   * (e.g. author_name to row.author.name) using pre-extracted projections.
+   */
+  assembleJoined(projections: JoinedProjection[]): void {
+    for (const proj of projections) {
+      if (proj.members.length === 0) continue;
+      for (const row of this.rows) {
+        const obj: Record<string, unknown> = {};
+        for (const member of proj.members) obj[member.subPath] = row[member.alias];
+        row[proj.outputKey] = obj;
+        for (const member of proj.members) delete row[member.alias];
+      }
     }
   }
-}
 
-/** Attach fetched relation maps onto rows. */
-export function assembleFetched(
-  rows: Record<string, unknown>[],
-  fetches: RelationFetchMetadata[],
-  fetched: Map<string, Map<string, unknown> | Map<string, unknown[]>>,
-  skip: Set<string>,
-): void {
-  for (const meta of fetches) {
-    if (skip.has(meta.relation.name)) continue;
-    const data = fetched.get(meta.relation.name);
-    if (!data) continue;
-    if (meta.relationType === "one-to-many" || meta.relationType === "many-to-many") {
-      attachToManyRelation(rows, meta, data as Map<string, unknown[]>);
-    } else {
-      attachToOneRelation(rows, meta, data as Map<string, unknown>);
+  /** Attach fetched relation maps onto rows. */
+  assembleFetched(
+    fetches: RelationFetchMetadata[],
+    fetched: RelationFetchedData,
+    skip: Set<string>,
+  ): void {
+    for (const meta of fetches) {
+      if (skip.has(meta.relation.name)) continue;
+      const data = fetched.get(meta.relation.name);
+      if (!data) continue;
+      if (meta.relationType === "one-to-many" || meta.relationType === "many-to-many") {
+        this.attachToManyRelation(meta, data as Map<string, unknown[]>);
+      } else {
+        this.attachToOneRelation(meta, data as Map<string, unknown>);
+      }
     }
   }
-}
 
-/** Set `row[outputKey]` to the array of related rows from `data`,
- *  looked up by the composite key of the parent's PK columns. */
-function attachToManyRelation(
-  rows: Record<string, unknown>[],
-  meta: RelationFetchMetadata,
-  data: Map<string, unknown[]>,
-): void {
-  const pkCols = meta.parentPkColumns ?? ["id"];
-  for (const row of rows) {
-    const key = makeCompositeKey(row, pkCols);
-    row[meta.relation.outputKey] = data.get(key) ?? [];
+  private attachToManyRelation(meta: RelationFetchMetadata, data: Map<string, unknown[]>): void {
+    const pkCols = meta.parentPkColumns!;
+    for (const row of this.rows) {
+      const key = makeCompositeKey(row, pkCols);
+      row[meta.relation.outputKey] = data.get(key) ?? [];
+    }
   }
-}
 
-/** Set `row[outputKey]` to the single related row from `data`,
- *  looked up by the composite key of the row's FK columns, or null if unmatched. */
-function attachToOneRelation(
-  rows: Record<string, unknown>[],
-  meta: RelationFetchMetadata,
-  data: Map<string, unknown>,
-): void {
-  for (const row of rows) {
-    const key = makeCompositeKey(row, meta.fkColumns);
-    row[meta.relation.outputKey] = data.get(key) ?? null;
+  private attachToOneRelation(meta: RelationFetchMetadata, data: Map<string, unknown>): void {
+    for (const row of this.rows) {
+      const key = makeCompositeKey(row, meta.fkColumns);
+      row[meta.relation.outputKey] = data.get(key) ?? null;
+    }
   }
 }

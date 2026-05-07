@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src/orm/query-builder.js";
 import { Entity } from "../../src/index.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
-import type { IrAggregate, IrSelect } from "../../src/ir/types.js";
+import type { IrAggregate, IrHaving, IrNode, IrSelect } from "../../src/ir/types.js";
 import { isIrNode } from "../../src/ir/types.js";
 import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
 import {
@@ -74,10 +74,16 @@ function newBuilder(
     whereParams: {},
     subqueryParams: {},
     orderBy: [],
+    havingIr: null,
+    havingParams: {},
     limitNum: null,
     offsetNum: null,
     selectIr: null,
   });
+}
+
+function having(node: IrNode, rootParam = "u"): IrHaving {
+  return { node, rootParam, localParamNames: [rootParam] };
 }
 
 describe("Aggregations", () => {
@@ -199,12 +205,12 @@ describe("Aggregations", () => {
 
   describe("having method", () => {
     it("having(IrNode) produces HAVING clause in SQL", async () => {
-      const havingIr = {
+      const havingIr = having({
         kind: "binary" as const,
         op: ">" as const,
         left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
         right: { kind: "const" as const, value: 5 },
-      };
+      });
       await newBuilder(qe).groupBy("category").having(havingIr).toArray();
       const [sql, params] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("HAVING");
@@ -213,12 +219,12 @@ describe("Aggregations", () => {
 
     it("having(arrow) parses and produces HAVING clause", async () => {
       const countAgg: IrAggregate = { kind: "aggregate", func: "COUNT", arg: null };
-      const havingIr = {
+      const havingIr = having({
         kind: "binary" as const,
         op: ">" as const,
         left: countAgg,
         right: { kind: "const" as const, value: 10 },
-      };
+      });
       await newBuilder(qe).groupBy("category").having(havingIr).toArray();
       const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("HAVING");
@@ -226,12 +232,12 @@ describe("Aggregations", () => {
     });
 
     it("having returns the same QueryBuilder (mutates in place)", () => {
-      const havingIr = {
+      const havingIr = having({
         kind: "binary" as const,
         op: ">" as const,
         left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
         right: { kind: "const" as const, value: 1 },
-      };
+      });
       const base = newBuilder(qe);
       const q = base.having(havingIr);
       expect(q).toBeInstanceOf(QueryBuilder);
@@ -256,12 +262,12 @@ describe("Aggregations", () => {
         groupBy: [["category"]],
       };
 
-      const havingIr = {
+      const havingIr = having({
         kind: "binary" as const,
         op: ">" as const,
         left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
         right: { kind: "const" as const, value: 5 },
-      };
+      });
 
       await newBuilder(qe).select(selectIr).having(havingIr).orderBy("category").toArray();
 
@@ -950,12 +956,12 @@ describe("compileGroupBy with GroupByItem[]", () => {
 describe("Postgres placeholder numbering: WHERE + GROUP BY + HAVING + LIMIT/OFFSET", () => {
   it("params are in correct order and placeholders don't collide", async () => {
     const qe = createMockQe("postgres");
-    const havingIr = {
+    const havingIr = having({
       kind: "binary" as const,
       op: ">" as const,
       left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
       right: { kind: "const" as const, value: 5 },
-    };
+    });
     await newBuilder(qe)
       .where((o: InstanceType<typeof OrderEntity>) => o.status === ("active" as any))
       .groupBy("category")
@@ -981,12 +987,12 @@ describe("Postgres placeholder numbering: WHERE + GROUP BY + HAVING + LIMIT/OFFS
 
   it("HAVING-only (no WHERE param): HAVING is $1, LIMIT is $2", async () => {
     const qe = createMockQe("postgres");
-    const havingIr = {
+    const havingIr = having({
       kind: "binary" as const,
       op: ">" as const,
       left: { kind: "aggregate" as const, func: "COUNT" as const, arg: null },
       right: { kind: "const" as const, value: 3 },
-    };
+    });
     await newBuilder(qe).groupBy("category").having(havingIr).limit(5).toArray();
 
     const [sql, params] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];

@@ -11,6 +11,7 @@ import type {
   IrIn,
   IrConst,
   IrSubqueryRef,
+  IrWhere,
 } from "../ir/types.js";
 import {
   captureSubqueryRef as captureSubqueryRefShared,
@@ -24,7 +25,7 @@ import {
   resolveMemberPath,
   binaryOpFromSyntaxKind,
   parseTsAggregateCall,
-  irNodeToTsLiteral,
+  irWhereToTsLiteral,
   getParamBindings,
   type ParamBindings,
   type ScopeFrame,
@@ -133,7 +134,7 @@ function tryExtractSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRe
 }
 
 function captureSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRef {
-  return captureSubqueryRefShared(expr, ctx.capturedSubqueries, ctx.paramNames, ctx.outerScope);
+  return captureSubqueryRefShared(expr, ctx.capturedSubqueries);
 }
 
 /** Handle `!<expr>` — wraps the inner IR in an IrUnary with `!`. */
@@ -164,7 +165,11 @@ function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNod
   if (ctx.outerDestructured) {
     const prefix = ctx.outerDestructured.bindings.get(current.text);
     if (prefix)
-      return { kind: "member", param: ctx.outerDestructured.paramName, path: [...prefix, ...parts] };
+      return {
+        kind: "member",
+        param: ctx.outerDestructured.paramName,
+        path: [...prefix, ...parts],
+      };
   }
 
   if (ctx.outerScope) {
@@ -360,7 +365,7 @@ function arrowToIr(
   extraParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
   outerScope?: ScopeFrame[],
-): { ir: IrNode; freeVars: string[]; capturedSubqueries: CapturedSubquery[] } | null {
+): { ir: IrWhere; freeVars: string[]; capturedSubqueries: CapturedSubquery[] } | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
 
@@ -378,7 +383,15 @@ function arrowToIr(
   });
   if (!ir) return null;
 
-  return { ir, freeVars: [...freeVars], capturedSubqueries };
+  return {
+    ir: {
+      node: ir,
+      rootParam: paramNames[0] ?? "u",
+      localParamNames: paramNames,
+    },
+    freeVars: [...freeVars],
+    capturedSubqueries,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +420,7 @@ function transformArrowCall(
   if (!result) return null;
 
   const args: ts.Expression[] = [
-    irNodeToTsLiteral(result.ir),
+    irWhereToTsLiteral(result.ir),
     buildParamsLiteral(result.freeVars, result.capturedSubqueries),
   ];
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
@@ -443,7 +456,7 @@ export function parseWhereArrowToIr(
   outerParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
   outerScope?: ScopeFrame[],
-): { ir: IrNode; freeVars: string[] } | null {
+): { ir: IrWhere; freeVars: string[] } | null {
   return arrowToIr(fn, checker, outerParamNames, outerDestructured, outerScope);
 }
 

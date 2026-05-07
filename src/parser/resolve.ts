@@ -2,25 +2,38 @@
  * Input resolvers: normalise the three QB method input shapes
  * (pre-built IR | arrow function | string / string[]) to IR structures.
  */
-import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
-import { isIrNode, isIrSelect, isIrOrderBy } from "../ir/types.js";
-import { parseArrowToIr, parseArrowToIrSelect, parseArrowToGroupByPaths } from "./parse-arrow.js";
+import type { IrHaving, IrOrderBy, IrSelect, IrWhere, OrderDirection } from "../ir/types.js";
+import { isIrSelect, isIrOrderBy, isIrWhere } from "../ir/types.js";
+import {
+  parseArrowToIr,
+  parseArrowToIrPredicate,
+  parseArrowToIrSelect,
+  parseArrowToGroupByPaths,
+} from "./parse-arrow.js";
 import { DEFAULT_ROW_PARAM } from "../orm/helpers/query-plan/query-plan.js";
 
-/** Resolve a where input (pre-built IR node or arrow fn) to an IrNode. */
+/** Resolve a where input (pre-built predicate IR or arrow fn) to an IrWhere. */
 export function resolveWhereIr(
-  input: IrNode | ((entity: unknown) => boolean),
+  input: IrWhere | ((entity: unknown) => boolean),
   paramKeys: string[] = [],
-  paramValues?: Record<string, unknown>,
-): IrNode {
-  if (isIrNode(input)) return input;
+  subqueryKeys: string[] = [],
+): IrWhere {
+  if (isIrWhere(input)) return input;
   try {
-    return parseArrowToIr(input as (u: any) => boolean, { paramKeys, paramValues });
+    return parseArrowToIrPredicate(input as (u: any) => boolean, { paramKeys, subqueryKeys });
   } catch (e) {
     throw new Error(
       "Failed to parse arrow predicate: " + (e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+export function resolveHavingIr(
+  input: IrHaving | ((entity: unknown) => boolean),
+  paramKeys: string[] = [],
+  subqueryKeys: string[] = [],
+): IrHaving {
+  return resolveWhereIr(input, paramKeys, subqueryKeys);
 }
 
 /** Resolve an orderBy input (pre-built IrOrderBy, string, or arrow fn) to an IrOrderBy. */

@@ -14,7 +14,6 @@ import {
   irAggregateToTsLiteral,
   getParamBindings,
   type ParamBindings,
-  type ScopeFrame,
 } from "./shared.js";
 import {
   captureSubqueryRef,
@@ -36,7 +35,6 @@ function arrowToIrSelect(
   pb: ParamBindings,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
-  outerScope: ScopeFrame[] = [],
 ): IrSelect | null {
   // Single-expression shorthand bodies: p => p, p => p.id, p => count(p.id)
   if (!ts.isBlock(fn.body)) {
@@ -46,7 +44,7 @@ function arrowToIrSelect(
 
   const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
-  return parseSelectObjectLiteral(obj, pb, checker, capturedSubqueries, outerScope);
+  return parseSelectObjectLiteral(obj, pb, checker, capturedSubqueries);
 }
 
 /**
@@ -122,7 +120,6 @@ function parseSelectObjectLiteral(
   pb: ParamBindings,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
-  outerScope: ScopeFrame[] = [],
 ): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
@@ -140,14 +137,7 @@ function parseSelectObjectLiteral(
     const keyName = getPropertyKeyName(prop);
     if (!keyName) return null;
 
-    const handled = parseSelectObjectProperty(
-      prop,
-      keyName,
-      pb,
-      checker,
-      capturedSubqueries,
-      outerScope,
-    );
+    const handled = parseSelectObjectProperty(prop, keyName, pb, checker, capturedSubqueries);
     if (!handled) return null;
 
     if (handled.kind === "path") {
@@ -204,7 +194,6 @@ function parseSelectObjectProperty(
   pb: ParamBindings,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
-  outerScope: ScopeFrame[] = [],
 ): PropertyResult | null {
   // { id }  →  shorthand refers to destructured binding
   if (ts.isShorthandPropertyAssignment(prop)) {
@@ -234,14 +223,10 @@ function parseSelectObjectProperty(
     if (parsed) return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
 
     // { totalPosts: Post.query().where(…).select(() => count()) }
-    // Pass the outer select-arrow's row param so a correlated inner where
-    // (e.g. `.where(p => p.authorId === a.id)`) resolves `a.id` correctly.
-    // For destructured outer arrows, also pass the bindings so bare locals
-    // like `id` resolve to IrMember on the outer row.
     if (isTyphexQueryChain(value, checker)) {
       return {
         kind: "subquery",
-        subquery: captureSubqueryRef(value, capturedSubqueries, [pb.paramName], outerScope),
+        subquery: captureSubqueryRef(value, capturedSubqueries),
       };
     }
   }
@@ -257,14 +242,13 @@ function parseSelectObjectProperty(
 export function transformSelectCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
-  outerScope: ScopeFrame[] = [],
 ): ts.CallExpression | null {
   const arrow = matchTyphexMethodCall(call, "select", checker, isTyphexType);
   if (!arrow) return null;
 
   const pb = getParamBindings(arrow.parameters[0]?.name);
   const capturedSubqueries: CapturedSubquery[] = [];
-  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedSubqueries, outerScope);
+  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedSubqueries);
   if (!irSelect) return null;
 
   const args: ts.Expression[] = [irSelectToTsLiteral(irSelect)];
@@ -272,7 +256,9 @@ export function transformSelectCall(
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
 
-function buildSubqueryParamsLiteral(capturedSubqueries: CapturedSubquery[]): ts.ObjectLiteralExpression {
+function buildSubqueryParamsLiteral(
+  capturedSubqueries: CapturedSubquery[],
+): ts.ObjectLiteralExpression {
   const f = ts.factory;
   return f.createObjectLiteralExpression(
     capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),

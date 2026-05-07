@@ -3,13 +3,7 @@
  */
 
 import ts from "typescript";
-import type {
-  IrNode,
-  IrSelect,
-  IrBinary,
-  IrOrderBy,
-  IrAggregate,
-} from "../ir/types.js";
+import type { IrNode, IrSelect, IrWhere, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
 // Typhex type detection
@@ -499,15 +493,21 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
       break;
     case "subqueryRef":
       props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
-      if (ir.localParamNames && ir.localParamNames.length > 0) {
-        props.push(
-          f.createPropertyAssignment(
-            "localParamNames",
-            stringArrayLiteral(ir.localParamNames, f),
-          ),
-        );
-      }
       break;
+  }
+  return f.createObjectLiteralExpression(props);
+}
+
+export function irWhereToTsLiteral(where: IrWhere): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = [
+    f.createPropertyAssignment("node", irNodeToTsLiteral(where.node)),
+    f.createPropertyAssignment("rootParam", f.createStringLiteral(where.rootParam)),
+  ];
+  if (where.localParamNames && where.localParamNames.length > 0) {
+    props.push(
+      f.createPropertyAssignment("localParamNames", stringArrayLiteral(where.localParamNames, f)),
+    );
   }
   return f.createObjectLiteralExpression(props);
 }

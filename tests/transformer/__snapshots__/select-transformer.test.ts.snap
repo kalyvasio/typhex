@@ -5,7 +5,7 @@ exports[`select transformer > transforms ({ id }) destructured outer with correl
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -24,7 +24,7 @@ exports[`select transformer > transforms ({ id: authorId }) aliased destructured
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -103,7 +103,7 @@ exports[`select transformer > transforms inline subquery with .limit() chain seg
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "a", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, {}).limit(10).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).limit(10).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -112,6 +112,6 @@ exports[`select transformer > transforms inline subquery with .orderBy().limit()
     static tableName: "posts" = "posts";
     static query(): any { return null as any; }
 }
-authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subqueryRef", key: "_sub0", localParamNames: ["p"] } }] }, { _sub0: Post.query().where({ kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, {}).orderBy({ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }).limit(1).select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }) });
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).orderBy({ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }).limit(1).select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }) });
 "
 `;
