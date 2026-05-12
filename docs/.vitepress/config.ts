@@ -21,13 +21,13 @@ export default defineConfig({
         text: "Guide",
         items: [
           { text: "Getting Started", link: "/guide/getting-started" },
+          { text: "TypeScript Transformer", link: "/guide/typescript-transformer" },
           { text: "Entities & Relations", link: "/guide/entities-relations" },
           { text: "Querying Relations", link: "/guide/querying-relations" },
           { text: "Filtering by Relations", link: "/guide/filtering-by-relations" },
           { text: "Aggregations", link: "/guide/aggregations" },
-          { text: "Transactions", link: "/guide/transactions" },
           { text: "Bulk Operations", link: "/guide/bulk-operations" },
-          { text: "TypeScript Transformer", link: "/guide/typescript-transformer" },
+          { text: "Transactions", link: "/guide/transactions" },
         ],
       },
       {

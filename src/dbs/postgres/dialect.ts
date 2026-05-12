@@ -9,7 +9,7 @@ import type {
   CompileSelectOpts,
   OnConflictClause,
 } from "../types.js";
-import type { RelationJoinInfo } from "../../orm/helpers/relations/relation-joins.js";
+import type { RelationJoinMeta } from "../../orm/helpers/relations/relation-joins.js";
 import type { Expr, ExprAggregate } from "../../orm/expr.js";
 import { getColumnDef, SQL_DEFAULT } from "../types.js";
 import {
@@ -265,7 +265,7 @@ export const postgresDialect: DialectImpl = {
 
   compileAggregate: postgresCompileAggregate,
 
-  buildJoinClause(join: RelationJoinInfo, mainAlias: string): string {
+  buildJoinClause(join: RelationJoinMeta, mainAlias: string): string {
     const kw =
       join.joinType === "cross" ? "INNER JOIN" : (JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
     const on = join.foreignKeys

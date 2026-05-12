@@ -1,10 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`having transformer > transforms ({ id }) => id > 5 — destructured outer where arrow 1`] = `
-"users.where({ node: { kind: "binary", op: ">", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, {});
-"
-`;
-
 exports[`having transformer > transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10 1`] = `
 "employees.having({ node: { kind: "binary", op: "&&", left: { kind: "binary", op: ">", left: { kind: "aggregate", func: "AVG", arg: { kind: "member", param: "p", path: ["salary"] } }, right: { kind: "const", value: 50000 } }, right: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 10 } } }, rootParam: "p", localParamNames: ["p"] }, {});
 "
@@ -26,26 +21,8 @@ orders.having({ node: { kind: "binary", op: ">=", left: { kind: "aggregate", fun
 "
 `;
 
-exports[`having transformer > transforms destructured outer where with correlated inline subquery comparison 1`] = `
-"class Post {
-    static tableName: "posts" = "posts";
-    static query(): any { return null as any; }
-}
-authors.where({ node: { kind: "binary", op: ">", left: { kind: "subqueryRef", key: "_sub0" }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
-"
-`;
-
-exports[`having transformer > transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id) 1`] = `
-"class Post {
-    static tableName: "posts" = "posts";
-    static query(): any { return null as any; }
-}
-authors.where({ node: { kind: "in", left: { kind: "member", param: "a", path: ["postId"] }, right: { kind: "subqueryRef", key: "_sub0" } }, rootParam: "a", localParamNames: ["a"] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["active"] }, right: { kind: "const", value: true } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "p", paths: [["id"]], aliases: ["id"] }) });
-"
-`;
-
-exports[`having transformer > transforms member access on destructured local — ({ author }) => author.id === 1 1`] = `
-"rows.where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["author", "id"] }, right: { kind: "const", value: 1 } }, rootParam: "u", localParamNames: ["u"] }, {});
+exports[`where transformer > transforms ({ id }) => id > 5 — destructured outer where arrow 1`] = `
+"users.where({ node: { kind: "binary", op: ">", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
@@ -88,5 +65,28 @@ exports[`where transformer > transforms (u) => u.name.includes("al") 1`] = `
 
 exports[`where transformer > transforms (u) => u.name.startsWith("A") 1`] = `
 "users.where({ node: { kind: "call", method: "startsWith", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "A" }] }, rootParam: "u", localParamNames: ["u"] }, {});
+"
+`;
+
+exports[`where transformer > transforms destructured outer where with correlated inline subquery comparison 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.where({ node: { kind: "binary", op: ">", left: { kind: "subqueryRef", key: "_sub0" }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+"
+`;
+
+exports[`where transformer > transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id) 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.where({ node: { kind: "in", left: { kind: "member", param: "a", path: ["postId"] }, right: { kind: "subqueryRef", key: "_sub0" } }, rootParam: "a", localParamNames: ["a"] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["active"] }, right: { kind: "const", value: true } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "p", paths: [["id"]], aliases: ["id"] }) });
+"
+`;
+
+exports[`where transformer > transforms member access on destructured local — ({ author }) => author.id === 1 1`] = `
+"rows.where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["author", "id"] }, right: { kind: "const", value: 1 } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;

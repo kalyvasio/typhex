@@ -72,28 +72,6 @@ describe("where transformer", () => {
       transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));"),
     ).toMatchSnapshot();
   });
-});
-
-describe("having transformer", () => {
-  it("transforms (p) => count(p.id) > 5", () => {
-    expect(transform("orders.having((p) => count(p.id) > 5);")).toMatchSnapshot();
-  });
-
-  it("transforms (p) => sum(p.price) >= minAmount with closure var", () => {
-    expect(
-      transform("const minAmount = 100; orders.having((p) => sum(p.price) >= minAmount);"),
-    ).toMatchSnapshot();
-  });
-
-  it("transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10", () => {
-    expect(
-      transform("employees.having((p) => avg(p.salary) > 50000 && count(p.id) > 10);"),
-    ).toMatchSnapshot();
-  });
-
-  it("transforms (p) => count(distinct(p.category)) > 3 with distinct", () => {
-    expect(transform("orders.having((p) => count(distinct(p.category)) > 3);")).toMatchSnapshot();
-  });
 
   it("transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id)", () => {
     const source = `
@@ -117,5 +95,27 @@ authors.where(({ id }: any) => Post.query().where((p: any) => p.authorId === id)
 
   it("transforms member access on destructured local — ({ author }) => author.id === 1", () => {
     expect(transform("rows.where(({ author }: any) => author.id === 1);")).toMatchSnapshot();
+  });
+});
+
+describe("having transformer", () => {
+  it("transforms (p) => count(p.id) > 5", () => {
+    expect(transform("orders.having((p) => count(p.id) > 5);")).toMatchSnapshot();
+  });
+
+  it("transforms (p) => sum(p.price) >= minAmount with closure var", () => {
+    expect(
+      transform("const minAmount = 100; orders.having((p) => sum(p.price) >= minAmount);"),
+    ).toMatchSnapshot();
+  });
+
+  it("transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10", () => {
+    expect(
+      transform("employees.having((p) => avg(p.salary) > 50000 && count(p.id) > 10);"),
+    ).toMatchSnapshot();
+  });
+
+  it("transforms (p) => count(distinct(p.category)) > 3 with distinct", () => {
+    expect(transform("orders.having((p) => count(distinct(p.category)) > 3);")).toMatchSnapshot();
   });
 });

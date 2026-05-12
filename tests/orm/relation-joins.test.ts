@@ -208,7 +208,7 @@ describe("relation-joins", () => {
       };
       expect(() =>
         new OneToManyExistsBuilder([where], mockRelations, "c", ["id"], mockResolveTarget).build(),
-      ).toThrow('where relation "tags" is not defined');
+      ).toThrow('EXISTS relation "tags" is not defined');
     });
 
     it("throws when EXISTS targets a non one-to-many relation", () => {
@@ -221,7 +221,7 @@ describe("relation-joins", () => {
       };
       expect(() =>
         new OneToManyExistsBuilder([where], mockRelations, "c", ["id"], mockResolveTarget).build(),
-      ).toThrow('where relation "company" must be one-to-many');
+      ).toThrow('EXISTS relation "company" must be one-to-many');
     });
 
     it("throws when one-to-many EXISTS has no parent primary key", () => {
@@ -234,7 +234,7 @@ describe("relation-joins", () => {
       };
       expect(() =>
         new OneToManyExistsBuilder([where], mockRelations, "d", [], mockResolveTarget).build(),
-      ).toThrow('where relation "employees" requires a primary key');
+      ).toThrow('EXISTS relation "employees" requires a primary key');
     });
 
     it("returns empty when no one-to-many in where", () => {

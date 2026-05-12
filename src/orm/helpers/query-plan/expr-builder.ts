@@ -21,7 +21,7 @@
 
 import type { IrNode, IrSubqueryRef, IrAggregate } from "../../../ir/types.js";
 import type { Expr, ExprColumn, ExprAggregate } from "../../expr.js";
-import type { OneToManyExistsInfo } from "../relations/relation-joins.js";
+import type { OneToManyExistsMeta } from "../relations/relation-joins.js";
 import type { QueryPlan } from "./query-plan.js";
 
 export type SubqueryPlans = Map<string, QueryPlan>;
@@ -47,7 +47,7 @@ export class ExprBuilder {
   constructor(
     private readonly paramToAlias: Record<string, string>,
     private readonly relationPathToAlias: Record<string, string>,
-    private readonly oneToManyExists: Record<string, OneToManyExistsInfo>,
+    private readonly oneToManyExists: Record<string, OneToManyExistsMeta>,
     private readonly subqueryPlans: SubqueryPlans,
     private readonly relationKeys: Set<string> = new Set(),
   ) {}
@@ -252,16 +252,22 @@ export class ExprBuilder {
    *    table alias rather than the outer row's.
    */
   private convertExists(node: IrNode & { kind: "exists" }, scope: Record<string, string>): Expr {
-    const info = this.oneToManyExists[`${node.rootParam}.${node.relationKey}`];
-    const innerScope = { ...scope, [node.innerParam]: info.alias };
+    const key = `${node.rootParam}.${node.relationKey}`;
+    const meta = this.oneToManyExists[key];
+    if (!meta) {
+      throw new Error(
+        `[typhex] EXISTS predicate for relation "${node.relationKey}" could not be planned`,
+      );
+    }
+    const innerScope = { ...scope, [node.innerParam]: meta.alias };
     return {
       kind: "exists",
       negated: node.negated,
       outerAlias: scope[node.rootParam],
-      innerAlias: info.alias,
-      targetTable: info.targetTable,
-      fkColumns: info.fkColumns,
-      mainPk: info.mainPk,
+      innerAlias: meta.alias,
+      targetTable: meta.targetTable,
+      fkColumns: meta.fkColumns,
+      mainPk: meta.mainPk,
       predicate: this.convert(node.innerWhere, innerScope),
     };
   }

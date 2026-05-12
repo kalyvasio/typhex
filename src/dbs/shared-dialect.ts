@@ -330,7 +330,6 @@ export function compilePlan(
     return out;
   };
 
-  const whereExpanded = expand(compileWhereExpr(plan.where, dialect), plan.whereParams);
   const joinsSql = plan.joins.map((j) => dialect.buildJoinClause(j, plan.tableAlias)).join("");
 
   switch (plan.operation.kind) {
@@ -348,6 +347,7 @@ export function compilePlan(
         ),
         plan.whereParams,
       );
+      const whereExpanded = expand(compileWhereExpr(plan.where, dialect), plan.whereParams);
       const havingExpanded = plan.having
         ? expand(compileWhereExpr(plan.having, dialect), plan.havingParams)
         : null;
@@ -371,7 +371,8 @@ export function compilePlan(
       });
       return options.wrap ? { sql: `(${result.sql})`, params: result.params } : result;
     }
-    case "count":
+    case "count": {
+      const whereExpanded = expand(compileWhereExpr(plan.where, dialect), plan.whereParams);
       return dialect.compileCount(
         plan.tableName,
         plan.tableAlias,
@@ -379,7 +380,9 @@ export function compilePlan(
         whereExpanded.params,
         joinsSql || undefined,
       );
-    case "update":
+    }
+    case "update": {
+      const whereExpanded = expand(compileWhereExpr(plan.where, dialect), plan.whereParams);
       return dialect.compileUpdate(
         plan.tableName,
         plan.operation.set,
@@ -388,9 +391,12 @@ export function compilePlan(
         whereExpanded.params,
         { returning: plan.operation.returning },
       );
-    case "delete":
+    }
+    case "delete": {
+      const whereExpanded = expand(compileWhereExpr(plan.where, dialect), plan.whereParams);
       return dialect.compileDelete(plan.tableName, whereExpanded.sql, whereExpanded.params, {
         returning: plan.operation.returning,
       });
+    }
   }
 }

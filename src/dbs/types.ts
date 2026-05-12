@@ -3,7 +3,7 @@
  */
 
 import type { Connection, ExecuteResult } from "../driver/types.js";
-import type { RelationJoinInfo } from "../orm/helpers/relations/relation-joins.js";
+import type { RelationJoinMeta } from "../orm/helpers/relations/relation-joins.js";
 import type { Dialect } from "../dialect.js";
 import type { Expr, ExprAggregate, GroupByItem } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
@@ -189,7 +189,7 @@ export interface DialectImpl {
     options?: { returning?: boolean },
   ): CompileResult;
   compileSelect(opts: CompileSelectOpts): CompileResult;
-  buildJoinClause(join: RelationJoinInfo, mainAlias: string): string;
+  buildJoinClause(join: RelationJoinMeta, mainAlias: string): string;
 }
 
 /** Resolve column definition for a dialect. */

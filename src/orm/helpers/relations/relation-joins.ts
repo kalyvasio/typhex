@@ -8,7 +8,7 @@ import type { IrExists, JoinHint, JoinType } from "../../../ir/types.js";
 import type { RelationsMap, RelationDef, JunctionOptions } from "../../../entity/relations.js";
 import { toArray } from "../../../utils.js";
 
-export interface RelationJoinInfo {
+export interface RelationJoinMeta {
   relationKey: string;
   alias: string;
   targetTable: string;
@@ -18,7 +18,7 @@ export interface RelationJoinInfo {
   joinType: JoinType;
 }
 
-export interface OneToManyExistsInfo {
+export interface OneToManyExistsMeta {
   targetTable: string;
   fkColumns: string[];
   mainPk: string[];
@@ -34,7 +34,7 @@ export interface RelationJoinContext {
 }
 
 /**
- * Builds EXISTS metadata for one-to-many relations in the where clause.
+ * Builds EXISTS metadata for one-to-many relation predicates.
  * One-to-many uses EXISTS instead of JOIN to avoid row duplication.
  */
 export class OneToManyExistsBuilder {
@@ -46,15 +46,17 @@ export class OneToManyExistsBuilder {
     private readonly rootParam: string,
     private readonly mainPk: string[],
     private readonly resolveTarget: (rel: RelationDef) => { table: string; pk: string[] } | null,
+    private readonly localParamNames: string[] = [rootParam],
     private readonly aliasPrefix = "ex",
   ) {}
 
-  build(): Record<string, OneToManyExistsInfo> {
-    const result: Record<string, OneToManyExistsInfo> = {};
+  build(): Record<string, OneToManyExistsMeta> {
+    const result: Record<string, OneToManyExistsMeta> = {};
+    const rootParams = new Set([this.rootParam, ...this.localParamNames]);
 
     for (const node of this.existsNodes) {
-      if (node.rootParam !== this.rootParam) continue;
-      const key = `${this.rootParam}.${node.relationKey}`;
+      if (!rootParams.has(node.rootParam)) continue;
+      const key = `${node.rootParam}.${node.relationKey}`;
       if (result[key]) continue;
       result[key] = this.buildExistsInfo(node);
     }
@@ -62,21 +64,21 @@ export class OneToManyExistsBuilder {
     return result;
   }
 
-  private buildExistsInfo(node: IrExists): OneToManyExistsInfo {
+  private buildExistsInfo(node: IrExists): OneToManyExistsMeta {
     const rel = this.relations[node.relationKey];
     if (!rel) {
       throw new Error(
-        `[typhex] where relation "${node.relationKey}" is not defined on this entity`,
+        `[typhex] EXISTS relation "${node.relationKey}" is not defined on this entity`,
       );
     }
     if (rel._relType !== "one-to-many") {
       throw new Error(
-        `[typhex] where relation "${node.relationKey}" must be one-to-many to use .some()/.every()`,
+        `[typhex] EXISTS relation "${node.relationKey}" must be one-to-many to use .some()/.every()`,
       );
     }
     if (this.mainPk.length === 0) {
       throw new Error(
-        `[typhex] where relation "${node.relationKey}" requires a primary key on the parent entity`,
+        `[typhex] EXISTS relation "${node.relationKey}" requires a primary key on the parent entity`,
       );
     }
 
@@ -104,8 +106,8 @@ export class RelationJoinBuilder {
     private readonly joinHints?: JoinHint[],
   ) {}
 
-  build(): RelationJoinInfo[] {
-    const result: RelationJoinInfo[] = [];
+  build(): RelationJoinMeta[] {
+    const result: RelationJoinMeta[] = [];
 
     for (const relKey of this.relationKeys) {
       const join = this.buildJoin(relKey);
@@ -115,7 +117,7 @@ export class RelationJoinBuilder {
     return result;
   }
 
-  private buildJoin(relKey: string): RelationJoinInfo | null {
+  private buildJoin(relKey: string): RelationJoinMeta | null {
     const rel = this.ctx.relations[relKey] as RelationDef | undefined;
     if (!rel) return null;
 
@@ -154,7 +156,7 @@ export class RelationJoinBuilder {
 /** Builds a lookup from `${param}.${relationKey}` to the JOIN alias. */
 export class RelationPathAliasBuilder {
   constructor(
-    private readonly joins: RelationJoinInfo[],
+    private readonly joins: RelationJoinMeta[],
     private readonly params: string[],
   ) {}
 

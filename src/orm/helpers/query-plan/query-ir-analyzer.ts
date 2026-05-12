@@ -18,7 +18,6 @@ export interface QueryIrAnalysis {
   having: ExprIrAnalysis;
   orderBy: ExprIrAnalysis;
   select: ExprIrAnalysis;
-  whereAndOrderBy: ExprIrAnalysis;
   all: ExprIrAnalysis;
   joinRelationKeys: Set<string>;
   reusableJoinKeys: Set<string>;
@@ -44,8 +43,8 @@ export class QueryIrAnalyzer {
     const having = this.analyzeExprIr(this.state.havingIr?.node, rootParam);
     const orderBy = this.analyzeOrderBy(this.state.orderBy, rootParam);
     const select = this.analyzeSelectIr(this.state.selectIr);
-    const whereAndOrderBy = this.merge(where, orderBy);
-    const joinRelationKeys = this.relationKeysWithHints(whereAndOrderBy.relationKeys);
+    const joinSources = this.merge(where, orderBy);
+    const joinRelationKeys = this.relationKeysWithHints(joinSources.relationKeys);
     const subqueries = this.analyzeSubqueries();
     const correlatedParamNames = this.getCorrelatedParamNames(subqueries);
 
@@ -58,7 +57,6 @@ export class QueryIrAnalyzer {
       having,
       orderBy,
       select,
-      whereAndOrderBy,
       all: this.merge(where, having, orderBy, select),
       joinRelationKeys,
       reusableJoinKeys: this.reusableJoinKeys(where.relationKeys, select.relationKeys),
@@ -68,6 +66,7 @@ export class QueryIrAnalyzer {
   private inferRootParam(): string {
     if (this.state.selectIr?.param) return this.state.selectIr.param;
     if (this.state.whereIr?.rootParam) return this.state.whereIr.rootParam;
+    if (this.state.havingIr?.rootParam) return this.state.havingIr.rootParam;
     const firstOrder = this.state.orderBy[0]?.expr;
     if (firstOrder?.kind === "member") return firstOrder.param;
     return this.fallbackParam;

@@ -58,8 +58,8 @@ import {
   RelationJoinBuilder,
   RelationPathAliasBuilder,
   OneToManyExistsBuilder,
-  type RelationJoinInfo,
-  type OneToManyExistsInfo,
+  type RelationJoinMeta,
+  type OneToManyExistsMeta,
 } from "../relations/relation-joins.js";
 import type { QueryState } from "../../query-builder.js";
 import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../expr.js";
@@ -203,8 +203,8 @@ interface OuterScope {
  * table, FK columns, and parent PK to use.
  */
 interface RelationDetection {
-  joins: RelationJoinInfo[];
-  oneToManyExists: Record<string, OneToManyExistsInfo>;
+  joins: RelationJoinMeta[];
+  oneToManyExists: Record<string, OneToManyExistsMeta>;
 }
 
 // ─── public entry point ───────────────────────────────────────────────────────
@@ -419,7 +419,7 @@ export class QueryPlanBuilder {
 
   private activeAnalysis(): ExprIrAnalysis {
     if (this.operation.kind === "select") return this.analysis.all;
-    return this.analysis.whereAndOrderBy;
+    return mergeExprIrAnalysis(this.analysis.where, this.analysis.orderBy);
   }
 
   private pickSubqueryAlias(
@@ -474,11 +474,12 @@ export class QueryPlanBuilder {
         this.state.joinHints,
       ).build(),
       oneToManyExists: new OneToManyExistsBuilder(
-        this.analysis.where.existsNodes,
+        [...this.analysis.where.existsNodes, ...this.analysis.having.existsNodes],
         relations,
         this.rootParam,
         pkColumns,
         resolveRelationTarget,
+        this.analysis.localParamNames,
       ).build(),
     };
   }
@@ -627,6 +628,22 @@ const EMPTY_RELATION_DETECTION: RelationDetection = {
   oneToManyExists: {},
 };
 
+function mergeExprIrAnalysis(...items: ExprIrAnalysis[]): ExprIrAnalysis {
+  const out: ExprIrAnalysis = {
+    paramNames: new Set(),
+    relationKeys: new Set(),
+    subqueryRefs: {},
+    existsNodes: [],
+  };
+  for (const item of items) {
+    for (const param of item.paramNames) out.paramNames.add(param);
+    for (const key of item.relationKeys) out.relationKeys.add(key);
+    Object.assign(out.subqueryRefs, item.subqueryRefs);
+    out.existsNodes.push(...item.existsNodes);
+  }
+  return out;
+}
+
 /**
  * Pick the lowest-numbered `tN` alias not already taken. Sibling
  * subqueries can share the same alias because each compiles to an
@@ -640,12 +657,12 @@ function pickFreeAlias(used: Set<string>): string {
 }
 
 /**
- * Project a `RelationJoinInfo` (used internally during relation-detection
+ * Project a `RelationJoinMeta` (used internally during relation-detection
  * to carry the planning-time fields) onto the public `JoinSpec` shape
  * that the dialect consumes. The dialect has no business knowing
  * planning-only fields, so this strip-down is the boundary.
  */
-function toJoinSpec(j: RelationJoinInfo): JoinSpec {
+function toJoinSpec(j: RelationJoinMeta): JoinSpec {
   return {
     relationKey: j.relationKey,
     alias: j.alias,

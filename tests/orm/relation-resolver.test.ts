@@ -5,7 +5,7 @@ import type {
   RelationFetchMetadata,
 } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { RelationAssembler } from "../../src/orm/helpers/relations/relation-assembler.js";
-import type { IrSelect, IrWhere } from "../../src/ir/types.js";
+import type { IrHaving, IrSelect, IrWhere } from "../../src/ir/types.js";
 import type { QueryState } from "../../src/orm/query-builder.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 
@@ -65,6 +65,7 @@ function buildState(args: {
   selectIr: IrSelect | null;
   relations?: any;
   whereIr?: IrWhere | null;
+  havingIr?: IrHaving | null;
   pkColumns?: string[] | null;
 }): QueryState<unknown> {
   return {
@@ -76,7 +77,7 @@ function buildState(args: {
     whereParams: {},
     subqueryParams: {},
     orderBy: [],
-    havingIr: null,
+    havingIr: args.havingIr ?? null,
     havingParams: {},
     limitNum: null,
     offsetNum: null,
@@ -97,6 +98,7 @@ function planFor(args: {
   selectIr: IrSelect | null;
   relations?: any;
   whereIr?: IrWhere | null;
+  havingIr?: IrHaving | null;
   pkColumns?: string[] | null;
 }) {
   const state = buildState(args);
@@ -370,6 +372,41 @@ describe("relation-resolver", () => {
       const plan = planFor({ selectIr: null, relations: mockRelations });
       expect(plan.selectItems).toEqual([]);
       expect(plan.relationFetches).toHaveLength(0);
+    });
+
+    it("plans one-to-many EXISTS metadata from HAVING predicates", () => {
+      const select: IrSelect = {
+        param: "u",
+        paths: [["id"]],
+        aliases: ["id"],
+      };
+      const having: IrHaving = {
+        rootParam: "p",
+        localParamNames: ["p"],
+        node: {
+          kind: "exists",
+          rootParam: "p",
+          relationKey: "posts",
+          innerParam: "post",
+          innerWhere: {
+            kind: "binary",
+            op: "===",
+            left: { kind: "member", param: "post", path: ["published"] },
+            right: { kind: "const", value: true },
+          },
+        },
+      };
+
+      const plan = planFor({ selectIr: select, relations: mockRelationsToMany, havingIr: having });
+
+      expect(plan.having).toMatchObject({
+        kind: "exists",
+        outerAlias: "t0",
+        innerAlias: "ex0",
+        targetTable: "posts",
+        fkColumns: ["userId"],
+        mainPk: ["id"],
+      });
     });
 
     it("appends missing FK column when it is not already selected", () => {

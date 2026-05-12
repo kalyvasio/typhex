@@ -2,13 +2,16 @@ import { describe, expect, it } from "vitest";
 import { postgresDialect, sqliteDialect } from "../../src/dbs/index.js";
 import { compileSelectListExpr } from "../../src/dbs/shared-dialect.js";
 import type { DialectImpl } from "../../src/dbs/types.js";
-import type { ExprAggregate, SelectItem } from "../../src/orm/expr.js";
+import type { Expr, ExprAggregate, SelectItem } from "../../src/orm/expr.js";
 import { col, eq, konst, selectPlan, countPostsSelect } from "./subquery-ref-helpers.js";
 
 function aggFn(dialect: DialectImpl) {
   return dialect.compileAggregate
-    ? (agg: ExprAggregate, fn: (n: import("../../src/orm/expr.js").Expr, p: unknown[]) => string, p: unknown[]) =>
-        dialect.compileAggregate!(agg, fn, p)
+    ? (
+        agg: ExprAggregate,
+        fn: (n: import("../../src/orm/expr.js").Expr, p: unknown[]) => string,
+        p: unknown[],
+      ) => dialect.compileAggregate!(agg, fn, p)
     : undefined;
 }
 
@@ -126,14 +129,39 @@ describe("Scalar subquery columns in SELECT", () => {
     expect(params).toEqual([true, true]);
   });
 
+  it("PostgreSQL: compilePlan numbers SELECT-list params before WHERE params", () => {
+    const statusParam: Expr = { kind: "param", name: "status" };
+    const countryParam: Expr = { kind: "param", name: "country" };
+    const countPostsByStatus = selectPlan({
+      selectItems: countPostsSelect,
+      where: eq(col("t1", "status"), statusParam),
+      whereParams: { status: "published" },
+    });
+    const plan = selectPlan({
+      tableName: "users",
+      tableAlias: "t0",
+      columnNames: ["id", "name", "country"],
+      selectItems: [
+        { expr: col("t0", "name"), alias: "name" },
+        { expr: { kind: "subquery", plan: countPostsByStatus }, alias: "postCount" },
+      ],
+      where: eq(col("t0", "country"), countryParam),
+      whereParams: { country: "US" },
+    });
+
+    const { sql, params } = postgresDialect.compilePlan(plan);
+
+    expect(sql).toContain('"t1"."status" = $1');
+    expect(sql).toContain('"t0"."country" = $2');
+    expect(params).toEqual(["published", "US"]);
+  });
+
   it("subquery alias avoids outer JOIN alias collision", () => {
     // When the outer query has a JOIN that occupies t1, the planner allocates
     // t2 for the subquery. Here we hand-build the inner plan with tableAlias "t2".
     const t2Plan = selectPlan({
       tableAlias: "t2",
-      selectItems: [
-        { expr: { kind: "aggregate", func: "COUNT", arg: null } as ExprAggregate },
-      ],
+      selectItems: [{ expr: { kind: "aggregate", func: "COUNT", arg: null } as ExprAggregate }],
       where: eq(col("t2", "active"), konst(true)),
     });
     const items: SelectItem[] = [
@@ -180,9 +208,7 @@ describe("Scalar subquery columns in SELECT", () => {
 
   it("emits LIMIT inside the subquery for COUNT(*) with limitNum", () => {
     const sub = selectPlan({ selectItems: countPostsSelect, limitNum: 10 });
-    const items: SelectItem[] = [
-      { expr: { kind: "subquery", plan: sub }, alias: "c" },
-    ];
+    const items: SelectItem[] = [{ expr: { kind: "subquery", plan: sub }, alias: "c" }];
     const { sql, params } = compileSelectListExpr(
       items,
       false,
@@ -209,9 +235,7 @@ describe("Scalar subquery columns in SELECT", () => {
       orderBy: [{ expr: col("t1", "score"), direction: "desc" }],
       limitNum: 1,
     });
-    const items: SelectItem[] = [
-      { expr: { kind: "subquery", plan: sub }, alias: "topScore" },
-    ];
+    const items: SelectItem[] = [{ expr: { kind: "subquery", plan: sub }, alias: "topScore" }];
     const { sql, params } = compileSelectListExpr(
       items,
       false,
@@ -232,9 +256,7 @@ describe("Scalar subquery columns in SELECT", () => {
       limitNum: 5,
       offsetNum: 2,
     });
-    const items: SelectItem[] = [
-      { expr: { kind: "subquery", plan: sub }, alias: "c" },
-    ];
+    const items: SelectItem[] = [{ expr: { kind: "subquery", plan: sub }, alias: "c" }];
     const { sql, params } = compileSelectListExpr(
       items,
       false,
