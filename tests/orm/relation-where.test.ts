@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, createSqliteDriver, Entity, rel } from "../../src/index.js";
-import type { IrNode } from "../../src/ir/types.js";
+import type { IrNode, IrWhere } from "../../src/ir/types.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 
 // Entities for multi-relation JOIN tests
@@ -206,6 +206,12 @@ describe("NOT IN / negated .some() (NOT EXISTS)", () => {
   });
 
   describe("NOT IN with array literal via IrNode", () => {
+    const where = (node: IrNode): IrWhere => ({
+      node,
+      rootParam: "u",
+      localParamNames: ["u"],
+    });
+
     it("returns rows whose id is NOT IN the given list", async () => {
       const alice = await User.query().insert({ name: "Alice", email: "alice@example.com" });
       const bob = await User.query().insert({ name: "Bob", email: "bob@example.com" });
@@ -222,7 +228,7 @@ describe("NOT IN / negated .some() (NOT EXISTS)", () => {
         right: { kind: "const", value: [aliceId, bobId] },
       };
 
-      const results = await User.query().where(notInIr).orderBy("id", "asc").toArray();
+      const results = await User.query().where(where(notInIr)).orderBy("id", "asc").toArray();
 
       expect(results).toHaveLength(1);
       expect((results[0] as any).name).toBe("Carol");
@@ -240,7 +246,7 @@ describe("NOT IN / negated .some() (NOT EXISTS)", () => {
         right: { kind: "const", value: [] },
       };
 
-      const results = await User.query().where(notInEmptyIr).orderBy("id", "asc").toArray();
+      const results = await User.query().where(where(notInEmptyIr)).orderBy("id", "asc").toArray();
 
       expect(results).toHaveLength(2);
     });
@@ -255,7 +261,7 @@ describe("NOT IN / negated .some() (NOT EXISTS)", () => {
         right: { kind: "const", value: [] },
       };
 
-      const results = await User.query().where(inEmptyIr).toArray();
+      const results = await User.query().where(where(inEmptyIr)).toArray();
 
       expect(results).toHaveLength(0);
     });

@@ -126,8 +126,7 @@ function hasPrimaryKey(def: string): boolean {
 
 function getPkColumns(schema: Record<string, string>): string[] {
   const names = Object.keys(schema);
-  const pks = names.filter((c) => hasPrimaryKey(schema[c]));
-  return pks.length > 0 ? pks : [names[0]];
+  return names.filter((c) => hasPrimaryKey(schema[c]));
 }
 
 /** Public helper for relation loading: primary key column names from a schema map. */
@@ -212,7 +211,10 @@ export function Entity<
       pkColumns: pkCols,
       whereIr: null,
       whereParams: {} as Record<string, unknown>,
+      subqueryParams: {},
       orderBy: [] as any[],
+      havingIr: null,
+      havingParams: {},
       limitNum: null,
       offsetNum: null,
       selectIr: null,

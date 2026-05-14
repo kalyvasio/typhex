@@ -5,6 +5,8 @@ import type { RelationDef } from "../../src/entity/relations.js";
 import { sqliteDialect } from "../../src/dbs/sqlite/dialect.js";
 import type { IrOrderBy } from "../../src/ir/types.js";
 import { type MockDb, createMockDb } from "../helpers.js";
+import { compileOrderByExpr } from "../../src/dbs/shared-dialect.js";
+import type { OrderItem } from "../../src/orm/expr.js";
 
 // ---------------------------------------------------------------------------
 // Unit tests: orderBy lambda parsing
@@ -35,7 +37,10 @@ function newBuilder(db: MockDb) {
     pkColumns: ["id"],
     whereIr: null,
     whereParams: {},
+    subqueryParams: {},
     orderBy: [],
+    havingIr: null,
+    havingParams: {},
     limitNum: null,
     offsetNum: null,
     selectIr: null,
@@ -65,6 +70,12 @@ describe("orderBy — lambda and dot-notation support", () => {
       const q = newBuilder(db);
       q.orderBy((u) => u.company.name);
       expect(q).toBeInstanceOf(QueryBuilder);
+    });
+
+    it("throws when ordering by a relation object", async () => {
+      const q = newBuilder(db);
+      q.orderBy((u) => u.company);
+      await expect(q.toArray()).rejects.toThrow('relation "company" must reference a column');
     });
 
     it("stores correct path for u => u.name", async () => {
@@ -105,6 +116,12 @@ describe("orderBy — lambda and dot-notation support", () => {
       expect(capturedSql).toMatch(/ORDER BY\s+.+name/i);
     });
 
+    it("throws when string orderBy targets a relation object", async () => {
+      const q = newBuilder(db);
+      q.orderBy("company");
+      await expect(q.toArray()).rejects.toThrow('relation "company" must reference a column');
+    });
+
     it("chains and returns this (same reference)", () => {
       const q = newBuilder(db);
       const result = q.orderBy("name", "desc");
@@ -117,58 +134,48 @@ describe("orderBy — lambda and dot-notation support", () => {
 // Unit tests: compileOrderBy with relationPathToAlias
 // ---------------------------------------------------------------------------
 
-describe("compileOrderBy — relation path resolution", () => {
-  it("resolves relation alias for path ['company', 'name']", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
-    expect(result).toBe('"t1"."name" ASC');
+describe("compileOrderByExpr — relation path resolution", () => {
+  // Note: relation alias resolution happens in QueryPlanBuilder, not the dialect.
+  // These tests now verify dialect-level rendering of pre-resolved ExprColumn.
+  it("renders relation alias for column { alias: 't1', column: 'name' }", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "asc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
+    expect(result.sql).toBe('"t1"."name" ASC');
   });
 
-  it("resolves relation alias for desc direction", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "desc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
-    expect(result).toBe('"t1"."name" DESC');
+  it("renders relation alias for desc direction", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "desc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
+    expect(result.sql).toBe('"t1"."name" DESC');
   });
 
-  it("falls back to table alias when no relation path alias matches", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["name"], direction: "asc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-    });
-    expect(result).toBe('"t0"."name" ASC');
+  it("renders main-table alias when no relation rewrite", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "asc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
+    expect(result.sql).toBe('"t0"."name" ASC');
   });
 
-  it("does not resolve single-segment paths (non-relation columns)", () => {
-    const orders: IrOrderBy[] = [{ param: "u", path: ["company"], direction: "asc" }];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
-    // single-segment path: no resolution (path.length < 2)
-    expect(result).toBe('"t0"."company" ASC');
+  it("renders a supplied main-table column named company", () => {
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t0", column: ["company"] }, direction: "asc" },
+    ];
+    const result = compileOrderByExpr(orders, sqliteDialect);
+    expect(result.sql).toBe('"t0"."company" ASC');
   });
 
   it("compiles multiple orders including a relation column", () => {
-    const orders: IrOrderBy[] = [
-      { param: "u", path: ["company", "name"], direction: "asc" },
-      { param: "u", path: ["name"], direction: "desc" },
+    const orders: OrderItem[] = [
+      { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "asc" },
+      { expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "desc" },
     ];
-    const result = sqliteDialect.compileOrderBy(orders, {
-      tableAlias: "t0",
-      paramToAlias: { u: "t0" },
-      relationPathToAlias: { "u.company": "t1" },
-    });
-    expect(result).toBe('"t1"."name" ASC, "t0"."name" DESC');
+    const result = compileOrderByExpr(orders, sqliteDialect);
+    expect(result.sql).toBe('"t1"."name" ASC, "t0"."name" DESC');
   });
 });
 
@@ -266,7 +273,10 @@ describe("orderBy relation columns — integration", () => {
       pkColumns: ["id"],
       whereIr: null,
       whereParams: {},
+      subqueryParams: {},
       orderBy: [] as IrOrderBy[],
+      havingIr: null,
+      havingParams: {},
       limitNum: null,
       offsetNum: null,
       selectIr: null,

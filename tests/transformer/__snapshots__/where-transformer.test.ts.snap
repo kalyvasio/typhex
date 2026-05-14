@@ -1,64 +1,92 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`having transformer > transforms (p) => avg(p.salary) > 50000 && count(p.id) > 10 1`] = `
-"employees.having({ kind: "binary", op: "&&", left: { kind: "binary", op: ">", left: { kind: "aggregate", func: "AVG", arg: { kind: "member", param: "p", path: ["salary"] } }, right: { kind: "const", value: 50000 } }, right: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 10 } } }, {});
+"employees.having({ node: { kind: "binary", op: "&&", left: { kind: "binary", op: ">", left: { kind: "aggregate", func: "AVG", arg: { kind: "member", param: "p", path: ["salary"] } }, right: { kind: "const", value: 50000 } }, right: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 10 } } }, rootParam: "p", localParamNames: ["p"] }, {});
 "
 `;
 
 exports[`having transformer > transforms (p) => count(distinct(p.category)) > 3 with distinct 1`] = `
-"orders.having({ kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["category"] }, distinct: true }, right: { kind: "const", value: 3 } }, {});
+"orders.having({ node: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["category"] }, distinct: true }, right: { kind: "const", value: 3 } }, rootParam: "p", localParamNames: ["p"] }, {});
 "
 `;
 
 exports[`having transformer > transforms (p) => count(p.id) > 5 1`] = `
-"orders.having({ kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 5 } }, {});
+"orders.having({ node: { kind: "binary", op: ">", left: { kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["id"] } }, right: { kind: "const", value: 5 } }, rootParam: "p", localParamNames: ["p"] }, {});
 "
 `;
 
 exports[`having transformer > transforms (p) => sum(p.price) >= minAmount with closure var 1`] = `
 "const minAmount = 100;
-orders.having({ kind: "binary", op: ">=", left: { kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["price"] } }, right: { kind: "param", key: "minAmount" } }, { minAmount });
+orders.having({ node: { kind: "binary", op: ">=", left: { kind: "aggregate", func: "SUM", arg: { kind: "member", param: "p", path: ["price"] } }, right: { kind: "param", key: "minAmount" } }, rootParam: "p", localParamNames: ["p"] }, { minAmount });
+"
+`;
+
+exports[`where transformer > transforms ({ id }) => id > 5 — destructured outer where arrow 1`] = `
+"users.where({ node: { kind: "binary", op: ">", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (d) => d.employees.some((e) => e.name === 'Alice') 1`] = `
-"depts.where({ kind: "exists", rootParam: "d", relationKey: "employees", innerParam: "e", innerWhere: { kind: "binary", op: "===", left: { kind: "member", param: "e", path: ["name"] }, right: { kind: "const", value: "Alice" } } }, {});
+"depts.where({ node: { kind: "exists", rootParam: "d", relationKey: "employees", innerParam: "e", innerWhere: { kind: "binary", op: "===", left: { kind: "member", param: "e", path: ["name"] }, right: { kind: "const", value: "Alice" } } }, rootParam: "d", localParamNames: ["d"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (u) => !(u.id in [2]) 1`] = `
-"users.where({ kind: "unary", op: "!", operand: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [2] } } }, {});
+"users.where({ node: { kind: "unary", op: "!", operand: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [2] } } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (u) => u.age >= minAge && u.age <= maxAge with closure vars 1`] = `
 "const minAge = 25;
 const maxAge = 35;
-users.where({ kind: "binary", op: "&&", left: { kind: "binary", op: ">=", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "minAge" } }, right: { kind: "binary", op: "<=", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "maxAge" } } }, { minAge, maxAge });
+users.where({ node: { kind: "binary", op: "&&", left: { kind: "binary", op: ">=", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "minAge" } }, right: { kind: "binary", op: "<=", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "maxAge" } } }, rootParam: "u", localParamNames: ["u"] }, { minAge, maxAge });
 "
 `;
 
 exports[`where transformer > transforms (u) => u.country === "US" 1`] = `
-"users.where({ kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["country"] }, right: { kind: "const", value: "US" } }, {});
+"users.where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["country"] }, right: { kind: "const", value: "US" } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (u) => u.id === 1 simple equality 1`] = `
-"users.where({ kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 1 } }, {});
+"users.where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 1 } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (u) => u.id in [1, 2] 1`] = `
-"users.where({ kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [1, 2] } }, {});
+"users.where({ node: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [1, 2] } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (u) => u.name.includes("al") 1`] = `
-"users.where({ kind: "call", method: "includes", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "al" }] }, {});
+"users.where({ node: { kind: "call", method: "includes", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "al" }] }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 
 exports[`where transformer > transforms (u) => u.name.startsWith("A") 1`] = `
-"users.where({ kind: "call", method: "startsWith", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "A" }] }, {});
+"users.where({ node: { kind: "call", method: "startsWith", receiver: { kind: "member", param: "u", path: ["name"] }, args: [{ kind: "const", value: "A" }] }, rootParam: "u", localParamNames: ["u"] }, {});
+"
+`;
+
+exports[`where transformer > transforms destructured outer where with correlated inline subquery comparison 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.where({ node: { kind: "binary", op: ">", left: { kind: "subqueryRef", key: "_sub0" }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+"
+`;
+
+exports[`where transformer > transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id) 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.where({ node: { kind: "in", left: { kind: "member", param: "a", path: ["postId"] }, right: { kind: "subqueryRef", key: "_sub0" } }, rootParam: "a", localParamNames: ["a"] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["active"] }, right: { kind: "const", value: true } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "p", paths: [["id"]], aliases: ["id"] }) });
+"
+`;
+
+exports[`where transformer > transforms member access on destructured local — ({ author }) => author.id === 1 1`] = `
+"rows.where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "u", path: ["author", "id"] }, right: { kind: "const", value: 1 } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;

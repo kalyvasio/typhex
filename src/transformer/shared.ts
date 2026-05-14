@@ -3,7 +3,7 @@
  */
 
 import ts from "typescript";
-import type { IrNode, IrSelect, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrSelect, IrWhere, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
 
 // ---------------------------------------------------------------------------
 // Typhex type detection
@@ -196,6 +196,82 @@ const BINARY_OP_MAP: Record<number, IrBinary["op"] | "in" | undefined> = {
 /** Map a TS binary-operator SyntaxKind to its IR operator string (or null if unsupported). */
 export function binaryOpFromSyntaxKind(kind: ts.SyntaxKind): IrBinary["op"] | "in" | null {
   return BINARY_OP_MAP[kind] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Destructured-parameter binding extraction
+// ---------------------------------------------------------------------------
+
+const DEFAULT_ROW_PARAM = "u";
+
+export interface ParamBindings {
+  paramName: string;
+  /** For destructured params: maps local name → path segments into the row. */
+  bindings: Map<string, string[]> | null;
+  /** Name of the ...rest identifier, if any. */
+  restName: string | null;
+}
+
+const NO_BINDINGS: ParamBindings = {
+  paramName: DEFAULT_ROW_PARAM,
+  bindings: null,
+  restName: null,
+};
+
+/**
+ * Inspect the arrow's first parameter: identifier → bound row name; object
+ * destructure → local-name → source-key map plus optional rest identifier.
+ * Aliased entries (`{ foo: bar }`) map `bar` back to `["foo"]`.
+ */
+export function getParamBindings(param: ts.BindingName | undefined): ParamBindings {
+  if (!param) return NO_BINDINGS;
+  if (ts.isIdentifier(param)) {
+    return { paramName: param.text, bindings: null, restName: null };
+  }
+  if (!ts.isObjectBindingPattern(param)) return NO_BINDINGS;
+
+  const bindings = new Map<string, string[]>();
+  let restName: string | null = null;
+  for (const el of param.elements) {
+    if (el.dotDotDotToken) {
+      if (ts.isIdentifier(el.name)) restName = el.name.text;
+      continue;
+    }
+    if (!ts.isIdentifier(el.name)) continue;
+    const localName = el.name.text;
+    const sourceKey =
+      el.propertyName && ts.isIdentifier(el.propertyName) ? el.propertyName.text : localName;
+    bindings.set(localName, [sourceKey]);
+  }
+
+  if (bindings.size === 0 && !restName) return NO_BINDINGS;
+  return {
+    paramName: DEFAULT_ROW_PARAM,
+    bindings: bindings.size > 0 ? bindings : null,
+    restName,
+  };
+}
+
+/** One arrow's binding info captured while the visitor descends into it.
+ *  The `scope` stack is `ScopeFrame[]` — each enclosing arrow adds one frame.
+ *  Used by per-method transformers (where/select/orderby) to recognize
+ *  references to outer-arrow params/destructured locals when the inner call
+ *  is rewritten inside-out (so the outer arrow hasn't been processed yet). */
+export interface ScopeFrame {
+  /** Row-param name for this arrow (the value identifier or DEFAULT_ROW_PARAM
+   *  for destructured patterns). */
+  paramName: string;
+  /** Destructured locals — local-name → path into the row. */
+  bindings?: Map<string, string[]>;
+}
+
+/** Build a ScopeFrame from an arrow's first parameter's binding name. */
+export function frameFromBindingName(name: ts.BindingName | undefined): ScopeFrame | null {
+  const pb = getParamBindings(name);
+  if (pb === NO_BINDINGS) return null;
+  const frame: ScopeFrame = { paramName: pb.paramName };
+  if (pb.bindings) frame.bindings = pb.bindings;
+  return frame;
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +491,23 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
         f.createPropertyAssignment("innerWhere", irNodeToTsLiteral(ir.innerWhere)),
       );
       break;
+    case "subqueryRef":
+      props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
+      break;
+  }
+  return f.createObjectLiteralExpression(props);
+}
+
+export function irWhereToTsLiteral(where: IrWhere): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = [
+    f.createPropertyAssignment("node", irNodeToTsLiteral(where.node)),
+    f.createPropertyAssignment("rootParam", f.createStringLiteral(where.rootParam)),
+  ];
+  if (where.localParamNames && where.localParamNames.length > 0) {
+    props.push(
+      f.createPropertyAssignment("localParamNames", stringArrayLiteral(where.localParamNames, f)),
+    );
   }
   return f.createObjectLiteralExpression(props);
 }
@@ -423,8 +516,7 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
 export function irOrderByToTsLiteral(ir: IrOrderBy): ts.ObjectLiteralExpression {
   const f = ts.factory;
   return f.createObjectLiteralExpression([
-    f.createPropertyAssignment("param", f.createStringLiteral(ir.param)),
-    f.createPropertyAssignment("path", stringArrayLiteral(ir.path, f)),
+    f.createPropertyAssignment("expr", irNodeToTsLiteral(ir.expr)),
     f.createPropertyAssignment("direction", f.createStringLiteral(ir.direction)),
   ]);
 }
@@ -471,6 +563,21 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
   }
   if (sel.groupBy && sel.groupBy.length > 0) {
     props.push(f.createPropertyAssignment("groupBy", groupByToTsLiteral(sel.groupBy, f)));
+  }
+  if (sel.subqueries && sel.subqueries.length > 0) {
+    props.push(
+      f.createPropertyAssignment(
+        "subqueries",
+        f.createArrayLiteralExpression(
+          sel.subqueries.map((entry) =>
+            f.createObjectLiteralExpression([
+              f.createPropertyAssignment("alias", f.createStringLiteral(entry.alias)),
+              f.createPropertyAssignment("subquery", irNodeToTsLiteral(entry.subquery)),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
   return f.createObjectLiteralExpression(props);
 }

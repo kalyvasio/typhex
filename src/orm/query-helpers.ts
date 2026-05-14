@@ -3,13 +3,17 @@
  * Used by Entity and other internal modules.
  */
 
-import type { IrNode } from "../ir/types.js";
+import type { IrNode, IrWhere } from "../ir/types.js";
 import { isRecord } from "../utils.js";
 
 const DEFAULT_ROW_PARAM = "u";
 
 /** Build IR for: column === value. Used for PK lookups, etc. */
-export function whereColumnEq(column: string, value: unknown, param = DEFAULT_ROW_PARAM): IrNode {
+export function whereColumnEq(column: string, value: unknown, param = DEFAULT_ROW_PARAM): IrWhere {
+  return toWhere(columnEqNode(column, value, param), param);
+}
+
+function columnEqNode(column: string, value: unknown, param = DEFAULT_ROW_PARAM): IrNode {
   return {
     kind: "binary",
     op: "===",
@@ -23,7 +27,11 @@ export function whereColumnIn(
   column: string,
   values: unknown[],
   param = DEFAULT_ROW_PARAM,
-): IrNode {
+): IrWhere {
+  return toWhere(columnInNode(column, values, param), param);
+}
+
+function columnInNode(column: string, values: unknown[], param = DEFAULT_ROW_PARAM): IrNode {
   return {
     kind: "in",
     left: { kind: "member", param, path: [column] },
@@ -32,8 +40,11 @@ export function whereColumnIn(
 }
 
 /** Combine two IR nodes with AND. Used when relation has both base filter and user where. */
-export function whereAnd(left: IrNode, right: IrNode): IrNode {
-  return { kind: "binary", op: "&&", left, right };
+export function whereAnd(left: IrWhere, right: IrWhere): IrWhere {
+  return toWhere({ kind: "binary", op: "&&", left: left.node, right: right.node }, left.rootParam, [
+    ...(left.localParamNames ?? [left.rootParam]),
+    ...(right.localParamNames ?? [right.rootParam]),
+  ]);
 }
 
 /** Serialize a row's values for the given columns into a stable string key.
@@ -55,12 +66,12 @@ export function makeCompositeKey(row: Record<string, unknown>, cols: string[]): 
  *
  * Returns null when any column produces an empty value set (nothing to fetch).
  */
-export function buildFetchByIdIr(
+export function buildRelationFetchWhereIr(
   rows: Record<string, unknown>[],
   srcCols: string[],
   tgtCols: string[],
-): IrNode | null {
-  let where: IrNode | null = null;
+): IrWhere | null {
+  let where: IrWhere | null = null;
   for (let i = 0; i < tgtCols.length; i++) {
     const vals = [...new Set(rows.map((r) => r[srcCols[i]]).filter((v) => v != null))];
     if (vals.length === 0) return null;
@@ -72,12 +83,16 @@ export function buildFetchByIdIr(
 
 /** Build WHERE IR for a primary key match. Accepts a Record keyed by PK column names
  *  (entity instance, composite id object, or the result of `pkToRecord`). */
-export function buildFindByIdIr(pkColumns: string[], id: Record<string, unknown>): IrNode {
+export function buildFindByIdIr(pkColumns: string[], id: Record<string, unknown>): IrWhere {
   let node = whereColumnEq(pkColumns[0], id[pkColumns[0]]);
   for (let i = 1; i < pkColumns.length; i++) {
     node = whereAnd(node, whereColumnEq(pkColumns[i], id[pkColumns[i]]));
   }
   return node;
+}
+
+function toWhere(node: IrNode, rootParam: string, localParamNames = [rootParam]): IrWhere {
+  return { node, rootParam, localParamNames: [...new Set(localParamNames)] };
 }
 
 /** Normalise a user-supplied PK value to a Record.

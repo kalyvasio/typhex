@@ -197,6 +197,20 @@ const byIds = await User.query()
   .toArray();
 ```
 
+## Find by ID and Count
+
+```ts
+const user = await User.query().findById(1);
+const n = await User.query()
+  .where((u) => u.country === "US")
+  .count();
+```
+
+```sql
+SELECT ... FROM users WHERE id = ? LIMIT 1           -- params: [1]
+SELECT COUNT(*) AS c FROM users WHERE country = ?    -- params: ["US"]
+```
+
 ## Update, Patch, and Delete
 
 ```ts
@@ -226,20 +240,6 @@ const deleted = await User.query()
 ```sql
 DELETE FROM users WHERE country = ?
 -- params: ["UK"]
-```
-
-## Count and FindById
-
-```ts
-const n = await User.query()
-  .where((u) => u.country === "US")
-  .count();
-const user = await User.query().findById(1);
-```
-
-```sql
-SELECT COUNT(*) AS c FROM users WHERE country = ?    -- params: ["US"]
-SELECT ... FROM users WHERE id = ? LIMIT 1           -- params: [1]
 ```
 
 ## Instance Save and Delete

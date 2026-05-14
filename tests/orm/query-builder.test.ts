@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryBuilder } from "../../src";
 import { whereColumnEq } from "../../src/orm/query-helpers.js";
-import { isIrSelect, type IrNode, type IrSelect } from "../../src/ir/types.js";
+import { isIrSelect, type IrNode, type IrSelect, type IrWhere } from "../../src/ir/types.js";
 import { Entity } from "../../src";
 import { type MockDb, createMockDb } from "../helpers.js";
 
@@ -24,11 +24,18 @@ function newBuilder(db: MockDb, columnNames = ["id", "name", "age"]) {
     pkColumns: ["id"],
     whereIr: null,
     whereParams: {},
+    subqueryParams: {},
     orderBy: [],
+    havingIr: null,
+    havingParams: {},
     limitNum: null,
     offsetNum: null,
     selectIr: null,
   });
+}
+
+function where(node: IrNode, rootParam = "u"): IrWhere {
+  return { node, rootParam, localParamNames: [rootParam] };
 }
 
 describe("QueryBuilder", () => {
@@ -46,7 +53,7 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["id"] },
         right: { kind: "const", value: 1 },
       };
-      const q = newBuilder(db).where(ir);
+      const q = newBuilder(db).where(where(ir));
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
@@ -92,7 +99,7 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["id"] },
         right: { kind: "const", value: 1 },
       };
-      const base = newBuilder(db).where(ir).limit(5);
+      const base = newBuilder(db).where(where(ir)).limit(5);
       const cloned = base.clone();
       expect(cloned).toBeInstanceOf(QueryBuilder);
       expect(cloned).not.toBe(base);
@@ -265,7 +272,7 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["id"] },
         right: { kind: "const", value: 42 },
       };
-      await newBuilder(db).where(ir).toArray();
+      await newBuilder(db).where(where(ir)).toArray();
       expect(db.query).toHaveBeenCalledWith(expect.stringContaining("?"), [42]);
     });
   });
@@ -305,7 +312,7 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["id"] },
         right: { kind: "const", value: 1 },
       };
-      await newBuilder(db).where(ir).update({ name: "Updated" });
+      await newBuilder(db).where(where(ir)).update({ name: "Updated" });
       expect(db.run).toHaveBeenCalled();
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("UPDATE");
@@ -321,7 +328,7 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["id"] },
         right: { kind: "const", value: 1 },
       };
-      await newBuilder(db).where(ir).delete();
+      await newBuilder(db).where(where(ir)).delete();
       expect(db.run).toHaveBeenCalled();
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain("DELETE");
@@ -337,7 +344,10 @@ describe("QueryBuilder", () => {
         pkColumns: ["id"],
         whereIr: null,
         whereParams: {},
+        subqueryParams: {},
         orderBy: [],
+        havingIr: null,
+        havingParams: {},
         limitNum: null,
         offsetNum: null,
         selectIr: null,
@@ -368,7 +378,10 @@ describe("QueryBuilder", () => {
         pkColumns: ["id"],
         whereIr: null,
         whereParams: {},
+        subqueryParams: {},
         orderBy: [],
+        havingIr: null,
+        havingParams: {},
         limitNum: null,
         offsetNum: null,
         selectIr: null,
@@ -404,7 +417,10 @@ describe("QueryBuilder", () => {
         pkColumns: ["id"],
         whereIr: null,
         whereParams: {},
+        subqueryParams: {},
         orderBy: [],
+        havingIr: null,
+        havingParams: {},
         limitNum: null,
         offsetNum: null,
         selectIr: null,
@@ -434,7 +450,7 @@ describe("QueryBuilder", () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
         { id: 1, name: "Updated", age: 30 },
       ]);
-      const row = await newBuilder(db).where(ir).patch({ name: "Updated" });
+      const row = await newBuilder(db).where(where(ir)).patch({ name: "Updated" });
       expect(row).toEqual({ id: 1, name: "Updated", age: 30 });
       expect(db.run).toHaveBeenCalled();
       expect(db.query).toHaveBeenCalled();
@@ -449,7 +465,7 @@ describe("QueryBuilder", () => {
       };
       (db.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
-      const row = await newBuilder(db).where(ir).patch({ name: "Gone" });
+      const row = await newBuilder(db).where(where(ir)).patch({ name: "Gone" });
       expect(row).toBeNull();
     });
   });

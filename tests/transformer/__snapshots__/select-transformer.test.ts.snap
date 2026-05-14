@@ -1,5 +1,14 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`select transformer > transforms ({ id }) destructured outer with correlated inner subquery 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+"
+`;
+
 exports[`select transformer > transforms ({ id, ...rest }) => ({ id, ...rest }) to IR object with rest 1`] = `
 "users.select({ param: "u", paths: [["id"]], aliases: ["id"], rest: true });
 "
@@ -7,6 +16,15 @@ exports[`select transformer > transforms ({ id, ...rest }) => ({ id, ...rest }) 
 
 exports[`select transformer > transforms ({ id, name }) => ({ id, name }) to IR object 1`] = `
 "users.select({ param: "u", paths: [["id"], ["name"]], aliases: ["id", "name"] });
+"
+`;
+
+exports[`select transformer > transforms ({ id: authorId }) aliased destructured outer with correlated inner subquery 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "u", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
 "
 `;
 
@@ -77,5 +95,23 @@ exports[`select transformer > transforms count(distinct(p.category)) single aggr
 
 exports[`select transformer > transforms groupConcat(p.name, ', ') single aggregate shorthand 1`] = `
 "users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "p", path: ["name"] }, alias: "groupconcat", separator: ", " }] });
+"
+`;
+
+exports[`select transformer > transforms inline subquery with .limit() chain segment 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "c", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).limit(10).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+"
+`;
+
+exports[`select transformer > transforms inline subquery with .orderBy().limit() top-N chain 1`] = `
+"class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).orderBy({ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }).limit(1).select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }) });
 "
 `;

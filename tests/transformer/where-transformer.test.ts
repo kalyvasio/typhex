@@ -18,6 +18,22 @@ function transform(source: string): string {
   return ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
 }
 
+/** Like transform() but builds a real program from the source so the type checker
+ *  can resolve static properties (needed for inline subquery tableName extraction). */
+function transformWithChecker(source: string): string {
+  const fileName = "test.ts";
+  const host = ts.createCompilerHost({ skipLibCheck: true, noLib: true });
+  const orig = host.getSourceFile.bind(host);
+  host.getSourceFile = (name, lang) =>
+    name === fileName
+      ? ts.createSourceFile(fileName, source, ts.ScriptTarget.ESNext, true)
+      : orig(name, lang);
+  const program = ts.createProgram([fileName], { skipLibCheck: true, noLib: true }, host);
+  const sf = program.getSourceFile(fileName)!;
+  const result = ts.transform(sf, [createTyphexTransformer(program)]);
+  return ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
+}
+
 describe("where transformer", () => {
   it('transforms (u) => u.country === "US"', () => {
     expect(transform('users.where((u) => u.country === "US");')).toMatchSnapshot();
@@ -55,6 +71,30 @@ describe("where transformer", () => {
     expect(
       transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));"),
     ).toMatchSnapshot();
+  });
+
+  it("transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id)", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.where((a: any) => a.postId in Post.query().where((p: any) => p.active === true).select((p: any) => p.id));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("transforms ({ id }) => id > 5 — destructured outer where arrow", () => {
+    expect(transform("users.where(({ id }: any) => id > 5);")).toMatchSnapshot();
+  });
+
+  it("transforms destructured outer where with correlated inline subquery comparison", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.where(({ id }: any) => Post.query().where((p: any) => p.authorId === id).select(() => count()) > 5);
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("transforms member access on destructured local — ({ author }) => author.id === 1", () => {
+    expect(transform("rows.where(({ author }: any) => author.id === 1);")).toMatchSnapshot();
   });
 });
 

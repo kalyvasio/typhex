@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  buildRelationJoins,
-  buildRelationPathToAlias,
-  buildOneToManyExists,
-  getReusableJoinKeys,
+  RelationJoinBuilder,
+  RelationPathAliasBuilder,
+  OneToManyExistsBuilder,
 } from "../../src/orm/helpers/relations/relation-joins.js";
-import type { IrNode, IrOrderBy, IrSelect, JoinType } from "../../src/ir/types.js";
+import type { IrNode, JoinType } from "../../src/ir/types.js";
 import type { RelationsMap } from "../../src/entity/relations.js";
 
 const mockResolveTarget = vi.fn(() => ({ table: "companies", pk: ["id"] }));
@@ -38,24 +37,12 @@ describe("relation-joins", () => {
 
   describe("buildRelationJoins", () => {
     it("returns empty when no relations in where or select", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["name"] },
-        right: { kind: "const", value: "Alice" },
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set()).build();
       expect(result).toEqual([]);
     });
 
     it("returns join info when relation in where", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         relationKey: "company",
@@ -68,71 +55,42 @@ describe("relation-joins", () => {
     });
 
     it("returns empty when relation only in select paths (select-only uses whereIn)", () => {
-      const result = buildRelationJoins(ctx, null, "c");
+      const result = new RelationJoinBuilder(ctx, new Set()).build();
       expect(result).toEqual([]);
     });
 
     it("returns empty when relation only in select.relations (select-only uses whereIn)", () => {
-      const result = buildRelationJoins(ctx, null, "c");
+      const result = new RelationJoinBuilder(ctx, new Set()).build();
       expect(result).toEqual([]);
     });
 
     it("does not add one-to-many to joins (uses EXISTS instead)", () => {
       mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "d", path: ["employees", "name"] },
-        right: { kind: "const", value: "Alice" },
-      };
-      const result = buildRelationJoins(ctx, where, "d");
+      const result = new RelationJoinBuilder(ctx, new Set(["employees"])).build();
       expect(result).toHaveLength(0);
       mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
     });
 
     it("returns join when relation referenced in where (joins are driven by where/orderBy, not select IR)", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
 
     it("collects relation key from unary (NOT) operand", () => {
-      const where: IrNode = {
-        kind: "unary",
-        op: "!",
-        operand: { kind: "member", param: "c", path: ["company", "active"] },
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
 
     it("collects relation key from call node receiver", () => {
-      const where: IrNode = {
-        kind: "call",
-        method: "startsWith",
-        receiver: { kind: "member", param: "c", path: ["company", "name"] },
-        args: [{ kind: "const", value: "Acm" }],
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
 
     it("collects relation key from call node args", () => {
-      const where: IrNode = {
-        kind: "call",
-        method: "includes",
-        receiver: { kind: "const", value: ["Acme"] },
-        args: [{ kind: "member", param: "c", path: ["company", "name"] }],
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
@@ -145,12 +103,10 @@ describe("relation-joins", () => {
           _options: { junction: "post_tags", foreignKey: "postId" } as any,
         } as any,
       };
-      const where: IrNode = {
-        kind: "member",
-        param: "c",
-        path: ["tags", "name"],
-      };
-      const result = buildRelationJoins({ ...ctx, relations: relationsWithJunction }, where, "c");
+      const result = new RelationJoinBuilder(
+        { ...ctx, relations: relationsWithJunction },
+        new Set(["tags"]),
+      ).build();
       expect(result).toHaveLength(0);
     });
 
@@ -162,31 +118,21 @@ describe("relation-joins", () => {
           _options: {} as any, // no foreignKey → fk = "" → skipped
         } as any,
       };
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const result = buildRelationJoins({ ...ctx, relations: relationsNoFk }, where, "c");
+      const result = new RelationJoinBuilder(
+        { ...ctx, relations: relationsNoFk },
+        new Set(["company"]),
+      ).build();
       expect(result).toHaveLength(0);
     });
 
     it("returns empty when resolveTarget returns null", () => {
       mockResolveTarget.mockReturnValueOnce(null);
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const result = buildRelationJoins(ctx, where, "c");
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toEqual([]);
     });
 
     it("returns join when relation column used in orderBy (dot-notation path)", () => {
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
-      const result = buildRelationJoins(ctx, null, "u", orderBy);
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0]).toMatchObject({
         relationKey: "company",
@@ -198,122 +144,26 @@ describe("relation-joins", () => {
     });
 
     it("returns empty when orderBy path has only one segment (not a relation column)", () => {
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["name"], direction: "asc" }];
-      const result = buildRelationJoins(ctx, null, "u", orderBy);
+      const result = new RelationJoinBuilder(ctx, new Set()).build();
       expect(result).toEqual([]);
     });
 
     it("does not duplicate join when same relation in both where and orderBy", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "u", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["company", "name"], direction: "asc" }];
-      const result = buildRelationJoins(ctx, where, "u", orderBy);
+      const result = new RelationJoinBuilder(ctx, new Set(["company"])).build();
       expect(result).toHaveLength(1);
       expect(result[0].relationKey).toBe("company");
     });
 
     it("does not join one-to-many relation from orderBy", () => {
       mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
-      const orderBy: IrOrderBy[] = [{ param: "u", path: ["employees", "name"], direction: "asc" }];
-      const result = buildRelationJoins(ctx, null, "u", orderBy);
+      const result = new RelationJoinBuilder(ctx, new Set(["employees"])).build();
       expect(result).toHaveLength(0);
       mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
     });
 
     it("returns empty when orderBy is undefined", () => {
-      const result = buildRelationJoins(ctx, null, "u", undefined);
+      const result = new RelationJoinBuilder(ctx, new Set()).build();
       expect(result).toEqual([]);
-    });
-  });
-
-  describe("getReusableJoinKeys", () => {
-    it("returns empty when relation only in select", () => {
-      const select: IrSelect = {
-        param: "c",
-        paths: [
-          ["company", "id"],
-          ["company", "name"],
-        ],
-        aliases: ["company_id", "company_name"],
-      };
-      const result = getReusableJoinKeys(null, select, mockRelations, "c");
-      expect(result).toEqual(new Set());
-    });
-
-    it("returns relation when in both and select projection <= where projection", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const select: IrSelect = {
-        param: "c",
-        paths: [["company", "name"]],
-        aliases: ["company_name"],
-      };
-      const result = getReusableJoinKeys(where, select, mockRelations, "c");
-      expect(result).toEqual(new Set(["company"]));
-    });
-
-    it("returns relation when in both (where joins whole table, no projection comparison)", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const select: IrSelect = {
-        param: "c",
-        paths: [
-          ["company", "id"],
-          ["company", "name"],
-        ],
-        aliases: ["company_id", "company_name"],
-      };
-      const result = getReusableJoinKeys(where, select, mockRelations, "c");
-      expect(result).toEqual(new Set(["company"]));
-    });
-
-    it("returns empty when selectNode is null", () => {
-      const result = getReusableJoinKeys(null, null, mockRelations, "c");
-      expect(result.size).toBe(0);
-    });
-
-    it("skips one-to-many relation (cannot be reused via join)", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "d", path: ["employees", "name"] },
-        right: { kind: "const", value: "Alice" },
-      };
-      const select: IrSelect = {
-        param: "d",
-        paths: [["employees", "name"]],
-        aliases: ["employees_name"],
-      };
-      const result = getReusableJoinKeys(where, select, mockRelations, "d");
-      expect(result.has("employees")).toBe(false);
-    });
-
-    it("returns relation when in both even with whole relation in select (no subPaths)", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const select: IrSelect = {
-        param: "c",
-        paths: [["id"]],
-        relations: [{ name: "company", outputKey: "company" }],
-      };
-      const result = getReusableJoinKeys(where, select, mockRelations, "c");
-      expect(result).toEqual(new Set(["company"]));
     });
   });
 
@@ -321,12 +171,24 @@ describe("relation-joins", () => {
     it("returns EXISTS info for one-to-many relation in where", () => {
       mockResolveTarget.mockReturnValue({ table: "employees", pk: ["id"] });
       const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "d", path: ["employees", "name"] },
-        right: { kind: "const", value: "Alice" },
+        kind: "exists",
+        rootParam: "d",
+        relationKey: "employees",
+        innerParam: "e",
+        innerWhere: {
+          kind: "binary",
+          op: "===",
+          left: { kind: "member", param: "e", path: ["name"] },
+          right: { kind: "const", value: "Alice" },
+        },
       };
-      const result = buildOneToManyExists(where, mockRelations, "d", ["id"], mockResolveTarget);
+      const result = new OneToManyExistsBuilder(
+        [where],
+        mockRelations,
+        "d",
+        ["id"],
+        mockResolveTarget,
+      ).build();
       expect(result["d.employees"]).toMatchObject({
         targetTable: "employees",
         fkColumns: ["departmentId"],
@@ -336,68 +198,53 @@ describe("relation-joins", () => {
       mockResolveTarget.mockReturnValue({ table: "companies", pk: ["id"] });
     });
 
-    it("skips junction relations in EXISTS", () => {
-      const relationsWithJunction: RelationsMap = {
-        tags: {
-          _relType: "one-to-many" as any,
-          _target: () => ({}),
-          _options: { junction: "post_tags", foreignKey: "postId" } as any,
-        } as any,
-      };
-      mockResolveTarget.mockReturnValue({ table: "tags", pk: ["id"] });
+    it("throws for unknown EXISTS relations", () => {
       const where: IrNode = {
-        kind: "member",
-        param: "c",
-        path: ["tags", "name"],
+        kind: "exists",
+        rootParam: "c",
+        relationKey: "tags",
+        innerParam: "t",
+        innerWhere: { kind: "const", value: true },
       };
-      const result = buildOneToManyExists(
-        where,
-        relationsWithJunction,
-        "c",
-        ["id"],
-        mockResolveTarget,
-      );
-      expect(Object.keys(result)).toHaveLength(0);
+      expect(() =>
+        new OneToManyExistsBuilder([where], mockRelations, "c", ["id"], mockResolveTarget).build(),
+      ).toThrow('EXISTS relation "tags" is not defined');
     });
 
-    it("skips when resolveTarget returns null for one-to-many", () => {
-      mockResolveTarget.mockReturnValueOnce(null);
+    it("throws when EXISTS targets a non one-to-many relation", () => {
       const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "d", path: ["employees", "name"] },
-        right: { kind: "const", value: "Alice" },
+        kind: "exists",
+        rootParam: "c",
+        relationKey: "company",
+        innerParam: "x",
+        innerWhere: { kind: "const", value: true },
       };
-      const result = buildOneToManyExists(where, mockRelations, "d", ["id"], mockResolveTarget);
-      expect(Object.keys(result)).toHaveLength(0);
+      expect(() =>
+        new OneToManyExistsBuilder([where], mockRelations, "c", ["id"], mockResolveTarget).build(),
+      ).toThrow('EXISTS relation "company" must be one-to-many');
     });
 
-    it("skips one-to-many with no foreignKey in options", () => {
-      const relNoFk: RelationsMap = {
-        posts: {
-          _relType: "one-to-many" as any,
-          _target: () => ({}),
-          _options: {} as any,
-        } as any,
-      };
-      mockResolveTarget.mockReturnValue({ table: "posts", pk: ["id"] });
+    it("throws when one-to-many EXISTS has no parent primary key", () => {
       const where: IrNode = {
-        kind: "member",
-        param: "u",
-        path: ["posts", "title"],
+        kind: "exists",
+        rootParam: "d",
+        relationKey: "employees",
+        innerParam: "e",
+        innerWhere: { kind: "const", value: true },
       };
-      const result = buildOneToManyExists(where, relNoFk, "u", ["id"], mockResolveTarget);
-      expect(Object.keys(result)).toHaveLength(0);
+      expect(() =>
+        new OneToManyExistsBuilder([where], mockRelations, "d", [], mockResolveTarget).build(),
+      ).toThrow('EXISTS relation "employees" requires a primary key');
     });
 
     it("returns empty when no one-to-many in where", () => {
-      const where: IrNode = {
-        kind: "binary",
-        op: "===",
-        left: { kind: "member", param: "c", path: ["company", "name"] },
-        right: { kind: "const", value: "Acme" },
-      };
-      const result = buildOneToManyExists(where, mockRelations, "c", ["id"], mockResolveTarget);
+      const result = new OneToManyExistsBuilder(
+        [],
+        mockRelations,
+        "c",
+        ["id"],
+        mockResolveTarget,
+      ).build();
       expect(result).toEqual({});
     });
   });
@@ -415,12 +262,12 @@ describe("relation-joins", () => {
           relType: "many-to-one" as const,
         },
       ];
-      const map = buildRelationPathToAlias(joins, ["c"]);
+      const map = new RelationPathAliasBuilder(joins, ["c"]).build();
       expect(map["c.company"]).toBe("t1");
     });
 
     it("returns empty when no joins", () => {
-      const map = buildRelationPathToAlias([], ["c"]);
+      const map = new RelationPathAliasBuilder([], ["c"]).build();
       expect(map).toEqual({});
     });
   });

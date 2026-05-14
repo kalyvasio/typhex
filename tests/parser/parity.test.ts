@@ -10,15 +10,15 @@
 import { describe, it, expect, vi } from "vitest";
 import * as ts from "typescript";
 import { createTyphexTransformer } from "../../src/transformer/index.js";
-import { parseArrowToIr } from "../../src/parser/parse-arrow.js";
-import type { IrNode } from "../../src/ir/types.js";
+import { parseArrowToIrPredicate } from "../../src/parser/parse-arrow.js";
+import type { IrWhere } from "../../src/ir/types.js";
 
 vi.mock("../../src/transformer/shared.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/transformer/shared.js")>();
   return { ...actual, isTyphexType: () => true };
 });
 
-function transformToIr(source: string): IrNode | null {
+function transformToIr(source: string): IrWhere | null {
   const program = ts.createProgram([], { noResolve: true, skipLibCheck: true });
   const sourceFile = ts.createSourceFile("test.ts", source, ts.ScriptTarget.ESNext, true);
   const result = ts.transform(sourceFile, [createTyphexTransformer(program)]);
@@ -27,7 +27,7 @@ function transformToIr(source: string): IrNode | null {
   const match = printed.match(/\.where\((\{[\s\S]+?\})\s*,\s*\{/);
   if (!match) return null;
   try {
-    return new Function(`return ${match[1]}`)() as IrNode;
+    return new Function(`return ${match[1]}`)() as IrWhere;
   } catch {
     return null;
   }
@@ -38,7 +38,7 @@ describe("parity: runtime parser vs compile-time transformer", () => {
     name: string;
     source: string;
     fn: (...args: any[]) => any;
-    options?: { paramKeys?: string[] };
+    options?: { paramNames?: string[]; paramKeys?: string[] };
   }> = [
     {
       name: "simple comparison: u.age > 18",
@@ -91,7 +91,7 @@ describe("parity: runtime parser vs compile-time transformer", () => {
   for (const { name, source, fn, options } of cases) {
     it(`produces identical IR: ${name}`, () => {
       const transformerIr = transformToIr(source);
-      const runtimeIr = parseArrowToIr(fn, options);
+      const runtimeIr = parseArrowToIrPredicate(fn, options);
       expect(transformerIr).not.toBeNull();
       expect(runtimeIr).toEqual(transformerIr);
     });

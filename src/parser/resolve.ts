@@ -2,24 +2,38 @@
  * Input resolvers: normalise the three QB method input shapes
  * (pre-built IR | arrow function | string / string[]) to IR structures.
  */
-import type { IrNode, IrOrderBy, IrSelect, OrderDirection } from "../ir/types.js";
-import { isIrNode, isIrSelect, isIrOrderBy } from "../ir/types.js";
-import { parseArrowToIr, parseArrowToIrSelect, parseArrowToGroupByPaths } from "./parse-arrow.js";
-import { DEFAULT_ROW_PARAM } from "../orm/compile-context.js";
+import type { IrHaving, IrOrderBy, IrSelect, IrWhere, OrderDirection } from "../ir/types.js";
+import { isIrSelect, isIrOrderBy, isIrWhere } from "../ir/types.js";
+import {
+  parseArrowToIr,
+  parseArrowToIrPredicate,
+  parseArrowToIrSelect,
+  parseArrowToGroupByPaths,
+} from "./parse-arrow.js";
+import { DEFAULT_ROW_PARAM } from "../orm/helpers/query-plan/query-plan.js";
 
-/** Resolve a where input (pre-built IR node or arrow fn) to an IrNode. */
+/** Resolve a where input (pre-built predicate IR or arrow fn) to an IrWhere. */
 export function resolveWhereIr(
-  input: IrNode | ((entity: unknown) => boolean),
+  input: IrWhere | ((entity: unknown) => boolean),
   paramKeys: string[] = [],
-): IrNode {
-  if (isIrNode(input)) return input;
+  subqueryKeys: string[] = [],
+): IrWhere {
+  if (isIrWhere(input)) return input;
   try {
-    return parseArrowToIr(input as (u: any) => boolean, { paramKeys });
+    return parseArrowToIrPredicate(input as (u: any) => boolean, { paramKeys, subqueryKeys });
   } catch (e) {
     throw new Error(
       "Failed to parse arrow predicate: " + (e instanceof Error ? e.message : String(e)),
     );
   }
+}
+
+export function resolveHavingIr(
+  input: IrHaving | ((entity: unknown) => boolean),
+  paramKeys: string[] = [],
+  subqueryKeys: string[] = [],
+): IrHaving {
+  return resolveWhereIr(input, paramKeys, subqueryKeys);
 }
 
 /** Resolve an orderBy input (pre-built IrOrderBy, string, or arrow fn) to an IrOrderBy. */
@@ -43,7 +57,7 @@ export function resolveOrderBy(
           "[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)",
         );
       }
-      return { param: ir.param, path: ir.path, direction };
+      return { expr: ir, direction };
     } catch (e) {
       throw new Error(
         "Failed to parse orderBy lambda: " + (e instanceof Error ? e.message : String(e)),
@@ -56,7 +70,10 @@ export function resolveOrderBy(
       '[typhex] orderBy column must be a non-empty dot-separated path (e.g. "company.name")',
     );
   }
-  return { param: DEFAULT_ROW_PARAM, path: segments, direction };
+  return {
+    expr: { kind: "member", param: DEFAULT_ROW_PARAM, path: segments },
+    direction,
+  };
 }
 
 /** Resolve a select input (pre-built IrSelect, column string array, or arrow fn) to an IrSelect. */

@@ -12,7 +12,17 @@ export type IrNode =
   | IrCall
   | IrIn
   | IrExists
-  | IrAggregate;
+  | IrAggregate
+  | IrSubqueryRef;
+
+export interface IrPredicate {
+  node: IrNode;
+  rootParam: string;
+  localParamNames?: string[];
+}
+
+export type IrWhere = IrPredicate;
+export type IrHaving = IrPredicate;
 
 export interface IrBinary {
   kind: "binary";
@@ -71,6 +81,11 @@ export interface IrCall {
   args: IrNode[];
 }
 
+export interface IrSubqueryRef {
+  kind: "subqueryRef";
+  key: string;
+}
+
 export interface IrAggregate {
   kind: "aggregate";
   func:
@@ -93,8 +108,8 @@ export interface IrAggregate {
 export type OrderDirection = "asc" | "desc";
 
 export interface IrOrderBy {
-  param: string;
-  path: string[];
+  /** Sort key — typically an IrMember (column path) or IrSubqueryRef (scalar subquery). */
+  expr: IrNode;
   direction: OrderDirection;
 }
 
@@ -105,7 +120,7 @@ export interface IrSelectRelation {
   /** Columns to select from target; undefined = all columns. */
   subPaths?: string[][];
   /** Optional: filter for the relation sub-query. */
-  whereIr?: IrNode;
+  whereIr?: IrWhere;
   whereParams?: Record<string, unknown>;
   /** Optional: order for the relation sub-query. */
   orderBy?: IrOrderBy[];
@@ -125,19 +140,13 @@ export interface IrSelect {
   relations?: IrSelectRelation[];
   /** Aggregate columns in SELECT (SUM, AVG, MIN, MAX, COUNT). */
   aggregates?: IrAggregate[];
+  /** Scalar subquery columns in SELECT (e.g. `(SELECT COUNT(*) FROM …) AS "x"`). */
+  subqueries?: Array<{ alias: string; subquery: IrSubqueryRef }>;
   /** GROUP BY entries: string[] = member path, number = positional column reference (GROUP BY 1). */
   groupBy?: Array<string[] | number>;
 }
 
 export type JoinType = "inner" | "left" | "right" | "cross" | "full";
-
-export const JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
-  inner: "INNER JOIN",
-  left: "LEFT JOIN",
-  right: "RIGHT JOIN",
-  cross: "CROSS JOIN",
-  full: "FULL OUTER JOIN",
-};
 
 export interface JoinHint {
   relationKey: string;
@@ -147,14 +156,13 @@ export interface JoinHint {
 export function isIrOrderBy(value: unknown): value is IrOrderBy {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;
-  return (
-    typeof v.param === "string" &&
-    v.param.length > 0 &&
-    Array.isArray(v.path) &&
-    v.path.length > 0 &&
-    (v.path as unknown[]).every((segment): segment is string => typeof segment === "string") &&
-    (v.direction === "asc" || v.direction === "desc")
-  );
+  return isIrNode(v.expr) && (v.direction === "asc" || v.direction === "desc");
+}
+
+export function isIrWhere(value: unknown): value is IrWhere {
+  if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
+  const v = value as Record<string, unknown>;
+  return isIrNode(v.node) && typeof v.rootParam === "string";
 }
 
 export function isIrNode(node: unknown): node is IrNode {
@@ -169,38 +177,9 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "in" ||
     k === "call" ||
     k === "exists" ||
-    k === "aggregate"
+    k === "aggregate" ||
+    k === "subqueryRef"
   );
-}
-
-/** Recursively gather every row-parameter name referenced inside an IrWhere tree
- *  (e.g. "u" from `u.name === "Alice"`). */
-export function collectParamNamesFromWhere(node: IrNode, out: Set<string>): void {
-  switch (node.kind) {
-    case "member":
-      out.add(node.param);
-      break;
-    case "binary":
-      collectParamNamesFromWhere(node.left, out);
-      collectParamNamesFromWhere(node.right, out);
-      break;
-    case "unary":
-      collectParamNamesFromWhere(node.operand, out);
-      break;
-    case "in":
-      collectParamNamesFromWhere(node.left, out);
-      collectParamNamesFromWhere(node.right, out);
-      break;
-    case "call":
-      collectParamNamesFromWhere(node.receiver, out);
-      for (const a of node.args) collectParamNamesFromWhere(a, out);
-      break;
-    case "exists":
-      out.add(node.rootParam);
-      break;
-    default:
-      break;
-  }
 }
 
 export function isIrSelect(node: unknown): node is IrSelect {
@@ -230,7 +209,7 @@ export function isIrSelect(node: unknown): node is IrSelect {
                 (p: unknown) =>
                   Array.isArray(p) && (p as unknown[]).every((s: unknown) => typeof s === "string"),
               ))) &&
-          (x.whereIr === undefined || isIrNode(x.whereIr)) &&
+          (x.whereIr === undefined || isIrWhere(x.whereIr)) &&
           (x.orderBy === undefined ||
             (Array.isArray(x.orderBy) &&
               x.orderBy.every(
@@ -258,6 +237,23 @@ export function isIrSelect(node: unknown): node is IrSelect {
   }
   if (o.groupBy !== undefined) {
     if (!Array.isArray(o.groupBy)) return false;
+  }
+  if (o.subqueries !== undefined) {
+    if (!Array.isArray(o.subqueries)) return false;
+    if (
+      !o.subqueries.every((s: unknown) => {
+        const x = s as Record<string, unknown>;
+        const sub = x?.subquery as Record<string, unknown> | undefined;
+        return (
+          x &&
+          typeof x.alias === "string" &&
+          sub != null &&
+          sub.kind === "subqueryRef" &&
+          typeof sub.key === "string"
+        );
+      })
+    )
+      return false;
   }
   return true;
 }
