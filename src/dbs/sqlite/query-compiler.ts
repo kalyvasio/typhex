@@ -1,0 +1,99 @@
+import { BaseQueryCompiler, compileAggregate, compileConcatAggregate } from "../query-compiler.js";
+import type { CompileResult, DiffAction, ExpandPlaceholdersResult } from "../types.js";
+import { SQL_DEFAULT } from "../types.js";
+import type { Expr, ExprAggregate } from "../../orm/expr.js";
+
+type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
+
+export class SqliteQueryCompiler extends BaseQueryCompiler {
+  readonly dialect = "sqlite" as const;
+  readonly insertCapabilities = {
+    supportsReturning: true,
+    supportsSequences: false,
+  };
+
+  compileNextSequenceValues(): CompileResult {
+    throw new Error("SQLite does not support sequence allocation");
+  }
+
+  compileTrackingTable(): CompileResult {
+    return {
+      sql: `CREATE TABLE IF NOT EXISTS ${this.escapeIdentifier("_typhex_migrations")} (
+  ${this.escapeIdentifier("id")} integer primary key autoincrement,
+  ${this.escapeIdentifier("name")} text not null unique,
+  ${this.escapeIdentifier("applied_at")} text not null default (datetime('now'))
+)`,
+      params: [],
+    };
+  }
+
+  compileListTables(): CompileResult {
+    return {
+      sql: `SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_typhex_migrations'`,
+      params: [],
+    };
+  }
+
+  compileListColumns(table: string): CompileResult {
+    return { sql: `PRAGMA table_info(${this.escapeIdentifier(table)})`, params: [] };
+  }
+
+  protected expandPlaceholders(
+    sql: string,
+    resolvedParams: unknown[],
+    _startIdx?: number,
+  ): ExpandPlaceholdersResult {
+    let idx = 0;
+    const newParams: unknown[] = [];
+    const newSql = sql.replaceAll("?", () => {
+      const v = resolvedParams[idx++];
+      if (Array.isArray(v)) {
+        v.forEach((x) => newParams.push(x));
+        return v.map(() => "?").join(", ");
+      }
+      newParams.push(v);
+      return "?";
+    });
+    return { sql: newSql, params: newParams };
+  }
+
+  protected compileAggregate(
+    agg: ExprAggregate,
+    compileNodeFn?: (node: Expr, params: unknown[]) => string,
+    params?: unknown[],
+  ): string {
+    if (agg.func === "GROUP_CONCAT") {
+      return compileConcatAggregate("GROUP_CONCAT", agg, undefined, compileNodeFn, params);
+    }
+    return compileAggregate(agg, compileNodeFn, params);
+  }
+
+  protected excludedTableName(): string {
+    return "excluded";
+  }
+
+  protected singleInsertReturnsRows(): boolean {
+    return false;
+  }
+
+  protected compileAlterColumn(action: AlterColumnAction, reverse: boolean): string {
+    const dimensions = action.changes.map((c) => c.kind).join(", ");
+    const direction = reverse ? "rollback" : "apply";
+    throw new Error(
+      `SQLite cannot ${direction} ALTER COLUMN on ${action.table}.${action.column} ` +
+        `(changes: ${dimensions}). The table must be recreated; please write the migration manually.`,
+    );
+  }
+
+  protected renderInsertManyValue(
+    value: unknown,
+    paramIndex: number,
+  ): { sql: string; params: unknown[] } {
+    return {
+      sql: this.placeholder(paramIndex),
+      params: [value === SQL_DEFAULT ? null : value],
+    };
+  }
+}
+
+export const sqliteQueryCompiler = new SqliteQueryCompiler();

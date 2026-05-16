@@ -7,7 +7,7 @@
 import type { Driver, TransactionOptions } from "../driver/types.js";
 import type { Dialect } from "../dialect.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
-import { getDbMigrations, getDialect } from "../dbs/index.js";
+import { getDbMigrations, getQueryCompiler } from "../dbs/index.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
 import {
@@ -139,8 +139,7 @@ export class Db implements QueryExecutor {
 
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
   async migrate(): Promise<void> {
-    const dialect = getDialect(this._driver.dialect);
-    const esc = dialect.escapeIdentifier.bind(dialect);
+    const compiler = getQueryCompiler(this._driver.dialect);
     const entities = getRegisteredEntities();
     const deps = parseFkDependencies(entities);
     const names = entities.map((e) => e.table._table);
@@ -151,10 +150,7 @@ export class Db implements QueryExecutor {
       const entity = byName.get(name);
       if (!entity) continue;
       const { _schema: schema } = entity.table;
-      const colDefs = Object.entries(schema)
-        .map(([c, def]) => `${esc(c)} ${def}`)
-        .join(", ");
-      await this.run(`CREATE TABLE IF NOT EXISTS ${esc(name)} (${colDefs})`);
+      await this.run(compiler.compileCreateTableIfNotExists(name, schema));
     }
   }
 

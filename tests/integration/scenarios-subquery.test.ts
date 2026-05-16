@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
-import { sqliteDialect } from "../../src/dbs/index.js";
+import { sqliteQueryCompiler } from "../../src/dbs/index.js";
 import {
   compileOrderByExpr,
   compileSelectListExpr,
@@ -21,6 +21,8 @@ import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/e
 import type { IrNode, IrWhere } from "../../src/ir/types.js";
 import { freshDb } from "../helpers.js";
 import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";
+
+const sqliteDialect = sqliteQueryCompiler as any;
 
 function where(node: IrNode, rootParam: string, localParamNames = [rootParam]): IrWhere {
   return { node, rootParam, localParamNames };

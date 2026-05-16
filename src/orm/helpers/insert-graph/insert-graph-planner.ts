@@ -1,4 +1,4 @@
-import { getDialect } from "../../../dbs/index.js";
+import { getQueryCompiler } from "../../../dbs/index.js";
 import type { DialectInsertCapabilities } from "../../../dbs/types.js";
 import {
   getPkColumnsFromSchema,
@@ -74,7 +74,7 @@ export class InsertGraphPlanner<C extends AnyEntityClass> {
     const graphs = toArray(this.input);
     if (graphs.length === 0) return [] as EntityInstance<C>[];
 
-    const capabilities = getDialect(this.state.qe.dialect).insertCapabilities;
+    const capabilities = getQueryCompiler(this.state.qe.dialect).insertCapabilities;
     const plan = this.buildInsertGraphPlan(graphs, capabilities);
 
     await selectExecutor(plan).execute();

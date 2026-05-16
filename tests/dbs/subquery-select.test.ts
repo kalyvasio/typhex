@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { postgresDialect, sqliteDialect } from "../../src/dbs/index.js";
+import { postgresQueryCompiler, sqliteQueryCompiler } from "../../src/dbs/index.js";
 import { compileSelectListExpr } from "../../src/dbs/shared-dialect.js";
 import type { DialectImpl } from "../../src/dbs/types.js";
 import type { Expr, ExprAggregate, SelectItem } from "../../src/orm/expr.js";
 import { col, eq, konst, selectPlan, countPostsSelect } from "./subquery-ref-helpers.js";
+
+const postgresDialect = postgresQueryCompiler as any;
+const sqliteDialect = sqliteQueryCompiler as any;
 
 function aggFn(dialect: DialectImpl) {
   return dialect.compileAggregate

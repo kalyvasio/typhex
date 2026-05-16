@@ -4,7 +4,7 @@ import { Entity } from "../../src/index.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 import type { IrAggregate, IrHaving, IrNode, IrSelect } from "../../src/ir/types.js";
 import { isIrNode } from "../../src/ir/types.js";
-import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
+import { sqliteQueryCompiler, postgresQueryCompiler } from "../../src/dbs/index.js";
 import {
   compileAggregate,
   compileSelectListExpr,
@@ -19,6 +19,9 @@ import type {
   GroupByItem,
   SelectItem,
 } from "../../src/orm/expr.js";
+
+const sqliteDialect = sqliteQueryCompiler as any;
+const postgresDialect = postgresQueryCompiler as any;
 
 function aggCompiler(dialect: DialectImpl) {
   return dialect.compileAggregate

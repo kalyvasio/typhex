@@ -1,5 +1,5 @@
-import { getDialect } from "../../../dbs/index.js";
-import type { DialectImpl } from "../../../dbs/types.js";
+import { getQueryCompiler } from "../../../dbs/index.js";
+import type { QueryCompiler } from "../../../dbs/types.js";
 import type { QueryExecutor } from "../../db.js";
 import { InsertGraphExecutor } from "./insert-graph-executor.js";
 import type { PlannedNode } from "./insert-graph-planner.js";
@@ -14,18 +14,18 @@ type InsertGroup = {
 
 export class InsertGraphBatchExecutor extends InsertGraphExecutor {
   protected async insertReadyNodes(qe: QueryExecutor, nodes: PlannedNode[]): Promise<void> {
-    const dialect = getDialect(qe.dialect);
+    const compiler = getQueryCompiler(qe.dialect);
     for (const group of groupByTable(nodes)) {
-      await this.insertNodeGroup(dialect, qe, group);
+      await this.insertNodeGroup(compiler, qe, group);
     }
   }
 
   private async insertNodeGroup(
-    dialect: DialectImpl,
+    compiler: QueryCompiler,
     qe: QueryExecutor,
     group: InsertGroup,
   ): Promise<void> {
-    await new SequenceIdAssigner(dialect, qe, group.tableName, group.items).assign();
+    await new SequenceIdAssigner(compiler, qe, group.tableName, group.items).assign();
     if (group.mode === "single") {
       await this.insertSingleNode(qe, group.items[0]);
       return;

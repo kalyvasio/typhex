@@ -3,8 +3,8 @@ import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
 import type { Expr, GroupByItem } from "../../src/orm/expr.js";
 import {
   createPostgresDriver,
-  postgresDialect,
-  postgresMigrations,
+  postgresMigrations as postgresMigrationsImpl,
+  postgresQueryCompiler,
   getDialect,
 } from "../../src/dbs/index.js";
 import { Entity } from "../../src/entity/entity.js";
@@ -12,6 +12,19 @@ import { Db } from "../../src/orm/db.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Driver } from "../../src/driver/types.js";
+
+const postgresDialect = postgresQueryCompiler as any;
+const postgresMigrations = {
+  ...postgresMigrationsImpl,
+  diffSchema: postgresMigrationsImpl.diffSchema.bind(postgresMigrationsImpl),
+  getDbTables: postgresMigrationsImpl.getDbTables.bind(postgresMigrationsImpl),
+  getDbColumns: postgresMigrationsImpl.getDbColumns.bind(postgresMigrationsImpl),
+  generateSql: postgresQueryCompiler.compileMigrationUp.bind(postgresQueryCompiler),
+  generateDownSql: postgresQueryCompiler.compileMigrationDown.bind(postgresQueryCompiler),
+  getTrackingTableDdl: () => postgresQueryCompiler.compileTrackingTable().sql,
+  getRecordMigrationSql: () => postgresQueryCompiler.compileRecordMigration("").sql,
+  getDeleteMigrationSql: () => postgresQueryCompiler.compileDeleteMigration("").sql,
+};
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";

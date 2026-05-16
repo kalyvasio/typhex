@@ -1,15 +1,27 @@
 export * from "./types.js";
-export { createSqliteDriver, sqliteDialect, sqliteMigrations } from "./sqlite/index.js";
+export {
+  createSqliteDriver,
+  sqliteDialect,
+  sqliteMigrations,
+  sqliteQueryCompiler,
+} from "./sqlite/index.js";
 export type { SqliteDriverOptions } from "./sqlite/index.js";
-export { createPostgresDriver, postgresDialect, postgresMigrations } from "./postgres/index.js";
+export {
+  createPostgresDriver,
+  postgresDialect,
+  postgresMigrations,
+  postgresQueryCompiler,
+} from "./postgres/index.js";
 export type { PostgresDriverOptions } from "./postgres/index.js";
 
-import type { DialectImpl } from "./types.js";
+import type { DialectImpl, QueryCompiler } from "./types.js";
 import type { BaseMigrations } from "./base-migrations.js";
 import { sqliteDialect } from "./sqlite/dialect.js";
 import { sqliteMigrations } from "./sqlite/migrations.js";
+import { sqliteQueryCompiler } from "./sqlite/query-compiler.js";
 import { postgresDialect } from "./postgres/dialect.js";
 import { postgresMigrations } from "./postgres/migrations.js";
+import { postgresQueryCompiler } from "./postgres/query-compiler.js";
 
 const dialectMap: Record<string, DialectImpl> = {
   sqlite: sqliteDialect,
@@ -21,11 +33,23 @@ const migrationsMap: Record<string, BaseMigrations> = {
   postgres: postgresMigrations,
 };
 
+const compilerMap: Record<string, QueryCompiler> = {
+  sqlite: sqliteQueryCompiler,
+  postgres: postgresQueryCompiler,
+};
+
 /** Get dialect implementation by name. */
 export function getDialect(name: string): DialectImpl {
   const d = dialectMap[name];
   if (!d) throw new Error(`Unknown dialect: ${name}`);
   return d;
+}
+
+/** Get query compiler implementation by dialect name. */
+export function getQueryCompiler(name: string): QueryCompiler {
+  const compiler = compilerMap[name];
+  if (!compiler) throw new Error(`Unknown dialect: ${name}`);
+  return compiler;
 }
 
 /** Get migrations implementation by dialect name. */

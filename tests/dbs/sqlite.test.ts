@@ -2,14 +2,27 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { compileWhereExpr, compileSelectListExpr } from "../../src/dbs/shared-dialect.js";
 import {
   createSqliteDriver,
-  sqliteDialect,
-  sqliteMigrations,
+  sqliteMigrations as sqliteMigrationsImpl,
+  sqliteQueryCompiler,
   getDialect,
 } from "../../src/dbs/index.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Expr, SelectItem } from "../../src/orm/expr.js";
+
+const sqliteDialect = sqliteQueryCompiler as any;
+const sqliteMigrations = {
+  ...sqliteMigrationsImpl,
+  diffSchema: sqliteMigrationsImpl.diffSchema.bind(sqliteMigrationsImpl),
+  getDbTables: sqliteMigrationsImpl.getDbTables.bind(sqliteMigrationsImpl),
+  getDbColumns: sqliteMigrationsImpl.getDbColumns.bind(sqliteMigrationsImpl),
+  generateSql: sqliteQueryCompiler.compileMigrationUp.bind(sqliteQueryCompiler),
+  generateDownSql: sqliteQueryCompiler.compileMigrationDown.bind(sqliteQueryCompiler),
+  getTrackingTableDdl: () => sqliteQueryCompiler.compileTrackingTable().sql,
+  getRecordMigrationSql: () => sqliteQueryCompiler.compileRecordMigration("").sql,
+  getDeleteMigrationSql: () => sqliteQueryCompiler.compileDeleteMigration("").sql,
+};
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {

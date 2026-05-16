@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity, createPostgresDriver } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
-import { postgresDialect } from "../../src/dbs/index.js";
+import { postgresQueryCompiler } from "../../src/dbs/index.js";
 import {
   compileOrderByExpr,
   compileSelectListExpr,
@@ -18,6 +18,8 @@ import type { DialectImpl } from "../../src/dbs/types.js";
 import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
 import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";
+
+const postgresDialect = postgresQueryCompiler as any;
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
