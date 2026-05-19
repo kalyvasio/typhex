@@ -18,10 +18,8 @@ import type { DialectImpl, QueryCompiler } from "./types.js";
 import type { BaseMigrations } from "./base-migrations.js";
 import { sqliteDialect } from "./sqlite/dialect.js";
 import { sqliteMigrations } from "./sqlite/migrations.js";
-import { sqliteQueryCompiler } from "./sqlite/query-compiler.js";
 import { postgresDialect } from "./postgres/dialect.js";
 import { postgresMigrations } from "./postgres/migrations.js";
-import { postgresQueryCompiler } from "./postgres/query-compiler.js";
 
 const dialectMap: Record<string, DialectImpl> = {
   sqlite: sqliteDialect,
@@ -33,11 +31,6 @@ const migrationsMap: Record<string, BaseMigrations> = {
   postgres: postgresMigrations,
 };
 
-const compilerMap: Record<string, QueryCompiler> = {
-  sqlite: sqliteQueryCompiler,
-  postgres: postgresQueryCompiler,
-};
-
 /** Get dialect implementation by name. */
 export function getDialect(name: string): DialectImpl {
   const d = dialectMap[name];
@@ -47,9 +40,7 @@ export function getDialect(name: string): DialectImpl {
 
 /** Get query compiler implementation by dialect name. */
 export function getQueryCompiler(name: string): QueryCompiler {
-  const compiler = compilerMap[name];
-  if (!compiler) throw new Error(`Unknown dialect: ${name}`);
-  return compiler;
+  return getDialect(name).queryCompiler;
 }
 
 /** Get migrations implementation by dialect name. */

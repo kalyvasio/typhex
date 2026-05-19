@@ -141,12 +141,11 @@ export interface DialectInsertCapabilities {
 export interface DialectImpl {
   readonly name: Dialect;
   readonly insertCapabilities: DialectInsertCapabilities;
+  readonly queryCompiler: QueryCompiler;
 }
 
 /** Public SQL-building surface for a dialect. */
 export interface QueryCompiler {
-  readonly dialect: Dialect;
-  readonly insertCapabilities: DialectInsertCapabilities;
   compilePlan(plan: QueryPlan, opts?: CompileQueryOpts): CompileResult;
   compileMigrationUp(action: DiffAction): string;
   compileMigrationDown(action: DiffAction): string;

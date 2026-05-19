@@ -5,6 +5,7 @@
  */
 
 import type { DialectImpl } from "../types.js";
+import { sqliteQueryCompiler } from "./query-compiler.js";
 
 export const sqliteDialect: DialectImpl = {
   name: "sqlite",
@@ -12,4 +13,5 @@ export const sqliteDialect: DialectImpl = {
     supportsReturning: true,
     supportsSequences: false,
   },
+  queryCompiler: sqliteQueryCompiler,
 };

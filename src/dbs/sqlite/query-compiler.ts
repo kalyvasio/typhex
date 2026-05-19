@@ -6,11 +6,7 @@ import type { Expr, ExprAggregate } from "../../orm/expr.js";
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 
 export class SqliteQueryCompiler extends BaseQueryCompiler {
-  readonly dialect = "sqlite" as const;
-  readonly insertCapabilities = {
-    supportsReturning: true,
-    supportsSequences: false,
-  };
+  protected readonly dialect = "sqlite" as const;
 
   compileNextSequenceValues(): CompileResult {
     throw new Error("SQLite does not support sequence allocation");

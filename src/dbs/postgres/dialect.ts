@@ -5,6 +5,7 @@
  */
 
 import type { DialectImpl } from "../types.js";
+import { postgresQueryCompiler } from "./query-compiler.js";
 
 export const postgresDialect: DialectImpl = {
   name: "postgres",
@@ -12,4 +13,5 @@ export const postgresDialect: DialectImpl = {
     supportsReturning: true,
     supportsSequences: false,
   },
+  queryCompiler: postgresQueryCompiler,
 };

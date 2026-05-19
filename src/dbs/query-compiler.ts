@@ -122,8 +122,7 @@ export function compileGroupBy(items: GroupByItem[]): string {
 }
 
 export abstract class BaseQueryCompiler implements QueryCompiler {
-  abstract readonly dialect: Dialect;
-  abstract readonly insertCapabilities: QueryCompiler["insertCapabilities"];
+  protected abstract readonly dialect: Dialect;
 
   compilePlan(plan: QueryPlan, options: CompileQueryOpts = {}): CompileResult {
     const operation = plan.operation;

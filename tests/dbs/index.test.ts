@@ -42,16 +42,16 @@ describe("dbs/index", () => {
   describe("getQueryCompiler", () => {
     it("returns sqlite compiler for sqlite", () => {
       const compiler = getQueryCompiler("sqlite");
-      expect(compiler.dialect).toBe("sqlite");
       expect(compiler.compilePlan).toBeDefined();
       expect(compiler.compileTrackingTable).toBeDefined();
+      expect(getDialect("sqlite").queryCompiler).toBe(compiler);
     });
 
     it("returns postgres compiler for postgres", () => {
       const compiler = getQueryCompiler("postgres");
-      expect(compiler.dialect).toBe("postgres");
       expect(compiler.compilePlan).toBeDefined();
       expect(compiler.compileTrackingTable).toBeDefined();
+      expect(getDialect("postgres").queryCompiler).toBe(compiler);
     });
   });
 

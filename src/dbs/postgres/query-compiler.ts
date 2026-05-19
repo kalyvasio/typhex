@@ -11,11 +11,7 @@ import type { Expr, ExprAggregate, JoinSpec } from "../../orm/expr.js";
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 
 export class PostgresQueryCompiler extends BaseQueryCompiler {
-  readonly dialect = "postgres" as const;
-  readonly insertCapabilities = {
-    supportsReturning: true,
-    supportsSequences: false,
-  };
+  protected readonly dialect = "postgres" as const;
 
   compileNextSequenceValues(): CompileResult {
     throw new Error("Postgres sequence allocation is not configured for this dialect yet");
