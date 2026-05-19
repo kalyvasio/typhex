@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   createSqliteDriver,
-  sqliteMigrations as sqliteMigrationsImpl,
+  sqliteMigrations,
   sqliteQueryCompiler,
   getDialect,
 } from "../../src/dbs/index.js";
@@ -9,19 +9,11 @@ import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Expr, SelectItem } from "../../src/orm/expr.js";
-
-const sqliteDialect = sqliteQueryCompiler as any;
-const sqliteMigrations = {
-  ...sqliteMigrationsImpl,
-  diffSchema: sqliteMigrationsImpl.diffSchema.bind(sqliteMigrationsImpl),
-  getDbTables: sqliteMigrationsImpl.getDbTables.bind(sqliteMigrationsImpl),
-  getDbColumns: sqliteMigrationsImpl.getDbColumns.bind(sqliteMigrationsImpl),
-  generateSql: sqliteQueryCompiler.compileMigrationUp.bind(sqliteQueryCompiler),
-  generateDownSql: sqliteQueryCompiler.compileMigrationDown.bind(sqliteQueryCompiler),
-  getTrackingTableDdl: () => sqliteQueryCompiler.compileTrackingTable().sql,
-  getRecordMigrationSql: () => sqliteQueryCompiler.compileRecordMigration("").sql,
-  getDeleteMigrationSql: () => sqliteQueryCompiler.compileDeleteMigration("").sql,
-};
+import {
+  insertManyPlan,
+  insertPlan,
+  selectPlan,
+} from "./compiler-plan-fixtures.js";
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {
@@ -83,21 +75,11 @@ describe("dbs/sqlite", () => {
     });
   });
 
-  describe("sqliteDialect", () => {
-    it("uses ? placeholders", () => {
-      expect(sqliteDialect.placeholder(1)).toBe("?");
-      expect(sqliteDialect.placeholder(2)).toBe("?");
-    });
-
+  describe("sqliteQueryCompiler", () => {
     it("rejects sequence allocation compilation", () => {
-      expect(() => sqliteDialect.compileNextSequenceValues("users", "id", 2)).toThrow(
+      expect(() => sqliteQueryCompiler.compileNextSequenceValues("users", "id", 2)).toThrow(
         "SQLite does not support sequence allocation",
       );
-    });
-
-    it("escapes identifiers", () => {
-      expect(sqliteDialect.escapeIdentifier("users")).toBe('"users"');
-      expect(sqliteDialect.escapeIdentifier('a"b')).toBe('"a""b"');
     });
 
     it("compiles WHERE with ? placeholders", () => {
@@ -126,18 +108,25 @@ describe("dbs/sqlite", () => {
       expect(result.params).toEqual(["Acme"]);
     });
 
-    it("compileSelect emits LEFT JOIN for relation joins", () => {
-      const result = sqliteDialect.compileSelect({
-        table: "contacts",
-        tableAlias: "t0",
-        selectList: '"t0"."id", "t1"."name" AS "company_name"',
-        whereSql: "1=1",
-        whereParams: [],
-        orderBySql: "",
-        limitNum: null,
-        offsetNum: null,
-        joinsSql: ' LEFT JOIN "companies" AS "t1" ON "t0"."companyId" = "t1"."id"',
-      });
+    it("compilePlan select emits LEFT JOIN for relation joins", () => {
+      const result = sqliteQueryCompiler.compilePlan(
+        selectPlan("contacts", {
+          columnNames: ["id", "companyId"],
+          selectItems: [
+            { expr: { kind: "column", alias: "t0", column: ["id"] }, alias: "id" },
+            { expr: { kind: "column", alias: "t1", column: ["name"] }, alias: "company_name" },
+          ],
+          joins: [
+            {
+              joinType: "left",
+              targetTable: "companies",
+              alias: "t1",
+              foreignKeys: ["companyId"],
+              targetPkColumns: ["id"],
+            },
+          ],
+        }),
+      );
       expect(result.sql).toContain("LEFT JOIN");
       expect(result.sql).toContain('"companies"');
     });
@@ -157,15 +146,17 @@ describe("dbs/sqlite", () => {
       expect(result.sql).toContain("company_name");
     });
 
-    it("compileInsertMany produces multi-row INSERT with RETURNING * when pk provided", () => {
-      const { sql, params, returningRow } = sqliteDialect.compileInsertMany(
-        "users",
-        ["name", "age"],
-        [
-          ["Alice", 30],
-          ["Bob", 25],
-        ],
-        "id",
+    it("compilePlan insertMany produces multi-row INSERT with RETURNING * when pk provided", () => {
+      const { sql, params, returningRow } = sqliteQueryCompiler.compilePlan(
+        insertManyPlan(
+          "users",
+          ["name", "age"],
+          [
+            ["Alice", 30],
+            ["Bob", 25],
+          ],
+          ["id"],
+        ),
       );
       expect(sql).toContain('INSERT INTO "users"');
       expect(sql).toContain('"name"');
@@ -176,125 +167,119 @@ describe("dbs/sqlite", () => {
       expect(returningRow).toBe(true);
     });
 
-    it("compileInsertMany without pk omits RETURNING", () => {
-      const { sql, returningRow } = sqliteDialect.compileInsertMany(
-        "users",
-        ["name", "age"],
-        [["Alice", 30]],
+    it("compilePlan insertMany without pk omits RETURNING", () => {
+      const { sql, returningRow } = sqliteQueryCompiler.compilePlan(
+        insertManyPlan("users", ["name", "age"], [["Alice", 30]]),
       );
       expect(sql).not.toContain("RETURNING");
       expect(returningRow).toBe(false);
     });
 
-    it("compileInsertMany with empty rows returns empty sql", () => {
-      const { sql } = sqliteDialect.compileInsertMany("users", ["name"], [], "id");
+    it("compilePlan insertMany with empty rows returns empty sql", () => {
+      const { sql } = sqliteQueryCompiler.compilePlan(
+        insertManyPlan("users", ["name"], [], ["id"]),
+      );
       expect(sql).toBe("");
     });
 
-    it("compileInsertMany maps SQL_DEFAULT to null for SQLite", () => {
-      const { sql, params } = sqliteDialect.compileInsertMany(
-        "users",
-        ["name", "age"],
-        [
-          ["Alice", SQL_DEFAULT],
-          [SQL_DEFAULT, 25],
-        ],
-        "id",
+    it("compilePlan insertMany maps SQL_DEFAULT to null for SQLite", () => {
+      const { sql, params } = sqliteQueryCompiler.compilePlan(
+        insertManyPlan(
+          "users",
+          ["name", "age"],
+          [
+            ["Alice", SQL_DEFAULT],
+            [SQL_DEFAULT, 25],
+          ],
+          ["id"],
+        ),
       );
       expect(sql).toContain("VALUES");
       expect(sql).not.toContain("DEFAULT");
       expect(params).toEqual(["Alice", null, null, 25]);
     });
 
-    it("compileInsert produces single-row INSERT without RETURNING (SQLite ignores pk)", () => {
-      const { sql, params, returningRow } = sqliteDialect.compileInsert(
-        "users",
-        ["name", "age"],
-        ["Alice", 30],
-        "id",
+    it("compilePlan insert produces single-row INSERT without RETURNING (SQLite ignores pk)", () => {
+      const { sql, params, returningRow } = sqliteQueryCompiler.compilePlan(
+        insertPlan("users", ["name", "age"], ["Alice", 30], ["id"]),
       );
       expect(sql).toBe('INSERT INTO "users" ("name", "age") VALUES (?, ?)');
       expect(params).toEqual(["Alice", 30]);
       expect(returningRow).toBe(false);
     });
 
-    it("compileInsert with no columns emits DEFAULT VALUES", () => {
-      const { sql, params } = sqliteDialect.compileInsert("users", [], []);
+    it("compilePlan insert with no columns emits DEFAULT VALUES", () => {
+      const { sql, params } = sqliteQueryCompiler.compilePlan(insertPlan("users", [], []));
       expect(sql).toBe('INSERT INTO "users" DEFAULT VALUES');
       expect(params).toEqual([]);
     });
 
-    it("compileInsert doNothing emits ON CONFLICT ... DO NOTHING", () => {
-      const { sql } = sqliteDialect.compileInsert(
-        "users",
-        ["name", "slug"],
-        ["Alice", "alice"],
-        undefined,
-        { conflictColumns: ["slug"], action: "nothing" },
+    it("compilePlan insert doNothing emits ON CONFLICT ... DO NOTHING", () => {
+      const { sql } = sqliteQueryCompiler.compilePlan(
+        insertPlan("users", ["name", "slug"], ["Alice", "alice"], undefined, {
+          conflictColumns: ["slug"],
+          action: "nothing",
+        }),
       );
       expect(sql).toBe(
         'INSERT INTO "users" ("name", "slug") VALUES (?, ?) ON CONFLICT ("slug") DO NOTHING',
       );
     });
 
-    it("compileInsert doUpdate infers update columns (excludes conflict columns)", () => {
-      const { sql } = sqliteDialect.compileInsert(
-        "users",
-        ["name", "slug"],
-        ["Alice", "alice"],
-        undefined,
-        { conflictColumns: ["slug"], action: "update" },
+    it("compilePlan insert doUpdate infers update columns (excludes conflict columns)", () => {
+      const { sql } = sqliteQueryCompiler.compilePlan(
+        insertPlan("users", ["name", "slug"], ["Alice", "alice"], undefined, {
+          conflictColumns: ["slug"],
+          action: "update",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET');
       expect(sql).toContain('"name" = excluded."name"');
       expect(sql).not.toContain('"slug" = excluded."slug"');
     });
 
-    it("compileInsert doUpdate with explicit updateColumns", () => {
-      const { sql } = sqliteDialect.compileInsert(
-        "products",
-        ["sku", "name", "price"],
-        ["X1", "Widget", 10],
-        undefined,
-        { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] },
+    it("compilePlan insert doUpdate with explicit updateColumns", () => {
+      const { sql } = sqliteQueryCompiler.compilePlan(
+        insertPlan("products", ["sku", "name", "price"], ["X1", "Widget", 10], undefined, {
+          conflictColumns: ["sku"],
+          action: "update",
+          updateColumns: ["price"],
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("sku") DO UPDATE SET "price" = excluded."price"');
       expect(sql).not.toContain('"name" = excluded."name"');
     });
 
-    it("compileInsertMany doNothing emits ON CONFLICT ... DO NOTHING", () => {
-      const { sql } = sqliteDialect.compileInsertMany(
-        "tags",
-        ["slug", "label"],
-        [
-          ["ts", "TypeScript"],
-          ["js", "JavaScript"],
-        ],
-        undefined,
-        { conflictColumns: ["slug"], action: "nothing" },
+    it("compilePlan insertMany doNothing emits ON CONFLICT ... DO NOTHING", () => {
+      const { sql } = sqliteQueryCompiler.compilePlan(
+        insertManyPlan(
+          "tags",
+          ["slug", "label"],
+          [
+            ["ts", "TypeScript"],
+            ["js", "JavaScript"],
+          ],
+          undefined,
+          { conflictColumns: ["slug"], action: "nothing" },
+        ),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
       expect(sql).not.toContain("RETURNING");
     });
 
-    it("compileInsertMany doUpdate emits ON CONFLICT ... DO UPDATE SET", () => {
-      const { sql } = sqliteDialect.compileInsertMany(
-        "tags",
-        ["slug", "label"],
-        [["ts", "TypeScript"]],
-        undefined,
-        { conflictColumns: ["slug"], action: "update" },
+    it("compilePlan insertMany doUpdate emits ON CONFLICT ... DO UPDATE SET", () => {
+      const { sql } = sqliteQueryCompiler.compilePlan(
+        insertManyPlan(
+          "tags",
+          ["slug", "label"],
+          [["ts", "TypeScript"]],
+          undefined,
+          { conflictColumns: ["slug"], action: "update" },
+        ),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = excluded."label"');
     });
 
-    it("expandPlaceholders expands IN arrays to multiple ?", () => {
-      const sql = '("t0"."id" IN (?))';
-      const resolved = [[10, 20]];
-      const { sql: outSql, params } = sqliteDialect.expandPlaceholders(sql, resolved);
-      expect(outSql).toBe('("t0"."id" IN (?, ?))');
-      expect(params).toEqual([10, 20]);
-    });
   });
 
   describe("sqliteMigrations", () => {
@@ -331,7 +316,7 @@ describe("dbs/sqlite", () => {
           name: "text not null",
         },
       };
-      const sql = sqliteMigrations.generateSql(action);
+      const sql = sqliteQueryCompiler.compileMigrationUp(action);
       expect(sql).toContain("CREATE TABLE");
       expect(sql).toContain('"users"');
       expect(sql).toContain("autoincrement");
@@ -347,20 +332,20 @@ describe("dbs/sqlite", () => {
         columnInfo: { name: "age", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
         changes: [{ kind: "type" as const, from: "text", to: "integer" }],
       };
-      expect(() => sqliteMigrations.generateSql(action)).toThrow(
+      expect(() => sqliteQueryCompiler.compileMigrationUp(action)).toThrow(
         /SQLite cannot apply ALTER COLUMN on users\.age/,
       );
     });
 
     it("generateDownSql produces reverse SQLite DDL", () => {
-      const addTable = sqliteMigrations.generateDownSql({
+      const addTable = sqliteQueryCompiler.compileMigrationDown({
         kind: "add_table",
         table: "users",
         schema: { id: "integer primary key" },
       });
       expect(addTable).toContain('DROP TABLE IF EXISTS "users"');
 
-      const dropTable = sqliteMigrations.generateDownSql({
+      const dropTable = sqliteQueryCompiler.compileMigrationDown({
         kind: "drop_table",
         table: "users",
         columnInfos: [
@@ -372,7 +357,7 @@ describe("dbs/sqlite", () => {
       expect(dropTable).toContain('"id" INTEGER PRIMARY KEY');
       expect(dropTable).toContain("\"name\" TEXT NOT NULL DEFAULT 'anon'");
 
-      const addColumn = sqliteMigrations.generateDownSql({
+      const addColumn = sqliteQueryCompiler.compileMigrationDown({
         kind: "add_column",
         table: "users",
         column: "age",
@@ -380,7 +365,7 @@ describe("dbs/sqlite", () => {
       });
       expect(addColumn).toContain('DROP COLUMN "age"');
 
-      const dropColumn = sqliteMigrations.generateDownSql({
+      const dropColumn = sqliteQueryCompiler.compileMigrationDown({
         kind: "drop_column",
         table: "users",
         column: "age",
@@ -399,26 +384,26 @@ describe("dbs/sqlite", () => {
         columnInfo: { name: "age", type: "TEXT", notnull: 0, dflt_value: null, pk: 0 },
         changes: [{ kind: "type" as const, from: "text", to: "integer" }],
       };
-      expect(() => sqliteMigrations.generateDownSql(action)).toThrow(
+      expect(() => sqliteQueryCompiler.compileMigrationDown(action)).toThrow(
         /SQLite cannot rollback ALTER COLUMN on users\.age/,
       );
     });
 
     it("getTrackingTableDdl produces SQLite DDL", () => {
-      const ddl = sqliteMigrations.getTrackingTableDdl();
+      const ddl = sqliteQueryCompiler.compileTrackingTable().sql;
       expect(ddl).toContain("_typhex_migrations");
       expect(ddl).toContain("autoincrement");
       expect(ddl).toContain("datetime('now')");
     });
 
     it("getRecordMigrationSql uses ? placeholder", () => {
-      const sql = sqliteMigrations.getRecordMigrationSql();
+      const sql = sqliteQueryCompiler.compileRecordMigration("migration_name").sql;
       expect(sql).toContain("INSERT INTO");
       expect(sql).toContain("?");
     });
 
     it("getDeleteMigrationSql uses ? placeholder", () => {
-      const sql = sqliteMigrations.getDeleteMigrationSql();
+      const sql = sqliteQueryCompiler.compileDeleteMigration("migration_name").sql;
       expect(sql).toContain("DELETE FROM");
       expect(sql).toContain("?");
     });

@@ -32,7 +32,7 @@ const migrationsMap: Record<DialectName, BaseMigrations> = {
 };
 
 /** Get dialect implementation by name. */
-export function getDialect(name: string): Dialect {
+export function getDialect(name: DialectName): Dialect {
   const d = dialectMap[name];
   if (!d) throw new Error(`Unknown dialect: ${name}`);
   return d;

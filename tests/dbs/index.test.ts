@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import type { DialectName } from "../../src/dbs/types.js";
 import {
   getDialect,
   getDbMigrations,
@@ -19,7 +20,7 @@ describe("dbs/index", () => {
     });
 
     it("throws for unknown dialect", () => {
-      expect(() => getDialect("mysql")).toThrow("Unknown dialect");
+      expect(() => getDialect("mysql" as DialectName)).toThrow("Unknown dialect");
     });
   });
 
