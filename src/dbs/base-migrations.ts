@@ -8,17 +8,15 @@ import type {
   ColumnDef,
   DiffAction,
   DbColumnInfo,
+  Dialect,
   Driver,
-  QueryCompiler,
 } from "./types.js";
 import { getColumnDef } from "./types.js";
-import type { Dialect } from "../dialect.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import { extractBaseType } from "../utils.js";
 
 export abstract class BaseMigrations {
   abstract readonly dialect: Dialect;
-  protected abstract readonly compiler: QueryCompiler;
 
   abstract getDbTables(driver: Driver): Promise<string[]>;
   abstract getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
@@ -65,7 +63,10 @@ export abstract class BaseMigrations {
         actions.push({ kind: "add_column", table, column: col, definition: def });
         continue;
       }
-      const changes = BaseMigrations.computeColumnChanges(dbCol, getColumnDef(def, this.dialect));
+      const changes = BaseMigrations.computeColumnChanges(
+        dbCol,
+        getColumnDef(def, this.dialect.name),
+      );
       if (changes.length > 0) {
         actions.push({
           kind: "alter_column",

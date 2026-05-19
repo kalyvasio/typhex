@@ -1,10 +1,4 @@
-import {
-  BaseQueryCompiler,
-  JOIN_SQL_KEYWORDS,
-  compileAggregate,
-  compileConcatAggregate,
-  compileStandardAggregate,
-} from "../query-compiler.js";
+import { BaseQueryCompiler } from "../query-compiler.js";
 import type { CompileResult, DiffAction, ExpandPlaceholdersResult } from "../types.js";
 import type { Expr, ExprAggregate, JoinSpec } from "../../orm/expr.js";
 
@@ -85,23 +79,25 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
     return { sql: newSql, params: newParams };
   }
 
-  protected compileAggregate(
+  compileAggregate(
     agg: ExprAggregate,
     compileNodeFn?: (node: Expr, params: unknown[]) => string,
     params?: unknown[],
   ): string {
     if (agg.func === "GROUP_CONCAT" || agg.func === "STRING_AGG") {
-      return compileConcatAggregate("STRING_AGG", agg, "','", compileNodeFn, params);
+      return this.compileConcatAggregate("STRING_AGG", agg, "','", compileNodeFn, params);
     }
     if (agg.func === "ARRAY_AGG" || agg.func === "JSON_AGG") {
-      return compileStandardAggregate(agg.func, agg, compileNodeFn, params);
+      return this.compileStandardAggregate(agg.func, agg, compileNodeFn, params);
     }
-    return compileAggregate(agg, compileNodeFn, params);
+    return super.compileAggregate(agg, compileNodeFn, params);
   }
 
   protected buildJoinClause(join: JoinSpec, mainAlias: string): string {
     const kw =
-      join.joinType === "cross" ? "INNER JOIN" : (JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
+      join.joinType === "cross"
+        ? "INNER JOIN"
+        : (BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
     const on = join.foreignKeys
       .map(
         (fk, i) =>

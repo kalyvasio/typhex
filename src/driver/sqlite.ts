@@ -6,6 +6,7 @@
 import { createRequire } from "node:module";
 import type { Driver, Connection, ExecuteResult, TransactionOptions } from "./types.js";
 import { SqliteTrx } from "../dbs/sqlite/trx.js";
+import { sqliteDialect } from "../dbs/sqlite/dialect.js";
 import { isRecord } from "../utils.js";
 
 const require = createRequire(import.meta.url);
@@ -63,7 +64,7 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
 
   function makeConnection(): Connection {
     return {
-      dialect: "sqlite" as const,
+      dialect: sqliteDialect,
       async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
         return executeSql(db, sql, params);
       },
@@ -74,7 +75,7 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
   }
 
   return {
-    dialect: "sqlite" as const,
+    dialect: sqliteDialect,
 
     async execute(sql: string, params: unknown[] = []): Promise<ExecuteResult> {
       return executeSql(db, sql, params);

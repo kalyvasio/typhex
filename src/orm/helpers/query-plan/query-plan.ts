@@ -52,7 +52,6 @@
 import { type IrSelectRelation, type JoinHint } from "../../../ir/types.js";
 import type { RelationType } from "../../../entity/relations.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
-import { getQueryCompiler } from "../../../dbs/index.js";
 import type { QueryCompiler, QueryOperation } from "../../../dbs/types.js";
 import {
   RelationJoinBuilder,
@@ -81,7 +80,7 @@ const TABLE_ALIAS = "t0";
  * (e.g. for `findById` shortcuts).
  */
 export function getQueryCompilerOrThrow(state: QueryState<unknown>): QueryCompiler {
-  return getQueryCompiler(state.qe.dialect);
+  return state.qe.dialect.queryCompiler;
 }
 
 // ─── plan types ───────────────────────────────────────────────────────────────

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { postgresDialect, sqliteDialect } from "../../src/dbs/index.js";
-import { compileSelectListExpr, compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import { postgresQueryCompiler, sqliteQueryCompiler } from "../../src/dbs/index.js";
 import type { Expr, ExprAggregate, SelectItem } from "../../src/orm/expr.js";
 import { col, eq, konst, selectPlan, countPostsSelect, bin } from "./subquery-ref-helpers.js";
 
@@ -15,15 +14,11 @@ describe("Correlated scalar subquery in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: correlatedActivePosts }, alias: "postCount" },
     ];
-    const { sql, params } = compileSelectListExpr(
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
       items,
       false,
       "t0",
       ["id", "name"],
-      sqliteDialect,
-      sqliteDialect.compileAggregate
-        ? (agg, fn, p) => sqliteDialect.compileAggregate!(agg, fn, p)
-        : undefined,
     );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "postCount"`,
@@ -36,15 +31,11 @@ describe("Correlated scalar subquery in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: correlatedActivePosts }, alias: "postCount" },
     ];
-    const { sql, params } = compileSelectListExpr(
+    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(
       items,
       false,
       "t0",
       ["id", "name"],
-      postgresDialect,
-      postgresDialect.compileAggregate
-        ? (agg, fn, p) => postgresDialect.compileAggregate!(agg, fn, p)
-        : undefined,
     );
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "postCount"`,
@@ -69,15 +60,11 @@ describe("Correlated scalar subquery in SELECT", () => {
     const items: SelectItem[] = [
       { expr: { kind: "subquery", plan: sumPlan }, alias: "score" },
     ];
-    const { sql, params } = compileSelectListExpr(
+    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(
       items,
       false,
       "t0",
       ["id", "name"],
-      postgresDialect,
-      postgresDialect.compileAggregate
-        ? (agg, fn, p) => postgresDialect.compileAggregate!(agg, fn, p)
-        : undefined,
     );
     expect(sql).toBe(
       `(SELECT SUM("t1"."score") FROM "posts" AS "t1" WHERE (("t1"."authorId" = "t0"."id") AND ("t1"."active" = $1))) AS "score"`,
@@ -95,15 +82,11 @@ describe("Correlated scalar subquery from destructured outer arrow", () => {
     const items: SelectItem[] = [
       { expr: { kind: "subquery", plan: sub }, alias: "c" },
     ];
-    const { sql, params } = compileSelectListExpr(
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
       items,
       false,
       "t0",
       ["id", "name"],
-      sqliteDialect,
-      sqliteDialect.compileAggregate
-        ? (agg, fn, p) => sqliteDialect.compileAggregate!(agg, fn, p)
-        : undefined,
     );
     expect(sql).toBe(
       `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "c"`,
@@ -123,7 +106,7 @@ describe("Correlated IN subquery", () => {
       left: col("t0", "id"),
       right: { kind: "subquery", plan: sub },
     };
-    const result = compileWhereExpr(expr, sqliteDialect);
+    const result = sqliteQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(
       `"t0"."id" IN (SELECT "t1"."authorId" FROM "posts" AS "t1" WHERE ("t1"."category" = "t0"."preferredCategory"))`,
     );

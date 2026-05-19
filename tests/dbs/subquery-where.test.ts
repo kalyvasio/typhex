@@ -4,8 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
-import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import { sqliteQueryCompiler, postgresQueryCompiler } from "../../src/dbs/index.js";
 import type { Expr } from "../../src/orm/expr.js";
 import { col, konst, selectPlan, countPostsSelect } from "./subquery-ref-helpers.js";
 
@@ -22,7 +21,7 @@ describe("Aggregate subquery comparison in WHERE", () => {
       left: { kind: "subquery", plan: correlatedPostCount },
       right: konst(5),
     };
-    const result = compileWhereExpr(expr, sqliteDialect);
+    const result = sqliteQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(
       `((SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) > ?)`,
     );
@@ -36,7 +35,7 @@ describe("Aggregate subquery comparison in WHERE", () => {
       left: { kind: "subquery", plan: correlatedPostCount },
       right: konst(5),
     };
-    const result = compileWhereExpr(expr, postgresDialect);
+    const result = postgresQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(
       `((SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) > $1)`,
     );
@@ -50,7 +49,7 @@ describe("Aggregate subquery comparison in WHERE", () => {
       left: konst(10),
       right: { kind: "subquery", plan: correlatedPostCount },
     };
-    const result = compileWhereExpr(expr, sqliteDialect);
+    const result = sqliteQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(
       `(? < (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")))`,
     );
@@ -68,7 +67,7 @@ describe("Aggregate subquery comparison in WHERE", () => {
       left: { kind: "subquery", plan: sub },
       right: konst(1),
     };
-    const result = compileWhereExpr(expr, postgresDialect);
+    const result = postgresQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(`((SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1) >= $1)`);
     expect(result.params).toEqual([1]);
   });

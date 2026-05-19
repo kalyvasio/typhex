@@ -26,12 +26,18 @@ describe("dbs/index", () => {
   describe("getDbMigrations", () => {
     it("returns sqlite migrations for sqlite", () => {
       const m = getDbMigrations("sqlite");
-      expect(m.dialect).toBe("sqlite");
+      expect(m.dialect.name).toBe("sqlite");
     });
 
     it("returns postgres migrations for postgres", () => {
       const m = getDbMigrations("postgres");
-      expect(m.dialect).toBe("postgres");
+      expect(m.dialect.name).toBe("postgres");
+    });
+
+    it("accepts dialect object", () => {
+      const dialect = getDialect("sqlite");
+      const m = getDbMigrations(dialect);
+      expect(m.dialect).toBe(dialect);
     });
 
     it("throws for unknown dialect", () => {

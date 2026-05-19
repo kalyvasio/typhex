@@ -14,6 +14,7 @@ export { parseFkDependencies, topoSort } from "./topo-sort.js";
 export type {
   DiffAction,
   Dialect,
+  DialectName,
   MigrationFile,
   MigrationRecord,
   MigrationConfig,

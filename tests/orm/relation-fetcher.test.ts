@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { RelationFetcher } from "../../src/orm/helpers/relations/relation-fetcher.js";
 import type { RelationFetchMetadata } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
+import { sqliteDialect } from "../../src/dbs/index.js";
 
 /** Builds a spy-able query builder chain whose toArray returns `rows`. */
 function makeChain(rows: Record<string, unknown>[]) {
@@ -209,7 +210,7 @@ describe("fetchRelations", () => {
     const chain = makeChain(tagRows);
     const junctionChain = makeChain(junctionRows);
     const qe = {
-      dialect: "sqlite" as const,
+      dialect: sqliteDialect,
       query: vi.fn().mockResolvedValue(junctionRows),
       run: vi.fn(),
     };

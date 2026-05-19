@@ -2,10 +2,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryBuilder } from "../../src/orm/query-builder.js";
 import { Db, createSqliteDriver, Entity, rel } from "../../src/index.js";
 import type { RelationDef } from "../../src/entity/relations.js";
-import { sqliteDialect } from "../../src/dbs/sqlite/dialect.js";
 import type { IrOrderBy } from "../../src/ir/types.js";
 import { type MockDb, createMockDb } from "../helpers.js";
-import { compileOrderByExpr } from "../../src/dbs/shared-dialect.js";
+import { sqliteQueryCompiler } from "../../src/dbs/index.js";
 import type { OrderItem } from "../../src/orm/expr.js";
 
 // ---------------------------------------------------------------------------
@@ -141,7 +140,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
     const orders: OrderItem[] = [
       { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "asc" },
     ];
-    const result = compileOrderByExpr(orders, sqliteDialect);
+    const result = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(result.sql).toBe('"t1"."name" ASC');
   });
 
@@ -149,7 +148,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
     const orders: OrderItem[] = [
       { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "desc" },
     ];
-    const result = compileOrderByExpr(orders, sqliteDialect);
+    const result = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(result.sql).toBe('"t1"."name" DESC');
   });
 
@@ -157,7 +156,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
     const orders: OrderItem[] = [
       { expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "asc" },
     ];
-    const result = compileOrderByExpr(orders, sqliteDialect);
+    const result = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(result.sql).toBe('"t0"."name" ASC');
   });
 
@@ -165,7 +164,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
     const orders: OrderItem[] = [
       { expr: { kind: "column", alias: "t0", column: ["company"] }, direction: "asc" },
     ];
-    const result = compileOrderByExpr(orders, sqliteDialect);
+    const result = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(result.sql).toBe('"t0"."company" ASC');
   });
 
@@ -174,7 +173,7 @@ describe("compileOrderByExpr — relation path resolution", () => {
       { expr: { kind: "column", alias: "t1", column: ["name"] }, direction: "asc" },
       { expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "desc" },
     ];
-    const result = compileOrderByExpr(orders, sqliteDialect);
+    const result = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(result.sql).toBe('"t1"."name" ASC, "t0"."name" DESC');
   });
 });

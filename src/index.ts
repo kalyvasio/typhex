@@ -108,6 +108,7 @@ export type { RegisteredEntity } from "./entity/index.js";
 export type {
   DiffAction,
   Dialect,
+  DialectName,
   MigrationFile,
   MigrationRecord,
   MigrationResult,

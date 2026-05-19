@@ -26,103 +26,85 @@ import type {
   SelectItem,
 } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
-import type { Dialect } from "../dialect.js";
+import type { DialectName } from "./types.js";
 import type { JoinType } from "../ir/types.js";
-
-export const JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
-  inner: "INNER JOIN",
-  left: "LEFT JOIN",
-  right: "RIGHT JOIN",
-  cross: "CROSS JOIN",
-  full: "FULL OUTER JOIN",
-};
-
-export function quoteId(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`;
-}
 
 type CompileNodeFn = (node: Expr, params: unknown[]) => string;
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 
-function renderColumn(col: ExprColumn): string {
-  if (col.column.length === 0) return quoteId(col.alias);
-  return `${quoteId(col.alias)}.${col.column.map(quoteId).join(".")}`;
-}
+export abstract class BaseQueryCompiler implements QueryCompiler {
+  protected static readonly JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
+    inner: "INNER JOIN",
+    left: "LEFT JOIN",
+    right: "RIGHT JOIN",
+    cross: "CROSS JOIN",
+    full: "FULL OUTER JOIN",
+  };
 
-export function compileAggregateArg(
-  arg: Expr | null,
-  compileNodeFn?: CompileNodeFn,
-  params?: unknown[],
-): string {
-  if (arg === null) return "*";
-  if (arg.kind === "column") return renderColumn(arg);
-  if (arg.kind === "const" && typeof arg.value === "number") {
-    return String(arg.value);
+  protected abstract readonly dialect: DialectName;
+
+  protected renderColumn(col: ExprColumn): string {
+    if (col.column.length === 0) return this.escapeIdentifier(col.alias);
+    return `${this.escapeIdentifier(col.alias)}.${col.column.map((c) => this.escapeIdentifier(c)).join(".")}`;
   }
-  if (compileNodeFn) {
-    return compileNodeFn(arg, params ?? []);
-  }
-  throw new Error(
-    `[typhex] Aggregate arg of kind "${arg.kind}" requires a compile context. Use a column expression, a numeric literal, or ensure the aggregate is used within a full query (HAVING/WHERE).`,
-  );
-}
 
-export function compileStandardAggregate(
-  funcName: string,
-  agg: ExprAggregate,
-  compileNodeFn?: CompileNodeFn,
-  params?: unknown[],
-): string {
-  const argSql = compileAggregateArg(agg.arg, compileNodeFn, params);
-  const distinctPrefix = agg.distinct ? "DISTINCT " : "";
-  const expr = `${funcName}(${distinctPrefix}${argSql})`;
-  return agg.alias ? `${expr} AS ${quoteId(agg.alias)}` : expr;
-}
-
-export function compileConcatAggregate(
-  funcName: string,
-  agg: ExprAggregate,
-  defaultSep: string | undefined,
-  compileNodeFn?: CompileNodeFn,
-  params?: unknown[],
-): string {
-  const argSql = compileAggregateArg(agg.arg, compileNodeFn, params);
-  const distinctPrefix = agg.distinct ? "DISTINCT " : "";
-  const sepLiteral =
-    agg.separator !== undefined ? `'${agg.separator.replaceAll("'", "''")}'` : defaultSep;
-  const inner =
-    sepLiteral !== undefined
-      ? `${distinctPrefix}${argSql}, ${sepLiteral}`
-      : `${distinctPrefix}${argSql}`;
-  const expr = `${funcName}(${inner})`;
-  return agg.alias ? `${expr} AS ${quoteId(agg.alias)}` : expr;
-}
-
-export function compileAggregate(
-  agg: ExprAggregate,
-  compileNodeFn?: CompileNodeFn,
-  params?: unknown[],
-): string {
-  const crossDialect = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT"]);
-  if (!crossDialect.has(agg.func)) {
+  protected compileAggregateArg(
+    arg: Expr | null,
+    compileNodeFn?: CompileNodeFn,
+    params?: unknown[],
+  ): string {
+    if (arg === null) return "*";
+    if (arg.kind === "column") return this.renderColumn(arg);
+    if (arg.kind === "const" && typeof arg.value === "number") {
+      return String(arg.value);
+    }
+    if (compileNodeFn) {
+      return compileNodeFn(arg, params ?? []);
+    }
     throw new Error(
-      `[typhex] Aggregate function "${agg.func}" is dialect-specific. Import it from the corresponding dialect and use with the matching database.`,
+      `[typhex] Aggregate arg of kind "${arg.kind}" requires a compile context. Use a column expression, a numeric literal, or ensure the aggregate is used within a full query (HAVING/WHERE).`,
     );
   }
-  return compileStandardAggregate(agg.func, agg, compileNodeFn, params);
-}
 
-export function compileGroupBy(items: GroupByItem[]): string {
-  return items
-    .map((entry) => {
-      if (entry.kind === "index") return String(entry.index);
-      return renderColumn(entry);
-    })
-    .join(", ");
-}
+  protected compileStandardAggregate(
+    funcName: string,
+    agg: ExprAggregate,
+    compileNodeFn?: CompileNodeFn,
+    params?: unknown[],
+  ): string {
+    const argSql = this.compileAggregateArg(agg.arg, compileNodeFn, params);
+    const distinctPrefix = agg.distinct ? "DISTINCT " : "";
+    const expr = `${funcName}(${distinctPrefix}${argSql})`;
+    return agg.alias ? `${expr} AS ${this.escapeIdentifier(agg.alias)}` : expr;
+  }
 
-export abstract class BaseQueryCompiler implements QueryCompiler {
-  protected abstract readonly dialect: Dialect;
+  protected compileConcatAggregate(
+    funcName: string,
+    agg: ExprAggregate,
+    defaultSep: string | undefined,
+    compileNodeFn?: CompileNodeFn,
+    params?: unknown[],
+  ): string {
+    const argSql = this.compileAggregateArg(agg.arg, compileNodeFn, params);
+    const distinctPrefix = agg.distinct ? "DISTINCT " : "";
+    const sepLiteral =
+      agg.separator !== undefined ? `'${agg.separator.replaceAll("'", "''")}'` : defaultSep;
+    const inner =
+      sepLiteral !== undefined
+        ? `${distinctPrefix}${argSql}, ${sepLiteral}`
+        : `${distinctPrefix}${argSql}`;
+    const expr = `${funcName}(${inner})`;
+    return agg.alias ? `${expr} AS ${this.escapeIdentifier(agg.alias)}` : expr;
+  }
+
+  compileGroupBy(items: GroupByItem[]): string {
+    return items
+      .map((entry) => {
+        if (entry.kind === "index") return String(entry.index);
+        return this.renderColumn(entry);
+      })
+      .join(", ");
+  }
 
   compilePlan(plan: QueryPlan, options: CompileQueryOpts = {}): CompileResult {
     const operation = plan.operation;
@@ -261,7 +243,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const params: unknown[] = [];
     if (selectAll && items.length === 0) {
       return {
-        sql: columnNames.map((c) => `${quoteId(tableAlias)}.${quoteId(c)}`).join(", "),
+        sql: columnNames
+          .map((c) => `${this.escapeIdentifier(tableAlias)}.${this.escapeIdentifier(c)}`)
+          .join(", "),
         params,
       };
     }
@@ -274,12 +258,12 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
           : this.compileNode(item.expr, params);
       if (item.expr.kind === "aggregate") {
         if (item.alias && !item.expr.alias) {
-          parts.push(`${col} AS ${quoteId(item.alias)}`);
+          parts.push(`${col} AS ${this.escapeIdentifier(item.alias)}`);
         } else {
           parts.push(col);
         }
       } else if (item.alias) {
-        parts.push(`${col} AS ${quoteId(item.alias)}`);
+        parts.push(`${col} AS ${this.escapeIdentifier(item.alias)}`);
       } else {
         parts.push(col);
       }
@@ -288,7 +272,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected escapeIdentifier(name: string): string {
-    return quoteId(name);
+    return `"${name.replaceAll('"', '""')}"`;
   }
 
   protected placeholder(index: number): string {
@@ -386,7 +370,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   protected compileSelect(opts: CompileSelectOpts): CompileResult {
     const params = [...(opts.selectListParams ?? []), ...opts.whereParams];
     const groupByClause =
-      opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${compileGroupBy(opts.groupBy)}` : "";
+      opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${this.compileGroupBy(opts.groupBy)}` : "";
     let havingClause = "";
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
@@ -533,7 +517,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       case "unary":
         return `(NOT ${this.compileNode(node.operand, params)})`;
       case "column":
-        return renderColumn(node);
+        return this.renderColumn(node);
       case "const":
         params.push(node.value);
         return this.placeholder(params.length);
@@ -632,16 +616,22 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `(${receiver} LIKE '%' || ${arg} || '%')`;
   }
 
-  protected compileAggregate(
+  compileAggregate(
     agg: ExprAggregate,
     compileNodeFn?: CompileNodeFn,
     params?: unknown[],
   ): string {
-    return compileAggregate(agg, compileNodeFn, params);
+    const crossDialect = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT"]);
+    if (!crossDialect.has(agg.func)) {
+      throw new Error(
+        `[typhex] Aggregate function "${agg.func}" is dialect-specific. Use the matching dialect query compiler.`,
+      );
+    }
+    return this.compileStandardAggregate(agg.func, agg, compileNodeFn, params);
   }
 
   protected buildJoinClause(join: JoinSpec, mainAlias: string): string {
-    const kw = JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
+    const kw = BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
     const on = join.foreignKeys
       .map(
         (fk, i) =>

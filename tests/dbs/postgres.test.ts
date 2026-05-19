@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
 import type { Expr, GroupByItem } from "../../src/orm/expr.js";
 import {
   createPostgresDriver,
@@ -66,7 +65,7 @@ describe("dbs/postgres", () => {
         left: { kind: "column", alias: "t0", column: ["age"] },
         right: { kind: "const", value: 18 },
       };
-      const result = compileWhereExpr(expr, postgresDialect);
+      const result = postgresQueryCompiler.compileWhereExpr(expr);
       expect(result.sql).toContain("$1");
       expect(result.params).toEqual([18]);
     });
@@ -325,7 +324,7 @@ describe("dbs/postgres", () => {
   describe("postgresMigrations", () => {
     function metadataDriver(): Driver {
       return {
-        dialect: "postgres",
+        dialect: getDialect("postgres"),
         async execute(sql: string, params: unknown[] = []) {
           if (sql.includes("information_schema.tables")) {
             return { rows: [{ table_name: "pg_test_users" }], changes: 0 };

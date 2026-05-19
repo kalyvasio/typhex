@@ -4,6 +4,7 @@ import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js
 import { QueryBuilder } from "../../src/orm/query-builder.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 import type { RelationDef } from "../../src/entity/relations.js";
+import { postgresDialect, sqliteDialect } from "../../src/dbs/index.js";
 
 const User = Entity("users", {
   id: "integer primary key autoincrement",
@@ -130,7 +131,7 @@ describe("join hints", () => {
 describe("join type SQL keywords (mock executor)", () => {
   function createMockQe(): QueryExecutor {
     return {
-      dialect: "sqlite",
+      dialect: sqliteDialect,
       query: vi.fn().mockReturnValue([]),
       run: vi.fn().mockReturnValue({ lastID: 1, changes: 0 }),
     };
@@ -229,7 +230,7 @@ describe("join type SQL keywords (mock executor)", () => {
 
   it("crossJoin on postgres dialect emits INNER JOIN (no ON-clause cross join)", async () => {
     let capturedSql = "";
-    const qe = { ...createMockQe(), dialect: "postgres" as const };
+    const qe = { ...createMockQe(), dialect: postgresDialect };
     (qe.query as ReturnType<typeof vi.fn>).mockImplementation((sql: string) => {
       capturedSql = sql;
       return [];

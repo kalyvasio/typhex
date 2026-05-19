@@ -1,16 +1,16 @@
 /**
- * Multi-database types: Driver, Dialect, DialectImpl.
+ * Multi-database types: Driver and Dialect.
  */
 
 import type { Connection, ExecuteResult } from "../driver/types.js";
-import type { Dialect } from "../dialect.js";
+import type { DialectName } from "../dialect.js";
 import type { GroupByItem } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 
-export type { Dialect };
+export type { DialectName };
 
 /** Column definition: string (all dialects) or per-dialect map. */
-export type ColumnDef = string | { [K in Dialect]?: string };
+export type ColumnDef = string | { [K in DialectName]?: string };
 
 export interface CompileResult {
   sql: string;
@@ -137,9 +137,9 @@ export interface DialectInsertCapabilities {
   supportsSequences: boolean;
 }
 
-/** Dialect: SQL compilation and schema translation. */
-export interface DialectImpl {
-  readonly name: Dialect;
+/** Dialect: SQL capabilities and compiler entry point. */
+export interface Dialect {
+  readonly name: DialectName;
   readonly insertCapabilities: DialectInsertCapabilities;
   readonly queryCompiler: QueryCompiler;
 }
@@ -160,7 +160,7 @@ export interface QueryCompiler {
 }
 
 /** Resolve column definition for a dialect. */
-export function getColumnDef(def: ColumnDef, dialect: Dialect): string {
+export function getColumnDef(def: ColumnDef, dialect: DialectName): string {
   if (typeof def === "string") return def;
   const resolved = def[dialect] ?? def.sqlite ?? def.postgres;
   if (resolved == null) {

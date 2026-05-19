@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { compileWhereExpr, compileSelectListExpr } from "../../src/dbs/shared-dialect.js";
 import {
   createSqliteDriver,
   sqliteMigrations as sqliteMigrationsImpl,
@@ -108,7 +107,7 @@ describe("dbs/sqlite", () => {
         left: { kind: "column", alias: "t0", column: ["age"] },
         right: { kind: "const", value: 18 },
       };
-      const result = compileWhereExpr(expr, sqliteDialect);
+      const result = sqliteQueryCompiler.compileWhereExpr(expr);
       expect(result.sql).toContain("?");
       expect(result.params).toEqual([18]);
     });
@@ -122,7 +121,7 @@ describe("dbs/sqlite", () => {
         left: { kind: "column", alias: "t1", column: ["name"] },
         right: { kind: "const", value: "Acme" },
       };
-      const result = compileWhereExpr(expr, sqliteDialect);
+      const result = sqliteQueryCompiler.compileWhereExpr(expr);
       expect(result.sql).toContain('"t1"."name"');
       expect(result.params).toEqual(["Acme"]);
     });
@@ -148,12 +147,11 @@ describe("dbs/sqlite", () => {
         { expr: { kind: "column", alias: "t0", column: ["id"] }, alias: "id" },
         { expr: { kind: "column", alias: "t1", column: ["name"] }, alias: "company_name" },
       ];
-      const result = compileSelectListExpr(
+      const result = sqliteQueryCompiler.compileSelectListExpr(
         items,
         false,
         "t0",
         ["id", "name", "companyId"],
-        sqliteDialect,
       );
       expect(result.sql).toContain('"t1"."name"');
       expect(result.sql).toContain("company_name");

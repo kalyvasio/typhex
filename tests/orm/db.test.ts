@@ -9,6 +9,7 @@ import {
 } from "../../src/entity/global-driver.js";
 import { freshDriver } from "../helpers.js";
 import type { Driver } from "../../src/driver/types.js";
+import { postgresDialect } from "../../src/dbs/index.js";
 
 describe("Db", () => {
   beforeEach(() => {
@@ -435,7 +436,7 @@ describe("Db", () => {
     it("PostgresTrx throws when sqliteMode is set", async () => {
       const { PostgresTrx } = await import("../../src/dbs/postgres/trx.js");
       const mockConn = {
-        dialect: "postgres" as const,
+        dialect: postgresDialect,
         execute: async () => ({ rows: [], changes: 0 }),
         release: async () => {},
       };
@@ -447,7 +448,7 @@ describe("Db", () => {
     it("PostgresTrx throws when deferrable is set without SERIALIZABLE", async () => {
       const { PostgresTrx } = await import("../../src/dbs/postgres/trx.js");
       const mockConn = {
-        dialect: "postgres" as const,
+        dialect: postgresDialect,
         execute: async () => ({ rows: [], changes: 0 }),
         release: async () => {},
       };
@@ -459,7 +460,7 @@ describe("Db", () => {
     it("PostgresTrx throws when deferrable is set without readOnly", async () => {
       const { PostgresTrx } = await import("../../src/dbs/postgres/trx.js");
       const mockConn = {
-        dialect: "postgres" as const,
+        dialect: postgresDialect,
         execute: async () => ({ rows: [], changes: 0 }),
         release: async () => {},
       };
@@ -504,7 +505,7 @@ describe("Db", () => {
     it("uses dialect metadata queries for Postgres validation", async () => {
       const sql: string[] = [];
       const driver = {
-        dialect: "postgres",
+        dialect: postgresDialect,
         async execute(statement: string, params?: unknown[]) {
           sql.push(statement);
           expect(statement).not.toContain("PRAGMA");

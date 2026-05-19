@@ -3,8 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { getDialect } from "../../src/dbs/index.js";
-import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
+import { postgresQueryCompiler, sqliteQueryCompiler } from "../../src/dbs/index.js";
 import type { Expr } from "../../src/orm/expr.js";
 import { col, eq, konst, selectPlan } from "./subquery-ref-helpers.js";
 
@@ -21,7 +20,7 @@ describe("IN subquery compilation", () => {
   };
 
   it("SQLite: compiles IN subquery correctly", () => {
-    const result = compileWhereExpr(expr, getDialect("sqlite"));
+    const result = sqliteQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = ?))`,
     );
@@ -29,7 +28,7 @@ describe("IN subquery compilation", () => {
   });
 
   it("PostgreSQL: compiles IN subquery correctly", () => {
-    const result = compileWhereExpr(expr, getDialect("postgres"));
+    const result = postgresQueryCompiler.compileWhereExpr(expr);
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = $1))`,
     );
@@ -38,7 +37,7 @@ describe("IN subquery compilation", () => {
 
   it("SQLite: compiles NOT IN subquery correctly (negated)", () => {
     const negated: Expr = { ...expr, negated: true } as Expr;
-    const result = compileWhereExpr(negated, getDialect("sqlite"));
+    const result = sqliteQueryCompiler.compileWhereExpr(negated);
     expect(result.sql).toBe(
       `"t0"."postId" NOT IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = ?))`,
     );
@@ -52,14 +51,11 @@ describe("IN subquery compilation", () => {
       selectItems: [{ expr: col("t2", "id") }],
       where: eq(col("t2", "active"), konst(true)),
     });
-    const result = compileWhereExpr(
-      {
-        kind: "in",
-        left: col("t0", "postId"),
-        right: { kind: "subquery", plan: t2Plan },
-      },
-      getDialect("sqlite"),
-    );
+    const result = sqliteQueryCompiler.compileWhereExpr({
+      kind: "in",
+      left: col("t0", "postId"),
+      right: { kind: "subquery", plan: t2Plan },
+    });
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t2"."id" FROM "posts" AS "t2" WHERE ("t2"."active" = ?))`,
     );
@@ -68,14 +64,11 @@ describe("IN subquery compilation", () => {
 
   it("supports a custom outer param name (no u/p/e/t heuristic)", () => {
     // Outer column is just an alias — naming is irrelevant in Expr-land.
-    const result = compileWhereExpr(
-      {
-        kind: "in",
-        left: col("t0", "postId"),
-        right: { kind: "subquery", plan: subPlan },
-      },
-      getDialect("sqlite"),
-    );
+    const result = sqliteQueryCompiler.compileWhereExpr({
+      kind: "in",
+      left: col("t0", "postId"),
+      right: { kind: "subquery", plan: subPlan },
+    });
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE ("t1"."active" = ?))`,
     );
@@ -98,14 +91,11 @@ describe("IN subquery compilation", () => {
         right: { kind: "subquery", plan: innerPlan },
       },
     });
-    const result = compileWhereExpr(
-      {
-        kind: "in",
-        left: col("t0", "postId"),
-        right: { kind: "subquery", plan: middlePlan },
-      },
-      getDialect("sqlite"),
-    );
+    const result = sqliteQueryCompiler.compileWhereExpr({
+      kind: "in",
+      left: col("t0", "postId"),
+      right: { kind: "subquery", plan: middlePlan },
+    });
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE "t1"."authorId" IN (SELECT "t2"."id" FROM "users" AS "t2" WHERE ("t2"."active" = ?)))`,
     );
@@ -119,14 +109,11 @@ describe("IN subquery compilation", () => {
       orderBy: [{ expr: col("t1", "score"), direction: "desc" }],
       limitNum: 3,
     });
-    const result = compileWhereExpr(
-      {
-        kind: "in",
-        left: col("t0", "postId"),
-        right: { kind: "subquery", plan: sub },
-      },
-      getDialect("sqlite"),
-    );
+    const result = sqliteQueryCompiler.compileWhereExpr({
+      kind: "in",
+      left: col("t0", "postId"),
+      right: { kind: "subquery", plan: sub },
+    });
     expect(result.sql).toBe(
       `"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE 1=1 ORDER BY "t1"."score" DESC LIMIT ?)`,
     );
@@ -138,14 +125,11 @@ describe("IN subquery compilation", () => {
       selectItems: [{ expr: col("t1", "id") }],
       where: null,
     });
-    const result = compileWhereExpr(
-      {
-        kind: "in",
-        left: col("t0", "postId"),
-        right: { kind: "subquery", plan: sub },
-      },
-      getDialect("sqlite"),
-    );
+    const result = sqliteQueryCompiler.compileWhereExpr({
+      kind: "in",
+      left: col("t0", "postId"),
+      right: { kind: "subquery", plan: sub },
+    });
     expect(result.sql).toBe(`"t0"."postId" IN (SELECT "t1"."id" FROM "posts" AS "t1" WHERE 1=1)`);
     expect(result.params).toEqual([]);
   });

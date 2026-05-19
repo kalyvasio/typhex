@@ -3,12 +3,12 @@
  * Used by Db, CLI, and config file.
  */
 
-import type { Dialect } from "../dialect.js";
+import type { DialectName } from "../dbs/types.js";
 
 /** Typhex configuration: dialect, connection details, and paths. */
 export interface TyphexConfig {
   /** Database dialect */
-  dialect: Dialect;
+  dialect: DialectName;
   /** SQLite: path to database file (or ":memory:") */
   database?: string;
   /** PostgreSQL: connection URL (future) */

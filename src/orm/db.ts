@@ -5,9 +5,9 @@
  */
 
 import type { Driver, TransactionOptions } from "../driver/types.js";
-import type { Dialect } from "../dialect.js";
+import type { Dialect, DialectName } from "../dbs/types.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
-import { getDbMigrations, getQueryCompiler } from "../dbs/index.js";
+import { getDbMigrations } from "../dbs/index.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
 import {
@@ -39,7 +39,7 @@ export interface QueryExecutor {
 export type DbOptions =
   | { driver: Driver; migrationsFolder?: string }
   | {
-      dialect: "sqlite" | "postgres";
+      dialect: DialectName;
       database?: string;
       url?: string;
       migrationsFolder?: string;
@@ -139,7 +139,7 @@ export class Db implements QueryExecutor {
 
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
   async migrate(): Promise<void> {
-    const compiler = getQueryCompiler(this._driver.dialect);
+    const compiler = this._driver.dialect.queryCompiler;
     const entities = getRegisteredEntities();
     const deps = parseFkDependencies(entities);
     const names = entities.map((e) => e.table._table);

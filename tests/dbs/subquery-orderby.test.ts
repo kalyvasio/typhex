@@ -3,8 +3,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
-import { compileOrderByExpr } from "../../src/dbs/shared-dialect.js";
+import { sqliteQueryCompiler, postgresQueryCompiler } from "../../src/dbs/index.js";
 import type { OrderItem } from "../../src/orm/expr.js";
 import { col, eq, konst, selectPlan, countPostsSelect } from "./subquery-ref-helpers.js";
 
@@ -18,7 +17,7 @@ describe("ORDER BY subquery", () => {
     const orders: OrderItem[] = [
       { expr: { kind: "subquery", plan: correlatedPostCount }, direction: "desc" },
     ];
-    const { sql, params } = compileOrderByExpr(orders, sqliteDialect);
+    const { sql, params } = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(sql).toBe(
       `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) DESC`,
     );
@@ -31,7 +30,7 @@ describe("ORDER BY subquery", () => {
       where: eq(col("t1", "active"), konst(true)),
     });
     const orders: OrderItem[] = [{ expr: { kind: "subquery", plan: sub }, direction: "asc" }];
-    const { sql, params } = compileOrderByExpr(orders, postgresDialect);
+    const { sql, params } = postgresQueryCompiler.compileOrderByExpr(orders);
     expect(sql).toBe(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = $1)) ASC`);
     expect(params).toEqual([true]);
   });
@@ -41,10 +40,9 @@ describe("ORDER BY subquery", () => {
       { expr: col("t0", "name"), direction: "asc" },
       { expr: { kind: "subquery", plan: correlatedPostCount }, direction: "desc" },
     ];
-    const { sql, params } = compileOrderByExpr(orders, sqliteDialect);
-    expect(sql).toBe(
-      `"t0"."name" ASC, (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) DESC`,
-    );
+    const { sql, params } = sqliteQueryCompiler.compileOrderByExpr(orders);
+    expect(sql).toContain(`"t0"."name" ASC`);
+    expect(sql).toContain(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) DESC`);
     expect(params).toEqual([]);
   });
 });

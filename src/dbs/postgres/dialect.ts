@@ -4,10 +4,10 @@
  * SQL generation lives in `PostgresQueryCompiler`.
  */
 
-import type { DialectImpl } from "../types.js";
+import type { Dialect } from "../types.js";
 import { postgresQueryCompiler } from "./query-compiler.js";
 
-export const postgresDialect: DialectImpl = {
+export const postgresDialect: Dialect = {
   name: "postgres",
   insertCapabilities: {
     supportsReturning: true,
