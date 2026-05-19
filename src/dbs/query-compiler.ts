@@ -29,7 +29,6 @@ import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 import type { DialectName } from "./types.js";
 import type { JoinType } from "../ir/types.js";
 
-type CompileNodeFn = (node: Expr, params: unknown[]) => string;
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 
 export abstract class BaseQueryCompiler implements QueryCompiler {
@@ -48,31 +47,21 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `${this.escapeIdentifier(col.alias)}.${col.column.map((c) => this.escapeIdentifier(c)).join(".")}`;
   }
 
-  protected compileAggregateArg(
-    arg: Expr | null,
-    compileNodeFn?: CompileNodeFn,
-    params?: unknown[],
-  ): string {
+  protected compileAggregateArg(arg: Expr | null, params: unknown[]): string {
     if (arg === null) return "*";
     if (arg.kind === "column") return this.renderColumn(arg);
     if (arg.kind === "const" && typeof arg.value === "number") {
       return String(arg.value);
     }
-    if (compileNodeFn) {
-      return compileNodeFn(arg, params ?? []);
-    }
-    throw new Error(
-      `[typhex] Aggregate arg of kind "${arg.kind}" requires a compile context. Use a column expression, a numeric literal, or ensure the aggregate is used within a full query (HAVING/WHERE).`,
-    );
+    return this.compileNode(arg, params);
   }
 
   protected compileStandardAggregate(
     funcName: string,
     agg: ExprAggregate,
-    compileNodeFn?: CompileNodeFn,
-    params?: unknown[],
+    params: unknown[],
   ): string {
-    const argSql = this.compileAggregateArg(agg.arg, compileNodeFn, params);
+    const argSql = this.compileAggregateArg(agg.arg, params);
     const distinctPrefix = agg.distinct ? "DISTINCT " : "";
     const expr = `${funcName}(${distinctPrefix}${argSql})`;
     return agg.alias ? `${expr} AS ${this.escapeIdentifier(agg.alias)}` : expr;
@@ -82,10 +71,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     funcName: string,
     agg: ExprAggregate,
     defaultSep: string | undefined,
-    compileNodeFn?: CompileNodeFn,
-    params?: unknown[],
+    params: unknown[],
   ): string {
-    const argSql = this.compileAggregateArg(agg.arg, compileNodeFn, params);
+    const argSql = this.compileAggregateArg(agg.arg, params);
     const distinctPrefix = agg.distinct ? "DISTINCT " : "";
     const sepLiteral =
       agg.separator !== undefined ? `'${agg.separator.replaceAll("'", "''")}'` : defaultSep;
@@ -204,11 +192,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   abstract compileListColumns(table: string): CompileResult;
 
   /** @internal */
-  makeCompileNode(): CompileNodeFn {
-    return (node, params) => this.compileNode(node, params);
-  }
-
-  /** @internal */
   compileWhereExpr(node: Expr | null): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
     const sql = node ? this.compileNode(node, params) : "1=1";
@@ -234,11 +217,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     selectAll: boolean,
     tableAlias: string,
     columnNames: string[],
-    compileAggFn: (agg: ExprAggregate, compileNodeFn: CompileNodeFn, params: unknown[]) => string = (
-      agg,
-      fn,
-      p,
-    ) => this.compileAggregate(agg, fn, p),
   ): { sql: string; params: unknown[] } {
     const params: unknown[] = [];
     if (selectAll && items.length === 0) {
@@ -254,7 +232,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     for (const item of items) {
       const col =
         item.expr.kind === "aggregate"
-          ? compileAggFn(item.expr, this.makeCompileNode(), params)
+          ? this.compileAggregate(item.expr, params)
           : this.compileNode(item.expr, params);
       if (item.expr.kind === "aggregate") {
         if (item.alias && !item.expr.alias) {
@@ -298,7 +276,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
         plan.selectAll,
         plan.tableAlias,
         plan.columnNames,
-        (agg, fn, p) => this.compileAggregate(agg, fn, p),
       ),
       plan.whereParams,
     );
@@ -543,7 +520,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
         throw new Error(`Unsupported method: ${node.method}`);
       }
       case "aggregate":
-        return this.compileAggregate(node, this.makeCompileNode(), params);
+        return this.compileAggregate(node, params);
     }
   }
 
@@ -616,18 +593,19 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `(${receiver} LIKE '%' || ${arg} || '%')`;
   }
 
-  compileAggregate(
-    agg: ExprAggregate,
-    compileNodeFn?: CompileNodeFn,
-    params?: unknown[],
-  ): string {
-    const crossDialect = new Set(["SUM", "AVG", "MIN", "MAX", "COUNT"]);
-    if (!crossDialect.has(agg.func)) {
-      throw new Error(
-        `[typhex] Aggregate function "${agg.func}" is dialect-specific. Use the matching dialect query compiler.`,
-      );
+  compileAggregate(agg: ExprAggregate, params: unknown[] = []): string {
+    switch (agg.func) {
+      case "SUM":
+      case "AVG":
+      case "MIN":
+      case "MAX":
+      case "COUNT":
+        return this.compileStandardAggregate(agg.func, agg, params);
+      default:
+        throw new Error(
+          `[typhex] Aggregate function "${agg.func}" is dialect-specific. Use the matching dialect query compiler.`,
+        );
     }
-    return this.compileStandardAggregate(agg.func, agg, compileNodeFn, params);
   }
 
   protected buildJoinClause(join: JoinSpec, mainAlias: string): string {

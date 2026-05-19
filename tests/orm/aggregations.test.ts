@@ -719,8 +719,7 @@ describe("Bug fix: non-member aggregate arg compiles correctly", () => {
   });
 
   it("SUM with param arg compiles correctly via compileWhereExpr", () => {
-    // SUM(:factor) > 100 — Expr.param arg requires a compileNodeFn,
-    // available when the aggregate is nested inside a HAVING/WHERE walk.
+    // SUM(:factor) > 100 — param args compile through compileNode inside the aggregate path.
     const havingExpr: Expr = {
       kind: "binary",
       op: ">",
@@ -737,13 +736,14 @@ describe("Bug fix: non-member aggregate arg compiles correctly", () => {
     expect(result.params).toContain(100);
   });
 
-  it("compileAggregate with param arg throws without compileNodeFn", () => {
-    const agg: ExprAggregate = {
-      kind: "aggregate",
-      func: "SUM",
-      arg: { kind: "param", name: "x" },
-    };
-    expect(() => sqliteQueryCompiler.compileAggregate(agg)).toThrow(/requires a compile context/);
+  it("compileAggregate with param arg compiles via compileNode", () => {
+    const params: unknown[] = [];
+    const sql = sqliteQueryCompiler.compileAggregate(
+      { kind: "aggregate", func: "SUM", arg: { kind: "param", name: "x" } },
+      params,
+    );
+    expect(sql).toBe("SUM(?)");
+    expect(params).toEqual([{ __param: "x" }]);
   });
 });
 

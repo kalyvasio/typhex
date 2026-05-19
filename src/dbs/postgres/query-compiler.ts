@@ -79,18 +79,17 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
     return { sql: newSql, params: newParams };
   }
 
-  compileAggregate(
-    agg: ExprAggregate,
-    compileNodeFn?: (node: Expr, params: unknown[]) => string,
-    params?: unknown[],
-  ): string {
-    if (agg.func === "GROUP_CONCAT" || agg.func === "STRING_AGG") {
-      return this.compileConcatAggregate("STRING_AGG", agg, "','", compileNodeFn, params);
+  compileAggregate(agg: ExprAggregate, params: unknown[] = []): string {
+    switch (agg.func) {
+      case "GROUP_CONCAT":
+      case "STRING_AGG":
+        return this.compileConcatAggregate("STRING_AGG", agg, "','", params);
+      case "ARRAY_AGG":
+      case "JSON_AGG":
+        return this.compileStandardAggregate(agg.func, agg, params);
+      default:
+        return super.compileAggregate(agg, params);
     }
-    if (agg.func === "ARRAY_AGG" || agg.func === "JSON_AGG") {
-      return this.compileStandardAggregate(agg.func, agg, compileNodeFn, params);
-    }
-    return super.compileAggregate(agg, compileNodeFn, params);
   }
 
   protected buildJoinClause(join: JoinSpec, mainAlias: string): string {

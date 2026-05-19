@@ -1,7 +1,7 @@
 import { BaseQueryCompiler } from "../query-compiler.js";
 import type { CompileResult, DiffAction, ExpandPlaceholdersResult } from "../types.js";
 import { SQL_DEFAULT } from "../types.js";
-import type { Expr, ExprAggregate } from "../../orm/expr.js";
+import type { ExprAggregate } from "../../orm/expr.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 
@@ -53,15 +53,13 @@ export class SqliteQueryCompiler extends BaseQueryCompiler {
     return { sql: newSql, params: newParams };
   }
 
-  compileAggregate(
-    agg: ExprAggregate,
-    compileNodeFn?: (node: Expr, params: unknown[]) => string,
-    params?: unknown[],
-  ): string {
-    if (agg.func === "GROUP_CONCAT") {
-      return this.compileConcatAggregate("GROUP_CONCAT", agg, undefined, compileNodeFn, params);
+  compileAggregate(agg: ExprAggregate, params: unknown[] = []): string {
+    switch (agg.func) {
+      case "GROUP_CONCAT":
+        return this.compileConcatAggregate("GROUP_CONCAT", agg, undefined, params);
+      default:
+        return super.compileAggregate(agg, params);
     }
-    return super.compileAggregate(agg, compileNodeFn, params);
   }
 
   protected excludedTableName(): string {
