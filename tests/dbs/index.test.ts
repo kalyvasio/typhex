@@ -1,64 +1,33 @@
 import { describe, it, expect } from "vitest";
 import type { DialectName } from "../../src/dbs/types.js";
-import {
-  getDialect,
-  getDbMigrations,
-  getColumnDef,
-  getQueryCompiler,
-} from "../../src/dbs/index.js";
+import { getDialect, getColumnDef, sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
 
 describe("dbs/index", () => {
   describe("getDialect", () => {
     it("returns sqlite dialect for sqlite", () => {
       const d = getDialect("sqlite");
       expect(d.name).toBe("sqlite");
+      expect(d).toBe(sqliteDialect);
     });
 
     it("returns postgres dialect for postgres", () => {
       const d = getDialect("postgres");
       expect(d.name).toBe("postgres");
+      expect(d).toBe(postgresDialect);
     });
 
     it("throws for unknown dialect", () => {
       expect(() => getDialect("mysql" as DialectName)).toThrow("Unknown dialect");
     });
-  });
 
-  describe("getDbMigrations", () => {
-    it("returns sqlite migrations for sqlite", () => {
-      const m = getDbMigrations("sqlite");
-      expect(m.dialect.name).toBe("sqlite");
+    it("exposes queryCompiler on dialect", () => {
+      expect(getDialect("sqlite").queryCompiler).toBe(sqliteDialect.queryCompiler);
+      expect(getDialect("postgres").queryCompiler).toBe(postgresDialect.queryCompiler);
     });
 
-    it("returns postgres migrations for postgres", () => {
-      const m = getDbMigrations("postgres");
-      expect(m.dialect.name).toBe("postgres");
-    });
-
-    it("accepts dialect object", () => {
-      const dialect = getDialect("sqlite");
-      const m = getDbMigrations(dialect);
-      expect(m.dialect).toBe(dialect);
-    });
-
-    it("throws for unknown dialect", () => {
-      expect(() => getDbMigrations("mysql")).toThrow("Unknown dialect");
-    });
-  });
-
-  describe("getQueryCompiler", () => {
-    it("returns sqlite compiler for sqlite", () => {
-      const compiler = getQueryCompiler("sqlite");
-      expect(compiler.compilePlan).toBeDefined();
-      expect(compiler.compileTrackingTable).toBeDefined();
-      expect(getDialect("sqlite").queryCompiler).toBe(compiler);
-    });
-
-    it("returns postgres compiler for postgres", () => {
-      const compiler = getQueryCompiler("postgres");
-      expect(compiler.compilePlan).toBeDefined();
-      expect(compiler.compileTrackingTable).toBeDefined();
-      expect(getDialect("postgres").queryCompiler).toBe(compiler);
+    it("exposes migrations on dialect", () => {
+      expect(getDialect("sqlite").migrations).toBe(sqliteDialect.migrations);
+      expect(getDialect("postgres").migrations).toBe(postgresDialect.migrations);
     });
   });
 

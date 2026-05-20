@@ -7,7 +7,6 @@
 import type { Driver, TransactionOptions } from "../driver/types.js";
 import type { Dialect, DialectName } from "../dbs/types.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
-import { getDbMigrations } from "../dbs/index.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
 import {
@@ -156,12 +155,11 @@ export class Db implements QueryExecutor {
 
   /** Validate all registered entities against the database. Throws on mismatch. */
   async validate(): Promise<void> {
-    const migrations = getDbMigrations(this._driver.dialect);
     for (const entity of getRegisteredEntities()) {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = await migrations.getDbColumns(this._driver, name);
+      const rows = await this._driver.dialect.migrations.getDbColumns(this._driver, name);
 
       if (rows.length === 0) {
         throw new Error(`validate: table "${name}" does not exist in the database.`);

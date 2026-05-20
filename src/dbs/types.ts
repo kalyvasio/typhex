@@ -2,8 +2,9 @@
  * Multi-database types: Driver and Dialect.
  */
 
-import type { Connection, ExecuteResult } from "../driver/types.js";
+import type { Connection, Driver, ExecuteResult, TransactionOptions } from "../driver/types.js";
 import type { DialectName } from "../dialect.js";
+import type { RegisteredEntity } from "../entity/global-driver.js";
 import type { GroupByItem } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 
@@ -57,7 +58,7 @@ export type DiffAction =
     };
 
 export type { Connection, ExecuteResult };
-export type { TransactionOptions, Driver } from "../driver/types.js";
+export type { TransactionOptions, Driver };
 
 /** Options for compileSelect. */
 export interface CompileSelectOpts {
@@ -137,11 +138,19 @@ export interface DialectInsertCapabilities {
   supportsSequences: boolean;
 }
 
-/** Dialect: SQL capabilities and compiler entry point. */
+/** Schema diff and introspection for a dialect. */
+export interface DbMigrations {
+  diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]>;
+  getDbTables(driver: Driver): Promise<string[]>;
+  getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
+}
+
+/** Dialect: SQL capabilities, compiler, and migrations. */
 export interface Dialect {
   readonly name: DialectName;
   readonly insertCapabilities: DialectInsertCapabilities;
   readonly queryCompiler: QueryCompiler;
+  readonly migrations: DbMigrations;
 }
 
 /** Public SQL-building surface for a dialect. */

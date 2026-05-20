@@ -9,7 +9,6 @@ import { join } from "node:path";
 import type { Driver } from "../driver/types.js";
 import type { DiffAction, MigrationFile } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
-import { getDbMigrations } from "../dbs/index.js";
 import { parseFkDependencies, topoSort } from "./topo-sort.js";
 import { groupBy } from "../utils.js";
 
@@ -76,9 +75,8 @@ export async function generateMigrationFiles(
   driver: Driver,
   entities: readonly RegisteredEntity[],
 ): Promise<MigrationFile[]> {
-  const migrations = getDbMigrations(driver.dialect);
   const compiler = driver.dialect.queryCompiler;
-  const actions = await migrations.diffSchema(driver, entities);
+  const actions = await driver.dialect.migrations.diffSchema(driver, entities);
   if (actions.length === 0) return [];
 
   const groups = groupByTable(actions);
