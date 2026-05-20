@@ -139,18 +139,18 @@ export interface DialectInsertCapabilities {
 }
 
 /** Schema diff and introspection for a dialect. */
-export interface DbMigrations {
+export interface DbMigrator {
   diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]>;
   getDbTables(driver: Driver): Promise<string[]>;
   getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
 }
 
-/** Dialect: SQL capabilities, compiler, and migrations. */
+/** Dialect: SQL capabilities, compiler, and migrator. */
 export interface Dialect {
   readonly name: DialectName;
   readonly insertCapabilities: DialectInsertCapabilities;
   readonly queryCompiler: QueryCompiler;
-  readonly migrations: DbMigrations;
+  readonly migrator: DbMigrator;
 }
 
 /** Public SQL-building surface for a dialect. */

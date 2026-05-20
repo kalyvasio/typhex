@@ -1,12 +1,12 @@
 /**
- * SQLite migrations: diff and DDL generation.
+ * SQLite schema migrator: diff and introspection.
  */
 
 import type { Driver, DbColumnInfo } from "../types.js";
-import { BaseMigrations } from "../base-migrations.js";
+import { BaseMigrator } from "../base-migrator.js";
 import { sqliteQueryCompiler } from "./query-compiler.js";
 
-export class SqliteMigrations extends BaseMigrations {
+export class SqliteMigrator extends BaseMigrator {
   constructor() {
     super("sqlite", sqliteQueryCompiler);
   }
@@ -24,4 +24,4 @@ export class SqliteMigrations extends BaseMigrations {
   }
 }
 
-export const sqliteMigrations = new SqliteMigrations();
+export const sqliteMigrator = new SqliteMigrator();

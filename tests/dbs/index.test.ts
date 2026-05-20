@@ -25,9 +25,9 @@ describe("dbs/index", () => {
       expect(getDialect("postgres").queryCompiler).toBe(postgresDialect.queryCompiler);
     });
 
-    it("exposes migrations on dialect", () => {
-      expect(getDialect("sqlite").migrations).toBe(sqliteDialect.migrations);
-      expect(getDialect("postgres").migrations).toBe(postgresDialect.migrations);
+    it("exposes migrator on dialect", () => {
+      expect(getDialect("sqlite").migrator).toBe(sqliteDialect.migrator);
+      expect(getDialect("postgres").migrator).toBe(postgresDialect.migrator);
     });
   });
 

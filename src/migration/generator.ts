@@ -1,7 +1,7 @@
 /**
  * Migration generator: takes DiffActions, groups them by table, orders them
  * topologically, and writes timestamped .js files with up() and down() functions.
- * Uses dialect's BaseMigrations subclass for diff and SQL generation.
+ * Uses the dialect migrator for diff and the query compiler for SQL generation.
  */
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -76,7 +76,7 @@ export async function generateMigrationFiles(
   entities: readonly RegisteredEntity[],
 ): Promise<MigrationFile[]> {
   const compiler = driver.dialect.queryCompiler;
-  const actions = await driver.dialect.migrations.diffSchema(driver, entities);
+  const actions = await driver.dialect.migrator.diffSchema(driver, entities);
   if (actions.length === 0) return [];
 
   const groups = groupByTable(actions);

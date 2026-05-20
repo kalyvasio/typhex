@@ -1,12 +1,12 @@
 /**
- * PostgreSQL migrations: diff and DDL generation.
+ * PostgreSQL schema migrator: diff and introspection.
  */
 
 import type { Driver, DbColumnInfo } from "../types.js";
-import { BaseMigrations } from "../base-migrations.js";
+import { BaseMigrator } from "../base-migrator.js";
 import { postgresQueryCompiler } from "./query-compiler.js";
 
-export class PostgresMigrations extends BaseMigrations {
+export class PostgresMigrator extends BaseMigrator {
   constructor() {
     super("postgres", postgresQueryCompiler);
   }
@@ -24,4 +24,4 @@ export class PostgresMigrations extends BaseMigrations {
   }
 }
 
-export const postgresMigrations = new PostgresMigrations();
+export const postgresMigrator = new PostgresMigrator();

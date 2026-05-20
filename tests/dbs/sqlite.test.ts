@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   createSqliteDriver,
-  sqliteMigrations,
+  sqliteMigrator,
   sqliteQueryCompiler,
   getDialect,
 } from "../../src/dbs/index.js";
@@ -282,12 +282,12 @@ describe("dbs/sqlite", () => {
 
   });
 
-  describe("sqliteMigrations", () => {
+  describe("sqliteMigrator", () => {
     it("getDbTables returns table names", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
         await driver.execute('CREATE TABLE "foo" ("id" integer primary key)');
-        const tables = await sqliteMigrations.getDbTables(driver);
+        const tables = await sqliteMigrator.getDbTables(driver);
         expect(tables).toContain("foo");
       } finally {
         await driver.close();
@@ -300,7 +300,7 @@ describe("dbs/sqlite", () => {
         await driver.execute(
           'CREATE TABLE "users" ("id" integer primary key, "name" text not null)',
         );
-        const cols = await sqliteMigrations.getDbColumns(driver, "users");
+        const cols = await sqliteMigrator.getDbColumns(driver, "users");
         expect(cols.map((c) => c.name)).toEqual(["id", "name"]);
       } finally {
         await driver.close();

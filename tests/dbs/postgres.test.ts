@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import type { Expr } from "../../src/orm/expr.js";
 import {
   createPostgresDriver,
-  postgresMigrations,
+  postgresMigrator,
   postgresQueryCompiler,
   getDialect,
 } from "../../src/dbs/index.js";
@@ -345,7 +345,7 @@ describe("dbs/postgres", () => {
     });
   });
 
-  describe("postgresMigrations", () => {
+  describe("postgresMigrator", () => {
     function metadataDriver(): Driver {
       return {
         dialect: getDialect("postgres"),
@@ -366,19 +366,19 @@ describe("dbs/postgres", () => {
     }
 
     it("getDbTables returns Postgres table names", async () => {
-      const tables = await postgresMigrations.getDbTables(metadataDriver());
+      const tables = await postgresMigrator.getDbTables(metadataDriver());
       expect(tables).toEqual(["pg_test_users"]);
     });
 
     it("getDbColumns returns Postgres column info", async () => {
-      const columns = await postgresMigrations.getDbColumns(metadataDriver(), "pg_test_users");
+      const columns = await postgresMigrator.getDbColumns(metadataDriver(), "pg_test_users");
       expect(columns).toEqual([
         { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 },
       ]);
     });
 
     it("diffSchema uses Postgres metadata", async () => {
-      const actions = await postgresMigrations.diffSchema(metadataDriver(), [
+      const actions = await postgresMigrator.diffSchema(metadataDriver(), [
         {
           table: {
             _table: "pg_test_users",

@@ -1,6 +1,6 @@
 /**
- * Base migration class: owns the dialect-agnostic diff and DDL logic.
- * Each dialect subclasses this and overrides the dialect-specific hooks.
+ * Base migrator: owns dialect-agnostic schema diff and introspection.
+ * Each dialect subclasses this and overrides dialect-specific hooks.
  */
 
 import type {
@@ -8,7 +8,7 @@ import type {
   ColumnDef,
   DiffAction,
   DbColumnInfo,
-  DbMigrations,
+  DbMigrator,
   DialectName,
   Driver,
   QueryCompiler,
@@ -17,7 +17,7 @@ import { getColumnDef } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import { extractBaseType } from "../utils.js";
 
-export abstract class BaseMigrations implements DbMigrations {
+export abstract class BaseMigrator implements DbMigrator {
   constructor(
     readonly dialectName: DialectName,
     protected readonly queryCompiler: QueryCompiler,
@@ -68,7 +68,7 @@ export abstract class BaseMigrations implements DbMigrations {
         actions.push({ kind: "add_column", table, column: col, definition: def });
         continue;
       }
-      const changes = BaseMigrations.computeColumnChanges(
+      const changes = BaseMigrator.computeColumnChanges(
         dbCol,
         getColumnDef(def, this.dialectName),
       );
@@ -107,7 +107,7 @@ export abstract class BaseMigrations implements DbMigrations {
 
   protected static extractDefault(def: string): string | null {
     const match = /\bdefault\s+(.+?)(?:\s+not\s+null|\s+primary\s+key|\s+unique|\s+references\b|$)/i.exec(def);
-    return BaseMigrations.normalizeDefault(match?.[1] ?? null);
+    return BaseMigrator.normalizeDefault(match?.[1] ?? null);
   }
 
   protected static computeColumnChanges(dbCol: DbColumnInfo, entityDef: string): ColumnChange[] {
@@ -131,8 +131,8 @@ export abstract class BaseMigrations implements DbMigrations {
       });
     }
 
-    const dbDefault = BaseMigrations.normalizeDefault(dbCol.dflt_value);
-    const entityDefault = BaseMigrations.extractDefault(entityDef);
+    const dbDefault = BaseMigrator.normalizeDefault(dbCol.dflt_value);
+    const entityDefault = BaseMigrator.extractDefault(entityDef);
     if (dbDefault !== entityDefault) {
       changes.push({ kind: "default", from: dbDefault, to: entityDefault });
     }
@@ -143,5 +143,4 @@ export abstract class BaseMigrations implements DbMigrations {
 
     return changes;
   }
-
 }

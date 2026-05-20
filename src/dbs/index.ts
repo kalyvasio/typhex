@@ -2,14 +2,14 @@ export * from "./types.js";
 export {
   createSqliteDriver,
   sqliteDialect,
-  sqliteMigrations,
+  sqliteMigrator,
   sqliteQueryCompiler,
 } from "./sqlite/index.js";
 export type { SqliteDriverOptions } from "./sqlite/index.js";
 export {
   createPostgresDriver,
   postgresDialect,
-  postgresMigrations,
+  postgresMigrator,
   postgresQueryCompiler,
 } from "./postgres/index.js";
 export type { PostgresDriverOptions } from "./postgres/index.js";

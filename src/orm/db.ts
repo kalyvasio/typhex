@@ -159,7 +159,7 @@ export class Db implements QueryExecutor {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = await this._driver.dialect.migrations.getDbColumns(this._driver, name);
+      const rows = await this._driver.dialect.migrator.getDbColumns(this._driver, name);
 
       if (rows.length === 0) {
         throw new Error(`validate: table "${name}" does not exist in the database.`);

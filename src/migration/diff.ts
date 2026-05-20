@@ -1,6 +1,6 @@
 /**
  * Schema diff: compare registered entity definitions against the live database.
- * Delegates to the dialect's BaseMigrations subclass for dialect-specific diff logic.
+ * Delegates to the dialect migrator for dialect-specific diff logic.
  */
 
 import type { Driver } from "../driver/types.js";
@@ -12,5 +12,5 @@ export async function diffSchema(
   driver: Driver,
   entities: readonly RegisteredEntity[],
 ): Promise<DiffAction[]> {
-  return driver.dialect.migrations.diffSchema(driver, entities);
+  return driver.dialect.migrator.diffSchema(driver, entities);
 }
