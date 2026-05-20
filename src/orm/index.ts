@@ -3,4 +3,5 @@ export { Trx } from "./trx.js";
 export type { DbOptions, QueryExecutor } from "./db.js";
 export type { OrderDirection } from "../ir/types.js";
 export { QueryBuilder, InsertBuilder } from "./query-builder.js";
+export type { QueryState, ScopedQueryBuilder } from "./query-builder.js";
 export { SingleRowQueryBuilder } from "./single-row-query-builder.js";

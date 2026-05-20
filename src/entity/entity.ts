@@ -7,7 +7,7 @@ import type { Trx } from "../orm/trx.js";
 import type { QueryExecutor } from "../orm/db.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
-import { QueryBuilder, QueryState } from "../orm/query-builder.js";
+import { QueryBuilder, type QueryState } from "../orm/query-builder.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
 import type {
   InferTable,
@@ -54,11 +54,15 @@ export type Row<TShape extends Record<string, unknown>, TRels extends RelationsM
 export interface AnyEntityClass {
   /** The table descriptor: name, schema, and relations. */
   table: TableDef<Record<string, string>, RelationsMap>;
+  /** Optional custom query builder class for entity scopes. */
+  queryBuilder?: new (state: QueryState<any>) => QueryBuilder<any, any>;
   /** Returns a `QueryBuilder` scoped to this entity, optionally within a transaction or `Db` instance. */
   query<C extends AnyEntityClass>(
     this: C,
     executor?: QueryExecutor,
-  ): QueryBuilder<C, EntityInstance<C>>;
+  ): C extends { queryBuilder: new (state: QueryState<any>) => infer QB }
+    ? QB
+    : QueryBuilder<C, EntityInstance<C>>;
   /** Runs `fn` inside a transaction on the default (or entity-scoped) database. */
   transaction<T>(fn: (trx: Trx) => Promise<T>): Promise<T>;
 }
@@ -158,6 +162,14 @@ export interface EntityClass<
   new (data?: Partial<InferTable<TSchema>>): Row<Materialized<TSchema>, TRels>;
   /** Typed table descriptor for this entity. */
   table: TableDef<TSchema, TRels>;
+  /** Optional custom query builder class for entity scopes. */
+  queryBuilder?: new (state: QueryState<any>) => QueryBuilder<any, any>;
+  query<C extends AnyEntityClass>(
+    this: C,
+    executor?: QueryExecutor,
+  ): C extends { queryBuilder: new (state: QueryState<any>) => infer QB }
+    ? QB
+    : QueryBuilder<C, EntityInstance<C>>;
 }
 
 /**
@@ -260,10 +272,11 @@ export function Entity<
       return classRels && Object.keys(classRels).length > 0 ? classRels : (rels as RelationsMap);
     }
 
-    static query(this: new (data?: any) => any, executor?: QueryExecutor) {
+    static query(this: any, executor?: QueryExecutor) {
       const Ctor = this;
       const effectiveRels = EntityClassImpl._resolveRelations(Ctor);
-      return new QueryBuilder({
+      const QBClass = Ctor.queryBuilder ?? QueryBuilder;
+      return new QBClass({
         ...baseState(executor),
         entity: Ctor as unknown as AnyEntityClass,
         relations: effectiveRels,
@@ -274,7 +287,7 @@ export function Entity<
           await runHook(inst, "afterLoad");
           return inst;
         },
-      }) as unknown as QueryBuilder<any, EntityRow<typeof Ctor>>;
+      }) as unknown as QueryBuilder<any, any>;
     }
 
     constructor(data?: Partial<InferTable<TSchema>>) {

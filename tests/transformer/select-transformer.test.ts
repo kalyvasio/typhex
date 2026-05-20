@@ -4,6 +4,9 @@
 
 import { describe, it, expect, vi } from "vitest";
 import * as ts from "typescript";
+import * as path from "path";
+import * as os from "os";
+import * as fs from "fs";
 import { createTyphexTransformer } from "../../src/transformer/index.js";
 
 vi.mock("../../src/transformer/shared.js", async (importOriginal) => {
@@ -32,6 +35,37 @@ function transformWithChecker(source: string): string {
   const sf = program.getSourceFile(fileName)!;
   const result = ts.transform(sf, [createTyphexTransformer(program)]);
   return ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
+}
+
+/** Transform with real type resolution for scope-call inlining (method declaration lookup). */
+function transformWithTypes(sourceText: string, extraFiles?: Record<string, string>): string {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "typhex-transformer-test-"));
+  try {
+    const extraPaths: string[] = [];
+    for (const [filename, content] of Object.entries(extraFiles ?? {})) {
+      const filePath = path.join(tmpDir, filename);
+      fs.writeFileSync(filePath, content, "utf8");
+      extraPaths.push(filePath);
+    }
+
+    const mainPath = path.join(tmpDir, "test.ts");
+    fs.writeFileSync(mainPath, sourceText, "utf8");
+
+    const program = ts.createProgram([mainPath, ...extraPaths], {
+      target: ts.ScriptTarget.ESNext,
+      module: ts.ModuleKind.CommonJS,
+      strict: false,
+      skipLibCheck: true,
+      noEmit: true,
+    });
+    const sourceFile = program.getSourceFile(mainPath);
+    if (!sourceFile) throw new Error("Could not get source file from program");
+
+    const result = ts.transform(sourceFile, [createTyphexTransformer(program)]);
+    return ts.createPrinter().printFile(result.transformed[0] as ts.SourceFile);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 }
 
 describe("select transformer", () => {
@@ -139,5 +173,70 @@ class Post { static tableName: "posts" = "posts"; static query(): any { return n
 authors.select((a: any) => ({ topScore: Post.query().where((p: any) => p.authorId === a.id).orderBy((p: any) => p.score, 'desc').limit(1).select((p: any) => max(p.score)) }));
 `;
     expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scope inlining tests: require real type resolution (transformWithTypes)
+// ---------------------------------------------------------------------------
+
+/** Stub QueryBuilder and entity classes for the scope-inlining tests.
+ *  The transformer's isTyphexType() is mocked (always true) so the "receiver is
+ *  a Typhex QB" check passes.  What we need here is for
+ *  checker.getSymbolAtLocation(callee) to find the method declaration so
+ *  extractWherePredicate can pull the inner where() call out of it. */
+const STUB_DEFS = `
+// Minimal stubs — no imports needed; isTyphexType is mocked to always return true.
+declare class QueryBuilder<C, T> {
+  where(predicate: (row: T) => boolean): this;
+  select(fn: (row: T) => any): any;
+}
+
+interface CommentRow {
+  id: number;
+  postId: number;
+  archived: number;
+}
+
+declare class CommentQuery extends QueryBuilder<any, CommentRow> {
+  archived(): this {
+    return this.where((c) => c.archived == 1);
+  }
+}
+
+interface UserRow {
+  id: number;
+  name: string;
+  comments: CommentQuery;
+}
+
+declare class UserQuery extends QueryBuilder<any, UserRow> {}
+
+declare const users: UserQuery;
+`;
+
+describe("select transformer — scope inlining (real type resolution)", () => {
+  it("inlines p.comments.archived() into an IrSelectRelation with whereIr", () => {
+    // The CommentQuery.archived() scope calls this.where(c => c.archived == 1).
+    // The transformer should resolve the method declaration and inline the
+    // where predicate as a whereIr on the relation.
+    const source = `
+${STUB_DEFS}
+users.select((p) => ({ comments: p.comments.archived() }));
+`;
+    const output = transformWithTypes(source);
+    expect(output).toMatchSnapshot();
+  });
+
+  it("gracefully falls back (leaves call unchanged) when type resolution fails (noResolve program)", () => {
+    // With noResolve: true the checker returns no symbol for the scope method,
+    // so tryResolveScopeCall returns null and the entire select() call is left
+    // unchanged (no IrSelect is emitted).
+    const source = `users.select((p) => ({ comments: p.comments.archived() }));`;
+    // Use the no-resolve transform helper — no type info available.
+    const output = transform(source);
+    // The call must NOT be transformed to an IR literal; it should be unchanged.
+    expect(output).toContain("p.comments.archived()");
+    expect(output).not.toContain("whereIr");
   });
 });
