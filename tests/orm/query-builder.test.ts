@@ -485,13 +485,13 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["age"] },
         right: { kind: "const", value: 65 },
       };
-      const inner = newBuilder(db).where(ageGte21);
-      const q = newBuilder(db).withCte("adults", inner).fromCte("adults").where(ageLt65);
+      const inner = newBuilder(db).where(where(ageGte21));
+      const q = newBuilder(db).withCte("adults", inner).fromCte("adults").where(where(ageLt65));
       await q.toArray();
       const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toMatch(/^WITH/);
       expect(sql).toContain('"adults" AS (');
-      expect(sql).toContain('FROM "adults" AS t0');
+      expect(sql).toContain('FROM "adults" AS "t0"');
     });
 
     it("throws when subquery already defines CTEs", () => {
