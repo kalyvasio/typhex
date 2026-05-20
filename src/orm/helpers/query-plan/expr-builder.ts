@@ -100,6 +100,15 @@ export class ExprBuilder {
         return this.convertSubqueryRef(node);
       case "aggregate":
         return this.convertAggregate(node, scope);
+      case "case":
+        return {
+          kind: "case",
+          branches: node.branches.map((b) => ({
+            when: this.convert(b.when, scope),
+            then: this.convert(b.then, scope),
+          })),
+          ...(node.else !== undefined ? { else: this.convert(node.else, scope) } : {}),
+        };
       default:
         throw new Error(`[typhex] Unknown IR node kind: ${(node as { kind: string }).kind}`);
     }

@@ -10,7 +10,27 @@
 import type { JoinType } from "../ir/types.js";
 import type { QueryPlan } from "./helpers/query-plan/query-plan.js";
 
-export type BinaryOp = "&&" | "||" | "===" | "!==" | "==" | "!=" | ">" | ">=" | "<" | "<=";
+export type BinaryOp =
+  | "&&"
+  | "||"
+  | "==="
+  | "!=="
+  | "=="
+  | "!="
+  | ">"
+  | ">="
+  | "<"
+  | "<="
+  | "+"
+  | "-"
+  | "*"
+  | "/"
+  | "%"
+  | "&"
+  | "|"
+  | "^"
+  | "<<"
+  | ">>";
 
 export type AggregateFn =
   | "SUM"
@@ -33,7 +53,8 @@ export type Expr =
   | ExprCall
   | ExprAggregate
   | ExprExists
-  | ExprSubquery;
+  | ExprSubquery
+  | ExprCase;
 
 export interface ExprBinary {
   kind: "binary";
@@ -44,7 +65,7 @@ export interface ExprBinary {
 
 export interface ExprUnary {
   kind: "unary";
-  op: "!";
+  op: "!" | "~";
   operand: Expr;
 }
 
@@ -116,6 +137,12 @@ export interface ExprExists {
 export interface ExprSubquery {
   kind: "subquery";
   plan: QueryPlan;
+}
+
+export interface ExprCase {
+  kind: "case";
+  branches: Array<{ when: Expr; then: Expr }>;
+  else?: Expr;
 }
 
 /** A SELECT-list item. `alias` is optional — when undefined no AS clause is emitted. */

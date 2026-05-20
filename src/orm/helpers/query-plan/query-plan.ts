@@ -65,6 +65,7 @@ import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../e
 import { ExprBuilder, type SubqueryPlans } from "./expr-builder.js";
 import { SelectClassifier, EMPTY_CLASSIFIED, type ClassifiedSelect } from "./select-classifier.js";
 import { QueryIrAnalyzer, type ExprIrAnalysis, type QueryIrAnalysis } from "./query-ir-analyzer.js";
+import { inlineOrderByParams, inlineSelectParams } from "../ir-inline-params.js";
 
 /** Default name for the row-param when no explicit one is in scope. */
 export const DEFAULT_ROW_PARAM = "u";
@@ -333,15 +334,21 @@ export class QueryPlanBuilder {
       cteNames,
     );
 
+    const selectIr = inlineSelectParams(this.state.selectIr, this.state.selectParams);
+    const orderByIr = inlineOrderByParams(this.state.orderBy, this.state.selectParams);
+
     const whereExpr =
       hasFilter && this.state.whereIr ? exprBuilder.convert(this.state.whereIr.node) : null;
     const havingExpr =
       isSelect && this.state.havingIr ? exprBuilder.convert(this.state.havingIr.node) : null;
-    const orderBy = isSelect ? this.buildOrderBy(exprBuilder) : [];
+    const orderBy = isSelect ? this.buildOrderBy(exprBuilder, orderByIr) : [];
     const groupBy = isSelect ? this.buildGroupBy(exprBuilder) : [];
-    const selectItems = isSelect ? this.buildSelectItems(classified, exprBuilder) : [];
+    const selectItems = isSelect ? this.buildSelectItems(classified, exprBuilder, selectIr) : [];
 
-    const selectAll = !this.state.selectIr || this.state.selectIr.paths.length === 0;
+    const selectAll =
+      !selectIr ||
+      (selectIr.paths.length === 0 &&
+        !(selectIr.aggregates?.length || selectIr.expressions?.length || selectIr.subqueries?.length));
     const relationJoinSpecs = joins.map(toJoinSpec);
     const entityJoinSpecs = this.buildEntityJoins(
       paramToAlias,
@@ -654,8 +661,12 @@ export class QueryPlanBuilder {
    *      `Entity.query()...` chains; each becomes an inline subquery via
    *      the pre-built subquery plan map.
    */
-  private buildSelectItems(classified: ClassifiedSelect, exprBuilder: ExprBuilder): SelectItem[] {
-    const select = this.state.selectIr;
+  private buildSelectItems(
+    classified: ClassifiedSelect,
+    exprBuilder: ExprBuilder,
+    selectIr: typeof this.state.selectIr,
+  ): SelectItem[] {
+    const select = selectIr;
     if (!select) return [];
 
     const items: SelectItem[] = [];
@@ -686,12 +697,15 @@ export class QueryPlanBuilder {
       items.push({ expr: exprBuilder.convertSubqueryRef(entry.subquery), alias: entry.alias });
     }
 
+    for (const entry of select.expressions ?? []) {
+      items.push({ expr: exprBuilder.convert(entry.expr), alias: entry.alias });
+    }
+
     return items;
   }
 
-  /** Build the `OrderItem[]` for the ORDER BY clause. */
-  private buildOrderBy(exprBuilder: ExprBuilder): OrderItem[] {
-    return this.state.orderBy.map((o) => ({
+  private buildOrderBy(exprBuilder: ExprBuilder, orderBy: typeof this.state.orderBy): OrderItem[] {
+    return orderBy.map((o) => ({
       expr:
         o.expr.kind === "member"
           ? exprBuilder.resolveColumn(o.expr.param, o.expr.path)

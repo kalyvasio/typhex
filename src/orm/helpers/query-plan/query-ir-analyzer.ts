@@ -223,6 +223,13 @@ export class QueryIrAnalyzer {
       case "aggregate":
         this.visitExprIr(node.arg, ctx, out);
         return;
+      case "case":
+        for (const b of node.branches) {
+          this.visitExprIr(b.when, ctx, out);
+          this.visitExprIr(b.then, ctx, out);
+        }
+        if (node.else) this.visitExprIr(node.else, ctx, out);
+        return;
       case "const":
       case "param":
         return;

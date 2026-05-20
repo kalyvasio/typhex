@@ -30,6 +30,7 @@
     "cte": "npm run build:cte && npm run start:cte",
     "cte:debug": "npm run build:cte && TYPHEX_DEBUG=1 npm run start:cte",
     "transformer": "npm run build:transformer && npm run start:transformer",
-    "subqueries": "npm run build:transformer && npm run start:subqueries"
+    "subqueries": "npm run build:transformer && npm run start:subqueries",
+    "case-arithmetic-extras": "tsx case-arithmetic-extras/case-arithmetic-extras.ts"
   }
 }

@@ -159,8 +159,13 @@ export class QueryBuilder<
   ): this {
     const { subqueryParams: captured } = QueryBuilder.splitParams(subqueryParams);
     Object.assign(this.state.subqueryParams, captured);
+    const paramKeys = Object.keys(this.state.selectParams ?? {});
     this.state.orderBy.push(
-      resolveOrderBy(colOrIr as IrOrderBy | string | ((row: unknown) => unknown), direction),
+      resolveOrderBy(
+        colOrIr as IrOrderBy | string | ((row: unknown) => unknown),
+        direction,
+        paramKeys,
+      ),
     );
     return this;
   }
@@ -348,15 +353,19 @@ export class QueryBuilder<
   /** Sets the SELECT projection using an explicit list of column names. */
   select(columns: string[]): QueryBuilder<C, T, Ctes>;
   /** @internal — used by the TypeScript transformer */
-  select(ir: IrSelect, subqueryParams?: Record<string, unknown>): QueryBuilder<C, T, Ctes>;
+  select(ir: IrSelect, params?: Record<string, unknown>): QueryBuilder<C, T, Ctes>;
   select(
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>),
-    subqueryParams?: Record<string, unknown>,
+    params?: Record<string, unknown>,
   ): QueryBuilder<C, unknown, Ctes> {
-    const { subqueryParams: captured } = QueryBuilder.splitParams(subqueryParams);
+    const { sqlParams, subqueryParams: captured } = QueryBuilder.splitParams(params);
     Object.assign(this.state.subqueryParams, captured);
+    if (params !== undefined) {
+      this.state.selectParams = sqlParams;
+    }
     this.state.selectIr = resolveSelectIr(
       columnsOrIr as string[] | IrSelect | ((row: unknown) => Record<string, unknown>),
+      params !== undefined ? Object.keys(sqlParams) : [],
     );
     return this as QueryBuilder<C, unknown, Ctes>;
   }

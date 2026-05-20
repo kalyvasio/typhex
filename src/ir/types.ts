@@ -13,7 +13,8 @@ export type IrNode =
   | IrIn
   | IrExists
   | IrAggregate
-  | IrSubqueryRef;
+  | IrSubqueryRef
+  | IrCase;
 
 export interface IrPredicate {
   node: IrNode;
@@ -26,14 +27,25 @@ export type IrHaving = IrPredicate;
 
 export interface IrBinary {
   kind: "binary";
-  op: "&&" | "||" | "===" | "!==" | ">" | ">=" | "<" | "<=" | "==" | "!=";
+  op:
+    | "&&" | "||"
+    | "===" | "!==" | "==" | "!="
+    | ">" | ">=" | "<" | "<="
+    | "+" | "-" | "*" | "/" | "%"
+    | "&" | "|" | "^" | "<<" | ">>";
   left: IrNode;
   right: IrNode;
 }
 
+export interface IrCase {
+  kind: "case";
+  branches: Array<{ when: IrNode; then: IrNode }>;
+  else?: IrNode;
+}
+
 export interface IrUnary {
   kind: "unary";
-  op: "!";
+  op: "!" | "~";
   operand: IrNode;
 }
 
@@ -142,6 +154,8 @@ export interface IrSelect {
   aggregates?: IrAggregate[];
   /** Scalar subquery columns in SELECT (e.g. `(SELECT COUNT(*) FROM …) AS "x"`). */
   subqueries?: Array<{ alias: string; subquery: IrSubqueryRef }>;
+  /** Computed expression columns (arithmetic, ternary, etc.). Emitted as inline-literal SQL. */
+  expressions?: Array<{ expr: IrNode; alias: string }>;
   /** GROUP BY entries: string[] = member path, number = positional column reference (GROUP BY 1). */
   groupBy?: Array<string[] | number>;
 }
@@ -185,8 +199,47 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "call" ||
     k === "exists" ||
     k === "aggregate" ||
-    k === "subqueryRef"
+    k === "subqueryRef" ||
+    k === "case"
   );
+}
+
+/** Map every direct child IrNode of `node` through `fn`, returning a new node
+ *  with the children replaced. Used by IR-rewriting passes (e.g. inlining
+ *  closure-var IrParams to IrConsts before SQL emission). Leaf nodes
+ *  (`member`, `const`, `param`) are returned unchanged. */
+export function mapIrChildren(node: IrNode, fn: (child: IrNode) => IrNode): IrNode {
+  switch (node.kind) {
+    case "binary":
+      return { ...node, left: fn(node.left), right: fn(node.right) };
+    case "unary":
+      return { ...node, operand: fn(node.operand) };
+    case "in":
+      return { ...node, left: fn(node.left), right: fn(node.right) };
+    case "call":
+      return { ...node, receiver: fn(node.receiver), args: node.args.map(fn) };
+    case "exists":
+      return { ...node, innerWhere: fn(node.innerWhere) };
+    case "aggregate":
+      return { ...node, arg: node.arg ? fn(node.arg) : null };
+    case "case":
+      return {
+        ...node,
+        branches: node.branches.map((b) => ({ when: fn(b.when), then: fn(b.then) })),
+        ...(node.else !== undefined ? { else: fn(node.else) } : {}),
+      };
+    case "member":
+    case "const":
+    case "param":
+    case "subqueryRef":
+      return node;
+  }
+}
+
+/** Recursively replace every IrNode in the tree (including the root) using `fn`.
+ *  `fn` is called bottom-up — children are rewritten first, then the parent. */
+export function rewriteIr(node: IrNode, fn: (n: IrNode) => IrNode): IrNode {
+  return fn(mapIrChildren(node, (child) => rewriteIr(child, fn)));
 }
 
 export function isIrSelect(node: unknown): node is IrSelect {
@@ -258,6 +311,16 @@ export function isIrSelect(node: unknown): node is IrSelect {
           sub.kind === "subqueryRef" &&
           typeof sub.key === "string"
         );
+      })
+    )
+      return false;
+  }
+  if (o.expressions !== undefined) {
+    if (!Array.isArray(o.expressions)) return false;
+    if (
+      !o.expressions.every((e: unknown) => {
+        const x = e as Record<string, unknown>;
+        return x && typeof x.alias === "string" && isIrNode(x.expr);
       })
     )
       return false;

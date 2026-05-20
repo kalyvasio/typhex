@@ -89,9 +89,9 @@ describe("orderBy — lambda and dot-notation support", () => {
       expect(capturedSql).toContain('"name"');
     });
 
-    it("throws on non-member-expression lambda", () => {
+    it("throws on whole-row lambda (not a column path or expression)", () => {
       const q = newBuilder(db);
-      expect(() => q.orderBy((u) => (u.name as any) > 5)).toThrow();
+      expect(() => q.orderBy((u) => u)).toThrow();
     });
 
     it("chains and returns this (same reference)", () => {

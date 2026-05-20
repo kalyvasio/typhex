@@ -63,11 +63,12 @@ export function resolveJoinOnIr(
 export function resolveOrderBy(
   input: IrOrderBy | string | ((row: unknown) => unknown),
   direction: OrderDirection = "asc",
+  paramKeys: string[] = [],
 ): IrOrderBy {
   if (isIrOrderBy(input)) return input;
   if (typeof input === "function") {
     try {
-      const ir = parseArrowToIr(input as (u: any) => any, { paramKeys: [] });
+      const ir = parseArrowToIr(input as (u: any) => any, { paramKeys });
       if (ir.kind === "aggregate") {
         throw new Error(
           "[typhex] orderBy does not support aggregate functions directly. " +
@@ -75,7 +76,10 @@ export function resolveOrderBy(
             'then orderBy the alias as a string: .orderBy("total", "desc").',
         );
       }
-      if (ir.kind !== "member" || !ir.path || ir.path.length === 0) {
+      if (ir.kind !== "member" || ir.path.length === 0) {
+        if (ir.kind === "case" || ir.kind === "binary") {
+          return { expr: ir, direction };
+        }
         throw new Error(
           "[typhex] orderBy lambda must select a column (e.g. u => u.name), not the whole row (e.g. u => u)",
         );
@@ -102,9 +106,10 @@ export function resolveOrderBy(
 /** Resolve a select input (pre-built IrSelect, column string array, or arrow fn) to an IrSelect. */
 export function resolveSelectIr(
   input: IrSelect | string[] | ((row: unknown) => Record<string, unknown>),
+  paramKeys: string[] = [],
 ): IrSelect {
   if (typeof input === "function") {
-    const parsed = parseArrowToIrSelect(input as (...args: any[]) => any);
+    const parsed = parseArrowToIrSelect(input as (...args: any[]) => any, paramKeys);
     if (!parsed) {
       throw new Error(
         "select(): could not parse lambda at runtime. Use the Typhex transformer for complex selects, or pass column names / IrSelect.",

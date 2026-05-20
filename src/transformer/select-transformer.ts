@@ -3,7 +3,7 @@
  */
 
 import * as ts from "typescript";
-import type { IrSelect, IrAggregate, IrSubqueryRef } from "../ir/types.js";
+import type { IrSelect, IrAggregate, IrSubqueryRef, IrNode } from "../ir/types.js";
 import {
   isTyphexType,
   matchTyphexMethodCall,
@@ -15,6 +15,7 @@ import {
   getParamBindings,
   type ParamBindings,
 } from "./shared.js";
+import { parseExprToIr } from "./where-transformer.js";
 import {
   captureSubqueryRef,
   isTyphexQueryChain,
@@ -35,16 +36,16 @@ function arrowToIrSelect(
   pb: ParamBindings,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
+  freeVars: Set<string>,
 ): IrSelect | null {
-  // Single-expression shorthand bodies: p => p, p => p.id, p => count(p.id)
   if (!ts.isBlock(fn.body)) {
-    const shorthand = tryParseShorthandBody(fn.body, pb.paramName);
+    const shorthand = tryParseShorthandBody(fn.body, pb.paramName, freeVars);
     if (shorthand) return shorthand;
   }
 
   const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
-  return parseSelectObjectLiteral(obj, pb, checker, capturedSubqueries);
+  return parseSelectObjectLiteral(obj, pb, checker, capturedSubqueries, freeVars);
 }
 
 /**
@@ -65,23 +66,25 @@ function extractReturnedObjectLiteral(
 // ---- Shorthand bodies -------------------------------------------------------
 
 /** Dispatch the single-expression shorthand body shapes to their handlers. */
-function tryParseShorthandBody(body: ts.ConciseBody, paramName: string): IrSelect | null {
-  // p => p  →  SELECT *
+function tryParseShorthandBody(
+  body: ts.ConciseBody,
+  paramName: string,
+  freeVars: Set<string>,
+): IrSelect | null {
   if (ts.isIdentifier(body) && body.text === paramName) {
     return { param: paramName, paths: [], aliases: [], rest: true };
   }
 
-  // p => p.id  or  p => p.author.name  →  single column
   if (ts.isPropertyAccessExpression(body)) {
     return parseShorthandMemberBody(body, paramName);
   }
 
-  // p => count(p.id)  →  single aggregate
   if (ts.isCallExpression(body)) {
-    return parseShorthandAggregateBody(body, paramName);
+    return parseShorthandAggregateBody(body, paramName, freeVars);
   }
 
-  return null;
+  if (!ts.isExpression(body)) return null;
+  return parseShorthandExpressionBody(body, paramName, freeVars);
 }
 
 /** Handle `p => p.id` / `p => p.author.name` — emits a single-column IrSelect aliased to the leaf name. */
@@ -96,8 +99,13 @@ function parseShorthandMemberBody(
 }
 
 /** Handle `p => count(p.id)` — single aggregate aliased to the lowercased function name. */
-function parseShorthandAggregateBody(body: ts.CallExpression, paramName: string): IrSelect | null {
-  const parsed = parseTsAggregateCall(body, [paramName]);
+function parseShorthandAggregateBody(
+  body: ts.CallExpression,
+  paramName: string,
+  freeVars: Set<string>,
+): IrSelect | null {
+  const resolveArg = (expr: ts.Expression) => parseExprToIr(expr, [paramName], freeVars);
+  const parsed = parseTsAggregateCall(body, [paramName], resolveArg);
   if (!parsed) return null;
   const alias = parsed.rawName.toLowerCase();
   return {
@@ -105,6 +113,21 @@ function parseShorthandAggregateBody(body: ts.CallExpression, paramName: string)
     paths: [],
     aliases: [],
     aggregates: [{ ...parsed.ir, alias }],
+  };
+}
+
+function parseShorthandExpressionBody(
+  body: ts.Expression,
+  paramName: string,
+  freeVars: Set<string>,
+): IrSelect | null {
+  const ir = parseExprToIr(body, [paramName], freeVars);
+  if (!ir || ir.kind === "member" || ir.kind === "param") return null;
+  return {
+    param: paramName,
+    paths: [],
+    aliases: [],
+    expressions: [{ expr: ir, alias: "expr" }],
   };
 }
 
@@ -120,11 +143,13 @@ function parseSelectObjectLiteral(
   pb: ParamBindings,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
+  freeVars: Set<string>,
 ): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
   const aggregates: IrAggregate[] = [];
   const subqueries: Array<{ alias: string; subquery: IrSubqueryRef }> = [];
+  const expressions: Array<{ expr: IrNode; alias: string }> = [];
   let rest = false;
 
   for (const prop of obj.properties) {
@@ -137,20 +162,27 @@ function parseSelectObjectLiteral(
     const keyName = getPropertyKeyName(prop);
     if (!keyName) return null;
 
-    const handled = parseSelectObjectProperty(prop, keyName, pb, checker, capturedSubqueries);
+    const handled = parseSelectObjectProperty(prop, keyName, pb, checker, capturedSubqueries, freeVars);
     if (!handled) return null;
 
-    if (handled.kind === "path") {
-      paths.push(handled.path);
-      aliases.push(keyName);
-    } else if (handled.kind === "aggregate") {
-      aggregates.push(handled.aggregate);
-    } else {
-      subqueries.push({ alias: keyName, subquery: handled.subquery });
+    switch (handled.kind) {
+      case "path":
+        paths.push(handled.path);
+        aliases.push(keyName);
+        break;
+      case "aggregate":
+        aggregates.push(handled.aggregate);
+        break;
+      case "subquery":
+        subqueries.push({ alias: keyName, subquery: handled.subquery });
+        break;
+      case "expression":
+        expressions.push({ expr: handled.expr, alias: keyName });
+        break;
     }
   }
 
-  if (paths.length === 0 && aggregates.length === 0 && subqueries.length === 0 && !rest) {
+  if (paths.length === 0 && aggregates.length === 0 && subqueries.length === 0 && expressions.length === 0 && !rest) {
     return null;
   }
   return {
@@ -160,6 +192,7 @@ function parseSelectObjectLiteral(
     ...(rest ? { rest: true } : {}),
     ...(aggregates.length > 0 ? { aggregates } : {}),
     ...(subqueries.length > 0 ? { subqueries } : {}),
+    ...(expressions.length > 0 ? { expressions } : {}),
   };
 }
 
@@ -181,21 +214,17 @@ function getPropertyKeyName(prop: ts.ObjectLiteralElementLike): string | null {
 type PropertyResult =
   | { kind: "path"; path: string[] }
   | { kind: "aggregate"; aggregate: IrAggregate }
-  | { kind: "subquery"; subquery: IrSubqueryRef };
+  | { kind: "subquery"; subquery: IrSubqueryRef }
+  | { kind: "expression"; expr: IrNode };
 
-/**
- * Classify a single select-object property as either a column path or an
- * aggregate. Handles shorthand (`{ id }`), aliased members (`{ x: p.col }`),
- * destructured locals, and aggregate calls.
- */
 function parseSelectObjectProperty(
   prop: ts.ObjectLiteralElementLike,
   keyName: string,
   pb: ParamBindings,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
+  freeVars: Set<string>,
 ): PropertyResult | null {
-  // { id }  →  shorthand refers to destructured binding
   if (ts.isShorthandPropertyAssignment(prop)) {
     const path = pb.bindings?.get(keyName);
     return path ? { kind: "path", path } : null;
@@ -203,26 +232,23 @@ function parseSelectObjectProperty(
 
   if (!ts.isPropertyAssignment(prop)) return null;
   const value = prop.initializer;
+  const resolveArg = (expr: ts.Expression) => parseExprToIr(expr, [pb.paramName], freeVars);
 
-  // { col: p.col }  or  { col: p.a.b }
   if (ts.isPropertyAccessExpression(value)) {
     const path = memberPath(value, pb.paramName);
     if (!path || path.length === 0) return null;
     return { kind: "path", path };
   }
 
-  // { col: someDestructuredLocal }
   if (pb.bindings && ts.isIdentifier(value)) {
     const path = pb.bindings.get(value.text);
     if (path) return { kind: "path", path };
   }
 
-  // { total: count(p.id) } / { max: max(p.salary) } / …
   if (ts.isCallExpression(value)) {
-    const parsed = parseTsAggregateCall(value, [pb.paramName]);
+    const parsed = parseTsAggregateCall(value, [pb.paramName], resolveArg);
     if (parsed) return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
 
-    // { totalPosts: Post.query().where(…).select(() => count()) }
     if (isTyphexQueryChain(value, checker)) {
       return {
         kind: "subquery",
@@ -231,7 +257,9 @@ function parseSelectObjectProperty(
     }
   }
 
-  return null;
+  const expr = parseExprToIr(value, [pb.paramName], freeVars);
+  if (!expr || expr.kind === "member" || expr.kind === "param") return null;
+  return { kind: "expression", expr };
 }
 
 // ---------------------------------------------------------------------------
@@ -248,12 +276,24 @@ export function transformSelectCall(
 
   const pb = getParamBindings(arrow.parameters[0]?.name);
   const capturedSubqueries: CapturedSubquery[] = [];
-  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedSubqueries);
+  const freeVars = new Set<string>();
+  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedSubqueries, freeVars);
   if (!irSelect) return null;
 
   const args: ts.Expression[] = [irSelectToTsLiteral(irSelect)];
-  if (capturedSubqueries.length > 0) args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  if (capturedSubqueries.length > 0) {
+    args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  } else if (freeVars.size > 0) {
+    args.push(buildFreeVarsLiteral([...freeVars]));
+  }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
+}
+
+function buildFreeVarsLiteral(freeVars: string[]): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  return f.createObjectLiteralExpression(
+    freeVars.map((v) => f.createShorthandPropertyAssignment(f.createIdentifier(v))),
+  );
 }
 
 function buildSubqueryParamsLiteral(

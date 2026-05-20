@@ -140,4 +140,42 @@ authors.select((a: any) => ({ topScore: Post.query().where((p: any) => p.authorI
 `;
     expect(transformWithChecker(source)).toMatchSnapshot();
   });
+
+  it("transforms ({ revenue: sum(p.price * p.qty) }) with arithmetic inside aggregate", () => {
+    expect(transform("orders.select((p) => ({ revenue: sum(p.price * p.qty) }));")).toMatchSnapshot();
+  });
+
+  it("transforms ({ flagged: sum(p.active ? 1 : 2) }) with ternary inside aggregate", () => {
+    expect(transform("orders.select((p) => ({ flagged: sum(p.active ? 1 : 2) }));")).toMatchSnapshot();
+  });
+
+  it("transforms ({ tier: sum(p.age < 18 && p.active ? 1 : 0) }) with compound test inside aggregate ternary", () => {
+    expect(transform("orders.select((p) => ({ tier: sum(p.age < 18 && p.active ? 1 : 0) }));")).toMatchSnapshot();
+  });
+
+  // --- Tier-1+2 follow-ups: computed columns + closure capture ----------
+
+  it("transforms ({ revenue: u.price * u.qty }) — pure arithmetic projection", () => {
+    expect(transform("users.select((u) => ({ revenue: u.price * u.qty }));")).toMatchSnapshot();
+  });
+
+  it("transforms ({ status: u.active ? 'on' : 'off' }) — pure ternary projection", () => {
+    expect(transform("users.select((u) => ({ status: u.active ? 'on' : 'off' }));")).toMatchSnapshot();
+  });
+
+  it("transforms ({ category, total: sum(u.price), bucket: u.qty < 10 ? 'small' : 'large' }) — mixed", () => {
+    expect(transform(
+      "orders.select((u) => ({ category: u.category, total: sum(u.price), bucket: u.qty < 10 ? 'small' : 'large' }));"
+    )).toMatchSnapshot();
+  });
+
+  it("transforms (u) => u.price * 100 — single-expression shorthand aliased to 'expr'", () => {
+    expect(transform("orders.select((u) => u.price * 100);")).toMatchSnapshot();
+  });
+
+  it("transforms select with closure capture — emits { c } as second arg", () => {
+    expect(transform(
+      "const c = 5; users.select((u) => ({ x: sum(u.age > c ? 1 : 0) }));"
+    )).toMatchSnapshot();
+  });
 });

@@ -12,6 +12,7 @@ import type {
   IrConst,
   IrSubqueryRef,
   IrWhere,
+  IrCase,
 } from "../ir/types.js";
 import {
   captureSubqueryRef as captureSubqueryRefShared,
@@ -72,20 +73,25 @@ interface WhereCtx {
 function exprToIr(expr: ts.Expression, ctx: WhereCtx): IrNode | null {
   if (ts.isParenthesizedExpression(expr)) return exprToIr(expr.expression, ctx);
   if (ts.isBinaryExpression(expr)) return binaryExprToIr(expr, ctx);
-  if (isBangExpression(expr)) return unaryExprToIr(expr, ctx);
+  if (isPrefixUnaryExpression(expr)) return prefixUnaryExprToIr(expr, ctx);
   if (ts.isPropertyAccessExpression(expr)) return memberExprToIr(expr, ctx);
   if (ts.isIdentifier(expr)) return identifierToIr(expr, ctx);
   if (isConstantLiteral(expr)) return literalToIr(expr);
   if (ts.isCallExpression(expr)) return callExprToIr(expr, ctx);
   if (ts.isArrayLiteralExpression(expr)) return arrayLiteralToIr(expr, ctx);
+  if (ts.isConditionalExpression(expr)) return conditionalExprToIr(expr, ctx);
   return null;
 }
 
 // ---- Node kind predicates ---------------------------------------------------
 
-/** Narrowing predicate: is this a `!<expr>` prefix unary expression? */
-function isBangExpression(expr: ts.Expression): expr is ts.PrefixUnaryExpression {
-  return ts.isPrefixUnaryExpression(expr) && expr.operator === ts.SyntaxKind.ExclamationToken;
+/** Narrowing predicate: is this a `!expr` / `~expr` prefix unary expression? */
+function isPrefixUnaryExpression(expr: ts.Expression): expr is ts.PrefixUnaryExpression {
+  return (
+    ts.isPrefixUnaryExpression(expr) &&
+    (expr.operator === ts.SyntaxKind.ExclamationToken ||
+      expr.operator === ts.SyntaxKind.TildeToken)
+  );
 }
 
 /** True if the expression is a supported literal constant (string/number/bool/null). */
@@ -136,11 +142,13 @@ function captureSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRef {
   return captureSubqueryRefShared(expr, ctx.capturedSubqueries);
 }
 
-/** Handle `!<expr>` — wraps the inner IR in an IrUnary with `!`. */
-function unaryExprToIr(expr: ts.PrefixUnaryExpression, ctx: WhereCtx): IrNode | null {
+/** Handle `!<expr>` / `~<expr>` — `!` wraps inner IR; `~` emits bitwise NOT. */
+function prefixUnaryExprToIr(expr: ts.PrefixUnaryExpression, ctx: WhereCtx): IrNode | null {
   const operand = exprToIr(expr.operand, ctx);
   if (!operand) return null;
-  return { kind: "unary", op: "!", operand };
+  const op = expr.operator === ts.SyntaxKind.TildeToken ? "~" : "!";
+  if (op === "!" && operand.kind === "in") return { ...operand, negated: !operand.negated };
+  return { kind: "unary", op, operand };
 }
 
 /** Handle `p.a.b.c` — resolves against the lambda params and returns an IrMember.
@@ -241,6 +249,23 @@ function arrayLiteralToIr(expr: ts.ArrayLiteralExpression, ctx: WhereCtx): IrNod
     values.push(ir.value);
   }
   return { kind: "const", value: values };
+}
+
+/** Handle `test ? consequent : alternate` — flattens nested ternaries in the alternate branch. */
+function conditionalExprToIr(expr: ts.ConditionalExpression, ctx: WhereCtx): IrCase | null {
+  const when = exprToIr(expr.condition, ctx);
+  const then = exprToIr(expr.whenTrue, ctx);
+  const alternate = exprToIr(expr.whenFalse, ctx);
+  if (!when || !then || !alternate) return null;
+
+  if (alternate.kind === "case") {
+    return {
+      kind: "case",
+      branches: [{ when, then }, ...alternate.branches],
+      ...(alternate.else !== undefined ? { else: alternate.else } : {}),
+    };
+  }
+  return { kind: "case", branches: [{ when, then }], else: alternate };
 }
 
 // ---- CallExpression handling -----------------------------------------------
@@ -457,6 +482,21 @@ export function parseWhereArrowToIr(
   outerScope?: ScopeFrame[],
 ): { ir: IrWhere; freeVars: string[] } | null {
   return arrowToIr(fn, checker, outerParamNames, outerDestructured, outerScope);
+}
+
+/** Convert a single TS expression to IR for select/orderBy transformers. */
+export function parseExprToIr(
+  expr: ts.Expression,
+  paramNames: string[],
+  freeVars: Set<string>,
+  checker?: ts.TypeChecker,
+): IrNode | null {
+  return exprToIr(expr, {
+    paramNames,
+    freeVars,
+    capturedSubqueries: [],
+    checker,
+  });
 }
 
 /** Rewrite a `.where(arrow)` call on a Typhex Table/QueryBuilder into IR form. */
