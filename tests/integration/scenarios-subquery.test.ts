@@ -10,13 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
-import { sqliteDialect } from "../../src/dbs/index.js";
-import {
-  compileOrderByExpr,
-  compileSelectListExpr,
-  compileWhereExpr,
-} from "../../src/dbs/shared-dialect.js";
-import type { DialectImpl } from "../../src/dbs/types.js";
+import { sqliteQueryCompiler } from "../../src/dbs/index.js";
 import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
 import type { IrNode, IrWhere } from "../../src/ir/types.js";
 import { freshDb } from "../helpers.js";
@@ -26,13 +20,6 @@ function where(node: IrNode, rootParam: string, localParamNames = [rootParam]): 
   return { node, rootParam, localParamNames };
 }
 import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
-
-function aggCompiler(dialect: DialectImpl) {
-  return dialect.compileAggregate
-    ? (agg: ExprAggregate, fn: (n: Expr, p: unknown[]) => string, p: unknown[]) =>
-        dialect.compileAggregate!(agg, fn, p)
-    : undefined;
-}
 
 /** Drive the same compile pipeline QueryBuilder uses, but with hand-built Expr. */
 function runExprQuery(
@@ -44,17 +31,15 @@ function runExprQuery(
   whereExpr: Expr | null,
   orderBy: OrderItem[],
 ): Promise<Record<string, unknown>[]> {
-  const selectListResult = compileSelectListExpr(
+  const selectListResult = sqliteQueryCompiler.compileSelectListExpr(
     selectItems,
     selectAll,
     "t0",
     columnNames,
-    sqliteDialect,
-    aggCompiler(sqliteDialect),
   );
-  const whereResult = compileWhereExpr(whereExpr, sqliteDialect);
-  const orderByResult = compileOrderByExpr(orderBy, sqliteDialect);
-  const { sql, params } = sqliteDialect.compileSelect({
+  const whereResult = sqliteQueryCompiler.compileWhereExpr(whereExpr);
+  const orderByResult = sqliteQueryCompiler.compileOrderByExpr(orderBy);
+  const { sql, params } = sqliteQueryCompiler.compileSelect({
     table,
     tableAlias: "t0",
     selectList: selectListResult.sql,

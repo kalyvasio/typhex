@@ -8,14 +8,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity, createPostgresDriver } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
-import { postgresDialect } from "../../src/dbs/index.js";
-import {
-  compileOrderByExpr,
-  compileSelectListExpr,
-  compileWhereExpr,
-} from "../../src/dbs/shared-dialect.js";
-import type { DialectImpl } from "../../src/dbs/types.js";
-import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
+import { postgresQueryCompiler } from "../../src/dbs/index.js";
+import type { Expr, OrderItem, SelectItem } from "../../src/orm/expr.js";
 import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";
 
@@ -30,13 +24,6 @@ function freshDb() {
   return new Db(createPostgresDriver({ connectionString }));
 }
 
-function aggCompiler(dialect: DialectImpl) {
-  return dialect.compileAggregate
-    ? (agg: ExprAggregate, fn: (n: Expr, p: unknown[]) => string, p: unknown[]) =>
-        dialect.compileAggregate!(agg, fn, p)
-    : undefined;
-}
-
 function runExprQuery(
   db: Db,
   table: string,
@@ -46,17 +33,15 @@ function runExprQuery(
   whereExpr: Expr | null,
   orderBy: OrderItem[],
 ): Promise<Record<string, unknown>[]> {
-  const selectListResult = compileSelectListExpr(
+  const selectListResult = postgresQueryCompiler.compileSelectListExpr(
     selectItems,
     selectAll,
     "t0",
     columnNames,
-    postgresDialect,
-    aggCompiler(postgresDialect),
   );
-  const whereResult = compileWhereExpr(whereExpr, postgresDialect);
-  const orderByResult = compileOrderByExpr(orderBy, postgresDialect);
-  const { sql, params } = postgresDialect.compileSelect({
+  const whereResult = postgresQueryCompiler.compileWhereExpr(whereExpr);
+  const orderByResult = postgresQueryCompiler.compileOrderByExpr(orderBy);
+  const { sql, params } = postgresQueryCompiler.compileSelect({
     table,
     tableAlias: "t0",
     selectList: selectListResult.sql,

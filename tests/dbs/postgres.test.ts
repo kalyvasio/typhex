@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { compileWhereExpr } from "../../src/dbs/shared-dialect.js";
-import type { Expr, GroupByItem } from "../../src/orm/expr.js";
+import type { Expr } from "../../src/orm/expr.js";
 import {
   createPostgresDriver,
-  postgresDialect,
-  postgresMigrations,
+  postgresMigrator,
+  postgresQueryCompiler,
   getDialect,
 } from "../../src/dbs/index.js";
 import { Entity } from "../../src/entity/entity.js";
@@ -12,6 +11,14 @@ import { Db } from "../../src/orm/db.js";
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Driver } from "../../src/driver/types.js";
+import {
+  countPlan,
+  deletePlan,
+  insertManyPlan,
+  insertPlan,
+  selectPlan,
+  updatePlan,
+} from "./compiler-plan-fixtures.js";
 
 const connectionString =
   process.env.TYPHEX_POSTGRES_URL ?? "postgresql://localhost:5432/typhex_test";
@@ -30,20 +37,11 @@ describe("dbs/postgres", () => {
     setDefaultDb(null);
   });
 
-  describe("postgresDialect", () => {
-    it("uses $1, $2 placeholders", () => {
-      expect(postgresDialect.placeholder(1)).toBe("$1");
-      expect(postgresDialect.placeholder(2)).toBe("$2");
-    });
-
+  describe("postgresQueryCompiler", () => {
     it("rejects sequence allocation compilation until configured", () => {
-      expect(() => postgresDialect.compileNextSequenceValues("users", "id", 2)).toThrow(
+      expect(() => postgresQueryCompiler.compileNextSequenceValues("users", "id", 2)).toThrow(
         "Postgres sequence allocation is not configured for this dialect yet",
       );
-    });
-
-    it("escapes identifiers", () => {
-      expect(postgresDialect.escapeIdentifier("users")).toBe('"users"');
     });
 
     it("compiles WHERE with $N placeholders", () => {
@@ -53,19 +51,21 @@ describe("dbs/postgres", () => {
         left: { kind: "column", alias: "t0", column: ["age"] },
         right: { kind: "const", value: 18 },
       };
-      const result = compileWhereExpr(expr, postgresDialect);
+      const result = postgresQueryCompiler.compileWhereExpr(expr);
       expect(result.sql).toContain("$1");
       expect(result.params).toEqual([18]);
     });
-    it("compileInsertMany produces multi-row INSERT with RETURNING * and sequential $N placeholders", () => {
-      const { sql, params, returningRow } = postgresDialect.compileInsertMany(
-        "users",
-        ["name", "age"],
-        [
-          ["Alice", 30],
-          ["Bob", 25],
-        ],
-        ["id"],
+    it("compilePlan insertMany produces multi-row INSERT with RETURNING * and sequential $N placeholders", () => {
+      const { sql, params, returningRow } = postgresQueryCompiler.compilePlan(
+        insertManyPlan(
+          "users",
+          ["name", "age"],
+          [
+            ["Alice", 30],
+            ["Bob", 25],
+          ],
+          ["id"],
+        ),
       );
       expect(sql).toContain('INSERT INTO "users"');
       expect(sql).toContain('"name"');
@@ -80,20 +80,24 @@ describe("dbs/postgres", () => {
       expect(returningRow).toBe(true);
     });
 
-    it("compileInsertMany with empty rows returns empty sql", () => {
-      const { sql } = postgresDialect.compileInsertMany("users", ["name"], [], ["id"]);
+    it("compilePlan insertMany with empty rows returns empty sql", () => {
+      const { sql } = postgresQueryCompiler.compilePlan(
+        insertManyPlan("users", ["name"], [], ["id"]),
+      );
       expect(sql).toBe("");
     });
 
-    it("compileInsertMany emits DEFAULT keyword for SQL_DEFAULT and skips its param slot", () => {
-      const { sql, params } = postgresDialect.compileInsertMany(
-        "users",
-        ["name", "age"],
-        [
-          ["Alice", SQL_DEFAULT],
-          [SQL_DEFAULT, 25],
-        ],
-        ["id"],
+    it("compilePlan insertMany emits DEFAULT keyword for SQL_DEFAULT and skips its param slot", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        insertManyPlan(
+          "users",
+          ["name", "age"],
+          [
+            ["Alice", SQL_DEFAULT],
+            [SQL_DEFAULT, 25],
+          ],
+          ["id"],
+        ),
       );
       expect(sql).toContain("DEFAULT");
       expect(sql).toContain("$1");
@@ -102,106 +106,122 @@ describe("dbs/postgres", () => {
       expect(params).toEqual(["Alice", 25]);
     });
 
-    it("compileInsert produces single-row INSERT with RETURNING *", () => {
-      const { sql, params, returningRow } = postgresDialect.compileInsert(
-        "users",
-        ["name", "age"],
-        ["Alice", 30],
-        ["id"],
+    it("compilePlan insert produces single-row INSERT with RETURNING *", () => {
+      const { sql, params, returningRow } = postgresQueryCompiler.compilePlan(
+        insertPlan("users", ["name", "age"], ["Alice", 30], ["id"]),
       );
       expect(sql).toBe('INSERT INTO "users" ("name", "age") VALUES ($1, $2) RETURNING *');
       expect(params).toEqual(["Alice", 30]);
       expect(returningRow).toBe(true);
     });
 
-    it("compileInsert with no columns emits DEFAULT VALUES with RETURNING *", () => {
-      const { sql, returningRow } = postgresDialect.compileInsert("users", [], [], ["id"]);
+    it("compilePlan insert with no columns emits DEFAULT VALUES with RETURNING *", () => {
+      const { sql, returningRow } = postgresQueryCompiler.compilePlan(
+        insertPlan("users", [], [], ["id"]),
+      );
       expect(sql).toBe('INSERT INTO "users" DEFAULT VALUES RETURNING *');
       expect(returningRow).toBe(true);
     });
 
-    it("compileInsert with no pk omits RETURNING", () => {
-      const { sql, returningRow } = postgresDialect.compileInsert("users", ["name"], ["Alice"]);
+    it("compilePlan insert with no pk omits RETURNING", () => {
+      const { sql, returningRow } = postgresQueryCompiler.compilePlan(
+        insertPlan("users", ["name"], ["Alice"]),
+      );
       expect(sql).not.toContain("RETURNING");
       expect(returningRow).toBe(false);
     });
 
-    it("compileInsert doNothing emits ON CONFLICT ... DO NOTHING before RETURNING", () => {
-      const { sql } = postgresDialect.compileInsert(
-        "users",
-        ["name", "slug"],
-        ["Alice", "alice"],
-        ["id"],
-        { conflictColumns: ["slug"], action: "nothing" },
+    it("compilePlan insert doNothing emits ON CONFLICT ... DO NOTHING before RETURNING", () => {
+      const { sql } = postgresQueryCompiler.compilePlan(
+        insertPlan("users", ["name", "slug"], ["Alice", "alice"], ["id"], {
+          conflictColumns: ["slug"],
+          action: "nothing",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
       expect(sql).toContain("RETURNING *");
       expect(sql.indexOf("DO NOTHING")).toBeLessThan(sql.indexOf("RETURNING"));
     });
 
-    it("compileInsert doUpdate uses EXCLUDED (uppercase for Postgres)", () => {
-      const { sql } = postgresDialect.compileInsert(
-        "users",
-        ["name", "slug"],
-        ["Alice", "alice"],
-        ["id"],
-        { conflictColumns: ["slug"], action: "update" },
+    it("compilePlan insert doUpdate uses EXCLUDED (uppercase for Postgres)", () => {
+      const { sql } = postgresQueryCompiler.compilePlan(
+        insertPlan("users", ["name", "slug"], ["Alice", "alice"], ["id"], {
+          conflictColumns: ["slug"],
+          action: "update",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "name" = EXCLUDED."name"');
       expect(sql).not.toContain('excluded."name"'); // SQLite uses lowercase; Postgres uses EXCLUDED
       expect(sql).toContain("RETURNING *");
     });
 
-    it("compileInsert doUpdate with explicit updateColumns", () => {
-      const { sql } = postgresDialect.compileInsert(
-        "products",
-        ["sku", "name", "price"],
-        ["X1", "Widget", 10],
-        ["id"],
-        { conflictColumns: ["sku"], action: "update", updateColumns: ["price"] },
+    it("compilePlan insert doUpdate with explicit updateColumns", () => {
+      const { sql } = postgresQueryCompiler.compilePlan(
+        insertPlan("products", ["sku", "name", "price"], ["X1", "Widget", 10], ["id"], {
+          conflictColumns: ["sku"],
+          action: "update",
+          updateColumns: ["price"],
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("sku") DO UPDATE SET "price" = EXCLUDED."price"');
       expect(sql).not.toContain('"name" = EXCLUDED."name"');
     });
 
-    it("compileInsertMany doNothing emits ON CONFLICT ... DO NOTHING with RETURNING", () => {
-      const { sql, returningRow } = postgresDialect.compileInsertMany(
-        "tags",
-        ["slug", "label"],
-        [["ts", "TypeScript"]],
-        ["id"],
-        { conflictColumns: ["slug"], action: "nothing" },
+    it("compilePlan insertMany doNothing emits ON CONFLICT ... DO NOTHING with RETURNING", () => {
+      const { sql, returningRow } = postgresQueryCompiler.compilePlan(
+        insertManyPlan(
+          "tags",
+          ["slug", "label"],
+          [["ts", "TypeScript"]],
+          ["id"],
+          { conflictColumns: ["slug"], action: "nothing" },
+        ),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
       expect(sql).toContain("RETURNING *");
       expect(returningRow).toBe(true);
     });
 
-    it("compileInsertMany doUpdate uses EXCLUDED (uppercase)", () => {
-      const { sql } = postgresDialect.compileInsertMany(
-        "tags",
-        ["slug", "label"],
-        [["ts", "TypeScript"]],
-        ["id"],
-        { conflictColumns: ["slug"], action: "update" },
+    it("compilePlan insertMany doUpdate uses EXCLUDED (uppercase)", () => {
+      const { sql } = postgresQueryCompiler.compilePlan(
+        insertManyPlan(
+          "tags",
+          ["slug", "label"],
+          [["ts", "TypeScript"]],
+          ["id"],
+          { conflictColumns: ["slug"], action: "update" },
+        ),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
     });
 
-    it("compileCount produces SELECT COUNT", () => {
-      const { sql, params } = postgresDialect.compileCount("users", "t0", '"t0"."age" = $1', [18]);
+    it("compilePlan count produces SELECT COUNT", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        countPlan("users", {
+          kind: "binary",
+          op: "===",
+          left: { kind: "column", alias: "t0", column: ["age"] },
+          right: { kind: "const", value: 18 },
+        }),
+      );
       expect(sql).toContain("SELECT COUNT(*) AS c");
       expect(sql).toContain('FROM "users"');
       expect(params).toEqual([18]);
     });
 
-    it("compileUpdate produces UPDATE with renumbered placeholders", () => {
-      const { sql, params } = postgresDialect.compileUpdate(
-        "users",
-        { name: "Bob" },
-        ["id", "name"],
-        '"t0"."id" = $1',
-        [1],
+    it("compilePlan update produces UPDATE with renumbered placeholders", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        updatePlan(
+          "users",
+          ["id", "name"],
+          { name: "Bob" },
+          {
+            kind: "binary",
+            op: "===",
+            left: { kind: "column", alias: "t0", column: ["id"] },
+            right: { kind: "const", value: 1 },
+          },
+        ),
       );
       expect(sql).toContain('UPDATE "users"');
       expect(sql).toContain('"name" = $1');
@@ -209,97 +229,113 @@ describe("dbs/postgres", () => {
       expect(params).toEqual(["Bob", 1]);
     });
 
-    it("compileDelete produces DELETE", () => {
-      const { sql, params } = postgresDialect.compileDelete("users", '"t0"."id" = $1', [1]);
+    it("compilePlan delete produces DELETE", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        deletePlan("users", {
+          kind: "binary",
+          op: "===",
+          left: { kind: "column", alias: "t0", column: ["id"] },
+          right: { kind: "const", value: 1 },
+        }),
+      );
       expect(sql).toContain('DELETE FROM "users"');
       expect(params).toEqual([1]);
     });
 
-    it("expandPlaceholders expands IN arrays to $1, $2", () => {
-      const sql = '("t0"."id" IN ($1))';
-      const resolved = [[10, 20]];
-      const { sql: outSql, params } = postgresDialect.expandPlaceholders(sql, resolved);
-      expect(outSql).toBe('("t0"."id" IN ($1, $2))');
-      expect(params).toEqual([10, 20]);
-    });
-
-    it("expandPlaceholders respects startIdx — numbers from the given offset", () => {
-      const sql = '("t0"."age" > $1)';
-      const { sql: outSql, params } = postgresDialect.expandPlaceholders(sql, [25], 3);
-      expect(outSql).toBe('("t0"."age" > $3)');
-      expect(params).toEqual([25]);
-    });
-
-    it("expandPlaceholders with startIdx expands IN arrays from the offset", () => {
-      const sql = '("t0"."id" IN ($1))';
-      const { sql: outSql, params } = postgresDialect.expandPlaceholders(sql, [[10, 20]], 5);
-      expect(outSql).toBe('("t0"."id" IN ($5, $6))');
-      expect(params).toEqual([10, 20]);
-    });
-
-    it("compileSelect: HAVING params are numbered after WHERE params", () => {
-      // WHERE has 2 params ($1, $2); HAVING arrives pre-numbered from $3
-      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["category"] }];
-      const { sql, params } = postgresDialect.compileSelect({
-        table: "orders",
-        tableAlias: "t0",
-        selectList: '"t0"."category", COUNT(*) AS "total"',
-        whereSql: '("t0"."status" = $1 AND "t0"."price" > $2)',
-        whereParams: ["active", 10],
-        orderBySql: "",
-        limitNum: null,
-        offsetNum: null,
-        groupBy,
-        havingSql: "(COUNT(*) > $3)",
-        havingParams: [5],
-      });
+    it("compilePlan select: HAVING params are numbered after WHERE params", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        selectPlan("orders", {
+          columnNames: ["category", "status", "price"],
+          selectItems: [
+            { expr: { kind: "column", alias: "t0", column: ["category"] } },
+            {
+              expr: {
+                kind: "aggregate",
+                func: "COUNT",
+                arg: null,
+                alias: "total",
+              },
+            },
+          ],
+          where: {
+            kind: "binary",
+            op: "&&",
+            left: {
+              kind: "binary",
+              op: "===",
+              left: { kind: "column", alias: "t0", column: ["status"] },
+              right: { kind: "param", name: "status" },
+            },
+            right: {
+              kind: "binary",
+              op: ">",
+              left: { kind: "column", alias: "t0", column: ["price"] },
+              right: { kind: "param", name: "minPrice" },
+            },
+          },
+          whereParams: { status: "active", minPrice: 10 },
+          groupBy: [{ kind: "column", alias: "t0", column: ["category"] }],
+          having: {
+            kind: "binary",
+            op: ">",
+            left: { kind: "aggregate", func: "COUNT", arg: null },
+            right: { kind: "const", value: 5 },
+          },
+        }),
+      );
       expect(sql).toContain("WHERE");
       expect(sql).toContain("GROUP BY");
       expect(sql).toContain("HAVING");
-      // Params must be in correct order: WHERE params first, then HAVING param
       expect(params).toEqual(["active", 10, 5]);
-      // Placeholders must not collide
-      expect(sql).toContain("$1");
-      expect(sql).toContain("$2");
-      expect(sql).toContain("$3");
       expect((sql.match(/\$1/g) ?? []).length).toBe(1);
       expect((sql.match(/\$2/g) ?? []).length).toBe(1);
       expect((sql.match(/\$3/g) ?? []).length).toBe(1);
     });
 
-    it("compileSelect: HAVING + LIMIT/OFFSET placeholder sequence is contiguous", () => {
-      const groupBy: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["category"] }];
-      const { sql, params } = postgresDialect.compileSelect({
-        table: "orders",
-        tableAlias: "t0",
-        selectList: 'COUNT(*) AS "total"',
-        whereSql: '("t0"."active" = $1)',
-        whereParams: [true],
-        orderBySql: "",
-        limitNum: 10,
-        offsetNum: 20,
-        groupBy,
-        havingSql: "(COUNT(*) > $2)",
-        havingParams: [3],
-      });
-      // WHERE=$1, HAVING=$2, LIMIT=$3, OFFSET=$4
+    it("compilePlan select: HAVING + LIMIT/OFFSET placeholder sequence is contiguous", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        selectPlan("orders", {
+          columnNames: ["category", "active"],
+          selectItems: [
+            { expr: { kind: "aggregate", func: "COUNT", arg: null, alias: "total" } },
+          ],
+          where: {
+            kind: "binary",
+            op: "===",
+            left: { kind: "column", alias: "t0", column: ["active"] },
+            right: { kind: "param", name: "active" },
+          },
+          whereParams: { active: true },
+          groupBy: [{ kind: "column", alias: "t0", column: ["category"] }],
+          having: {
+            kind: "binary",
+            op: ">",
+            left: { kind: "aggregate", func: "COUNT", arg: null },
+            right: { kind: "const", value: 3 },
+          },
+          limitNum: 10,
+          offsetNum: 20,
+        }),
+      );
       expect(params).toEqual([true, 3, 10, 20]);
       expect(sql).toMatch(/HAVING.*\$2/);
       expect(sql).toMatch(/LIMIT \$3/);
       expect(sql).toMatch(/OFFSET \$4/);
     });
 
-    it("compileSelect produces SELECT with LIMIT/OFFSET", () => {
-      const { sql, params } = postgresDialect.compileSelect({
-        table: "users",
-        tableAlias: "t0",
-        selectList: '"t0"."id", "t0"."name"',
-        whereSql: "1=1",
-        whereParams: [],
-        orderBySql: '"t0"."name" ASC',
-        limitNum: 10,
-        offsetNum: 5,
-      });
+    it("compilePlan select produces SELECT with LIMIT/OFFSET", () => {
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        selectPlan("users", {
+          columnNames: ["id", "name"],
+          selectItems: [
+            { expr: { kind: "column", alias: "t0", column: ["id"] } },
+            { expr: { kind: "column", alias: "t0", column: ["name"] } },
+          ],
+          orderBy: [{ expr: { kind: "column", alias: "t0", column: ["name"] }, direction: "asc" }],
+          limitNum: 10,
+          offsetNum: 5,
+        }),
+      );
       expect(sql).toContain('SELECT "t0"."id", "t0"."name"');
       expect(sql).toContain('FROM "users"');
       expect(sql).toContain("ORDER BY");
@@ -309,10 +345,10 @@ describe("dbs/postgres", () => {
     });
   });
 
-  describe("postgresMigrations", () => {
+  describe("postgresMigrator", () => {
     function metadataDriver(): Driver {
       return {
-        dialect: "postgres",
+        dialect: getDialect("postgres"),
         async execute(sql: string, params: unknown[] = []) {
           if (sql.includes("information_schema.tables")) {
             return { rows: [{ table_name: "pg_test_users" }], changes: 0 };
@@ -330,19 +366,19 @@ describe("dbs/postgres", () => {
     }
 
     it("getDbTables returns Postgres table names", async () => {
-      const tables = await postgresMigrations.getDbTables(metadataDriver());
+      const tables = await postgresMigrator.getDbTables(metadataDriver());
       expect(tables).toEqual(["pg_test_users"]);
     });
 
     it("getDbColumns returns Postgres column info", async () => {
-      const columns = await postgresMigrations.getDbColumns(metadataDriver(), "pg_test_users");
+      const columns = await postgresMigrator.getDbColumns(metadataDriver(), "pg_test_users");
       expect(columns).toEqual([
         { name: "id", type: "integer", notnull: 1, dflt_value: null, pk: 1 },
       ]);
     });
 
     it("diffSchema uses Postgres metadata", async () => {
-      const actions = await postgresMigrations.diffSchema(metadataDriver(), [
+      const actions = await postgresMigrator.diffSchema(metadataDriver(), [
         {
           table: {
             _table: "pg_test_users",
@@ -373,14 +409,14 @@ describe("dbs/postgres", () => {
           name: "VARCHAR(255) NOT NULL",
         },
       };
-      const sql = postgresMigrations.generateSql(action);
+      const sql = postgresQueryCompiler.compileMigrationUp(action);
       expect(sql).toContain("CREATE TABLE");
       expect(sql).toContain('"pg_test_users"');
       expect(sql).toContain("SERIAL");
     });
 
     it("generateSql produces Postgres ALTER COLUMN DDL", () => {
-      const sql = postgresMigrations.generateSql({
+      const sql = postgresQueryCompiler.compileMigrationUp({
         kind: "alter_column",
         table: "pg_test_users",
         column: "age",
@@ -393,7 +429,7 @@ describe("dbs/postgres", () => {
     });
 
     it("generateSql produces Postgres ALTER COLUMN DDL for constraints and defaults", () => {
-      const sql = postgresMigrations.generateSql({
+      const sql = postgresQueryCompiler.compileMigrationUp({
         kind: "alter_column",
         table: "pg_test_users",
         column: "name",
@@ -413,7 +449,7 @@ describe("dbs/postgres", () => {
 
     it("generateSql throws on primary_key alter (no safe single-statement form)", () => {
       expect(() =>
-        postgresMigrations.generateSql({
+        postgresQueryCompiler.compileMigrationUp({
           kind: "alter_column",
           table: "pg_test_users",
           column: "id",
@@ -426,14 +462,14 @@ describe("dbs/postgres", () => {
     });
 
     it("generateDownSql produces reverse Postgres DDL", () => {
-      const addTable = postgresMigrations.generateDownSql({
+      const addTable = postgresQueryCompiler.compileMigrationDown({
         kind: "add_table",
         table: "pg_test_users",
         schema: { id: "SERIAL PRIMARY KEY" },
       });
       expect(addTable).toContain('DROP TABLE IF EXISTS "pg_test_users"');
 
-      const dropTable = postgresMigrations.generateDownSql({
+      const dropTable = postgresQueryCompiler.compileMigrationDown({
         kind: "drop_table",
         table: "pg_test_users",
         columnInfos: [
@@ -445,7 +481,7 @@ describe("dbs/postgres", () => {
       expect(dropTable).toContain('"id" integer PRIMARY KEY');
       expect(dropTable).toContain("\"name\" text NOT NULL DEFAULT 'anon'");
 
-      const addColumn = postgresMigrations.generateDownSql({
+      const addColumn = postgresQueryCompiler.compileMigrationDown({
         kind: "add_column",
         table: "pg_test_users",
         column: "age",
@@ -453,7 +489,7 @@ describe("dbs/postgres", () => {
       });
       expect(addColumn).toContain('DROP COLUMN "age"');
 
-      const dropColumn = postgresMigrations.generateDownSql({
+      const dropColumn = postgresQueryCompiler.compileMigrationDown({
         kind: "drop_column",
         table: "pg_test_users",
         column: "age",
@@ -463,7 +499,7 @@ describe("dbs/postgres", () => {
     });
 
     it("generateDownSql restores old Postgres alter_column type", () => {
-      const sql = postgresMigrations.generateDownSql({
+      const sql = postgresQueryCompiler.compileMigrationDown({
         kind: "alter_column",
         table: "pg_test_users",
         column: "age",
@@ -476,7 +512,7 @@ describe("dbs/postgres", () => {
     });
 
     it("generateDownSql reverses Postgres constraint and default changes", () => {
-      const sql = postgresMigrations.generateDownSql({
+      const sql = postgresQueryCompiler.compileMigrationDown({
         kind: "alter_column",
         table: "pg_test_users",
         column: "name",
@@ -495,20 +531,20 @@ describe("dbs/postgres", () => {
     });
 
     it("getTrackingTableDdl produces Postgres DDL", () => {
-      const ddl = postgresMigrations.getTrackingTableDdl();
+      const ddl = postgresQueryCompiler.compileTrackingTable().sql;
       expect(ddl).toContain("_typhex_migrations");
       expect(ddl).toContain("SERIAL");
       expect(ddl).toContain("DEFAULT NOW()");
     });
 
     it("getRecordMigrationSql uses $1 placeholder", () => {
-      const sql = postgresMigrations.getRecordMigrationSql();
+      const sql = postgresQueryCompiler.compileRecordMigration("migration_name").sql;
       expect(sql).toContain("INSERT INTO");
       expect(sql).toContain("$1");
     });
 
     it("getDeleteMigrationSql uses $1 placeholder", () => {
-      const sql = postgresMigrations.getDeleteMigrationSql();
+      const sql = postgresQueryCompiler.compileDeleteMigration("migration_name").sql;
       expect(sql).toContain("DELETE FROM");
       expect(sql).toContain("$1");
     });

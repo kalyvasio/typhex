@@ -1,7 +1,7 @@
 /**
  * Migration generator: takes DiffActions, groups them by table, orders them
  * topologically, and writes timestamped .js files with up() and down() functions.
- * Uses dialect's BaseMigrations subclass for diff and SQL generation.
+ * Uses the dialect migrator for diff and the query compiler for SQL generation.
  */
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
@@ -9,7 +9,6 @@ import { join } from "node:path";
 import type { Driver } from "../driver/types.js";
 import type { DiffAction, MigrationFile } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
-import { getDbMigrations } from "../dbs/index.js";
 import { parseFkDependencies, topoSort } from "./topo-sort.js";
 import { groupBy } from "../utils.js";
 
@@ -76,8 +75,8 @@ export async function generateMigrationFiles(
   driver: Driver,
   entities: readonly RegisteredEntity[],
 ): Promise<MigrationFile[]> {
-  const migrations = getDbMigrations(driver.dialect);
-  const actions = await migrations.diffSchema(driver, entities);
+  const compiler = driver.dialect.queryCompiler;
+  const actions = await driver.dialect.migrator.diffSchema(driver, entities);
   if (actions.length === 0) return [];
 
   const groups = groupByTable(actions);
@@ -95,8 +94,8 @@ export async function generateMigrationFiles(
 
   for (const group of sortedGroups) {
     for (const action of group.actions) {
-      const upSql = migrations.generateSql(action);
-      const downSql = migrations.generateDownSql(action);
+      const upSql = compiler.compileMigrationUp(action);
+      const downSql = compiler.compileMigrationDown(action);
       files.push({
         name: scriptName(ts, seq, action),
         upSql,

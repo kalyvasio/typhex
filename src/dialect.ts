@@ -1,2 +1,2 @@
-/** Database dialect for SQL generation and driver selection. */
-export type Dialect = "sqlite" | "postgres";
+/** Database dialect name for config and driver selection. */
+export type DialectName = "sqlite" | "postgres";

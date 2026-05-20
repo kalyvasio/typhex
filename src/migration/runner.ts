@@ -11,8 +11,6 @@ import { pathToFileURL } from "node:url";
 import * as acorn from "acorn";
 import type { Driver, Connection } from "../driver/types.js";
 import type { MigrationDb, MigrationRecord, PendingMigration } from "./types.js";
-import { getDbMigrations, getDialect } from "../dbs/index.js";
-
 interface MigrationModule {
   upSql: string;
   downSql: string;
@@ -34,17 +32,14 @@ class ConnectionMigrationDb implements MigrationDb {
 }
 
 async function ensureTrackingTable(driver: Driver): Promise<void> {
-  await driver.execute(getDbMigrations(driver.dialect).getTrackingTableDdl());
+  const compiled = driver.dialect.queryCompiler.compileTrackingTable();
+  await driver.execute(compiled.sql, compiled.params);
 }
 
 async function getAppliedRows(driver: Driver): Promise<MigrationRecord[]> {
   await ensureTrackingTable(driver);
-  const esc = (n: string) => getDialect(driver.dialect).escapeIdentifier(n);
-  const rows = await driver
-    .execute(
-      `SELECT ${esc("id")}, ${esc("name")}, ${esc("applied_at")} FROM ${esc("_typhex_migrations")} ORDER BY ${esc("id")}`,
-    )
-    .then((r) => r.rows);
+  const compiled = driver.dialect.queryCompiler.compileAppliedMigrations();
+  const rows = await driver.execute(compiled.sql, compiled.params).then((r) => r.rows);
   return rows as MigrationRecord[];
 }
 
@@ -199,7 +194,7 @@ export interface MigrationResult {
 export async function runMigrations(driver: Driver, dir: string): Promise<MigrationResult> {
   const applied = await getAppliedNames(driver);
   const files = listMigrationFiles(dir);
-  const recordSql = getDbMigrations(driver.dialect).getRecordMigrationSql();
+  const compiler = driver.dialect.queryCompiler;
   const result: MigrationResult = { applied: [], skipped: [] };
 
   await withConnection(driver, (conn) =>
@@ -212,7 +207,8 @@ export async function runMigrations(driver: Driver, dir: string): Promise<Migrat
         }
         const mod = await loadModule(dir, file);
         await mod.up(db);
-        await conn.execute(recordSql, [name]);
+        const record = compiler.compileRecordMigration(name);
+        await conn.execute(record.sql, record.params);
         applied.add(name);
         result.applied.push(name);
       }
@@ -296,15 +292,16 @@ async function runSingleMigration(
   }
 
   const mod = await loadModule(dir, file);
-  const migrations = getDbMigrations(driver.dialect);
-  const trackingSql = direction === "up"
-    ? migrations.getRecordMigrationSql()
-    : migrations.getDeleteMigrationSql();
+  const compiler = driver.dialect.queryCompiler;
+  const tracking =
+    direction === "up"
+      ? compiler.compileRecordMigration(name)
+      : compiler.compileDeleteMigration(name);
 
   await withConnection(driver, (conn) =>
     withTransaction(conn, async (db) => {
       await mod[direction](db);
-      await conn.execute(trackingSql, [name]);
+      await conn.execute(tracking.sql, tracking.params);
     }),
   );
 }

@@ -8,6 +8,7 @@ import { RelationAssembler } from "../../src/orm/helpers/relations/relation-asse
 import type { IrHaving, IrSelect, IrWhere } from "../../src/ir/types.js";
 import type { QueryState } from "../../src/orm/query-builder.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
+import { sqliteDialect } from "../../src/dbs/index.js";
 
 const mockRelations = {
   company: {
@@ -55,7 +56,7 @@ const companyJoinWhereIr: IrWhere = {
 
 function makeQe(): QueryExecutor {
   return {
-    dialect: "sqlite",
+    dialect: sqliteDialect,
     query: async () => [],
     run: async () => ({ lastID: 1, changes: 0 }),
   };

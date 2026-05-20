@@ -4,14 +4,12 @@ import { Entity } from "../../src/index.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 import type { IrAggregate, IrHaving, IrNode, IrSelect } from "../../src/ir/types.js";
 import { isIrNode } from "../../src/ir/types.js";
-import { sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
 import {
-  compileAggregate,
-  compileSelectListExpr,
-  compileWhereExpr,
-  compileGroupBy,
-} from "../../src/dbs/shared-dialect.js";
-import type { DialectImpl } from "../../src/dbs/types.js";
+  sqliteDialect as sqliteDialectObject,
+  postgresDialect as postgresDialectObject,
+  sqliteQueryCompiler,
+  postgresQueryCompiler,
+} from "../../src/dbs/index.js";
 import type {
   Expr,
   ExprAggregate,
@@ -20,27 +18,16 @@ import type {
   SelectItem,
 } from "../../src/orm/expr.js";
 
-function aggCompiler(dialect: DialectImpl) {
-  return dialect.compileAggregate
-    ? (agg: ExprAggregate, fn: (n: Expr, p: unknown[]) => string, p: unknown[]) =>
-        dialect.compileAggregate!(agg, fn, p)
-    : undefined;
-}
+const sqliteDialect = sqliteQueryCompiler as any;
+const postgresDialect = postgresQueryCompiler as any;
 
 function compileItems(
   items: SelectItem[],
   columnNames: string[],
-  dialect: DialectImpl,
+  compiler: typeof sqliteQueryCompiler,
   tableAlias = "t0",
 ): { sql: string; params: unknown[] } {
-  return compileSelectListExpr(
-    items,
-    false,
-    tableAlias,
-    columnNames,
-    dialect,
-    aggCompiler(dialect),
-  );
+  return compiler.compileSelectListExpr(items, false, tableAlias, columnNames);
 }
 
 const orderSchema = {
@@ -55,7 +42,7 @@ class OrderEntity extends Entity("orders", orderSchema) {}
 
 function createMockQe(dialect: "sqlite" | "postgres" = "sqlite"): QueryExecutor {
   return {
-    dialect,
+    dialect: dialect === "postgres" ? postgresDialectObject : sqliteDialectObject,
     query: vi.fn().mockResolvedValue([]),
     run: vi.fn().mockResolvedValue({ lastID: 1, changes: 0 }),
   };
@@ -627,7 +614,7 @@ describe("compileAggregate uses ExprColumn alias directly", () => {
       arg: { kind: "column", alias: "t1", column: ["price"] } as ExprColumn,
       alias: "total",
     };
-    const sql = compileAggregate(agg);
+    const sql = sqliteQueryCompiler.compileAggregate(agg);
     expect(sql).toContain('"t1"."price"');
     expect(sql).not.toContain('"t0"');
   });
@@ -639,7 +626,7 @@ describe("compileAggregate uses ExprColumn alias directly", () => {
       arg: { kind: "column", alias: "t1", column: ["amount"] } as ExprColumn,
       alias: "total",
     };
-    const sql = compileAggregate(agg);
+    const sql = sqliteQueryCompiler.compileAggregate(agg);
     expect(sql).toContain('"t1"."amount"');
     expect(sql).not.toContain('"t0"');
   });
@@ -715,7 +702,7 @@ describe("Bug fix: JSON_AGG respects DISTINCT flag", () => {
 describe("Bug fix: non-member aggregate arg compiles correctly", () => {
   it("SUM with numeric const arg inlines the literal (SUM(1))", () => {
     const agg: ExprAggregate = { kind: "aggregate", func: "SUM", arg: { kind: "const", value: 1 } };
-    const sql = compileAggregate(agg);
+    const sql = sqliteQueryCompiler.compileAggregate(agg);
     expect(sql).toBe("SUM(1)");
     expect(sql).not.toContain("*");
   });
@@ -726,14 +713,13 @@ describe("Bug fix: non-member aggregate arg compiles correctly", () => {
       func: "COUNT",
       arg: { kind: "const", value: 1 },
     };
-    const sql = compileAggregate(agg);
+    const sql = sqliteQueryCompiler.compileAggregate(agg);
     expect(sql).toBe("COUNT(1)");
     expect(sql).not.toContain("*");
   });
 
   it("SUM with param arg compiles correctly via compileWhereExpr", () => {
-    // SUM(:factor) > 100 — Expr.param arg requires a compileNodeFn,
-    // available when the aggregate is nested inside a HAVING/WHERE walk.
+    // SUM(:factor) > 100 — param args compile through compileNode inside the aggregate path.
     const havingExpr: Expr = {
       kind: "binary",
       op: ">",
@@ -744,19 +730,20 @@ describe("Bug fix: non-member aggregate arg compiles correctly", () => {
       } as ExprAggregate,
       right: { kind: "const", value: 100 },
     };
-    const result = compileWhereExpr(havingExpr, sqliteDialect);
+    const result = sqliteQueryCompiler.compileWhereExpr(havingExpr);
     expect(result.sql).toContain("SUM(");
     expect(result.sql).not.toContain("SUM(*)");
     expect(result.params).toContain(100);
   });
 
-  it("compileAggregate with param arg throws without compileNodeFn", () => {
-    const agg: ExprAggregate = {
-      kind: "aggregate",
-      func: "SUM",
-      arg: { kind: "param", name: "x" },
-    };
-    expect(() => compileAggregate(agg)).toThrow(/requires a compile context/);
+  it("compileAggregate with param arg compiles via compileNode", () => {
+    const params: unknown[] = [];
+    const sql = sqliteQueryCompiler.compileAggregate(
+      { kind: "aggregate", func: "SUM", arg: { kind: "param", name: "x" } },
+      params,
+    );
+    expect(sql).toBe("SUM(?)");
+    expect(params).toEqual([{ __param: "x" }]);
   });
 });
 
@@ -936,12 +923,12 @@ describe("GROUP BY: positional references (GROUP BY 1, 2)", () => {
 describe("compileGroupBy with GroupByItem[]", () => {
   it("renders ExprColumn-based GROUP BY", () => {
     const items: GroupByItem[] = [{ kind: "column", alias: "t1", column: ["name"] }];
-    expect(compileGroupBy(items)).toBe('"t1"."name"');
+    expect(sqliteQueryCompiler.compileGroupBy(items)).toBe('"t1"."name"');
   });
 
   it("renders main-table column when no relation alias", () => {
     const items: GroupByItem[] = [{ kind: "column", alias: "t0", column: ["name"] }];
-    expect(compileGroupBy(items)).toBe('"t0"."name"');
+    expect(sqliteQueryCompiler.compileGroupBy(items)).toBe('"t0"."name"');
   });
 
   it("mixes column ref and index", () => {
@@ -949,7 +936,7 @@ describe("compileGroupBy with GroupByItem[]", () => {
       { kind: "column", alias: "t1", column: ["name"] },
       { kind: "index", index: 2 },
     ];
-    expect(compileGroupBy(items)).toBe('"t1"."name", 2');
+    expect(sqliteQueryCompiler.compileGroupBy(items)).toBe('"t1"."name", 2');
   });
 });
 

@@ -7,7 +7,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Connection, TransactionOptions } from "../driver/types.js";
-import type { Dialect } from "../dialect.js";
+import type { Dialect } from "../dbs/types.js";
 
 const _txStorage = new AsyncLocalStorage<Trx>();
 export function getActiveTrx(): Trx | undefined {

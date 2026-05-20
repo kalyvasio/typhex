@@ -6,6 +6,7 @@
 import pg from "pg";
 import type { Driver, Connection, ExecuteResult, TransactionOptions } from "../../driver/types.js";
 import { PostgresTrx } from "./trx.js";
+import { postgresDialect } from "./dialect.js";
 import { isRecord } from "../../utils.js";
 
 const { Pool } = pg;
@@ -128,7 +129,7 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
 
   function makeConnection(client: PoolClient): Connection {
     return {
-      dialect: "postgres" as const,
+      dialect: postgresDialect,
       execute: (sql, params) => runQuery(client, sql, params),
       async release(): Promise<void> {
         client.release();
@@ -137,7 +138,7 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
   }
 
   return {
-    dialect: "postgres",
+    dialect: postgresDialect,
 
     execute: (sql, params) => runQuery(pool, sql, params),
 

@@ -15,7 +15,7 @@
  *    every captured `QueryBuilder` has been inlined as a child plan,
  *    relations have been split into joins / fetches / projections, and
  *    the EXISTS / SUBQUERY / IN shapes have been pre-resolved.
- * 3. **DialectImpl** (`src/dbs/postgres`, `src/dbs/sqlite`) — walks the
+ * 3. **QueryCompiler** (`src/dbs/<dialect>/query-compiler`) — walks the
  *    `QueryPlan`'s `Expr` tree to emit SQL strings + parameter arrays.
  *    The dialect never sees IR; the planner is the only IR consumer.
  *
@@ -52,8 +52,7 @@
 import { type IrSelectRelation, type JoinHint } from "../../../ir/types.js";
 import type { RelationType } from "../../../entity/relations.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
-import { getDialect } from "../../../dbs/index.js";
-import type { DialectImpl, QueryOperation } from "../../../dbs/types.js";
+import type { QueryCompiler, QueryOperation } from "../../../dbs/types.js";
 import {
   RelationJoinBuilder,
   RelationPathAliasBuilder,
@@ -75,13 +74,13 @@ export const DEFAULT_ROW_PARAM = "u";
 const TABLE_ALIAS = "t0";
 
 /**
- * Resolve a `DialectImpl` from the QueryExecutor on a state. Throws if
+ * Resolve a `QueryCompiler` from the QueryExecutor on a state. Throws if
  * the dialect isn't registered — used by the query-builder to look up
  * the dialect when it needs to compile SQL outside the planner path
  * (e.g. for `findById` shortcuts).
  */
-export function getDialectOrThrow(state: QueryState<unknown>): DialectImpl {
-  return getDialect(state.qe.dialect);
+export function getQueryCompilerOrThrow(state: QueryState<unknown>): QueryCompiler {
+  return state.qe.dialect.queryCompiler;
 }
 
 // ─── plan types ───────────────────────────────────────────────────────────────
@@ -134,7 +133,7 @@ export interface JoinedProjection {
 
 /**
  * Dialect-agnostic execution plan. Produced by `QueryPlanBuilder` and
- * consumed by `DialectImpl.compilePlan` (which produces SQL) plus the
+ * consumed by `QueryCompiler.compilePlan` (which produces SQL) plus the
  * relation pipeline (which uses the relation* fields to load and shape
  * fetched data after the main query runs).
  *
@@ -290,6 +289,7 @@ export class QueryPlanBuilder {
    */
   private build(): QueryPlan {
     const isSelect = this.operation.kind === "select";
+    const hasFilter = this.operation.kind !== "insert" && this.operation.kind !== "insertMany";
     const paramToAlias = this.buildParamToAlias();
     const { joins, oneToManyExists } = this.detectRelations();
     const relationPathToAlias = new RelationPathAliasBuilder(
@@ -308,7 +308,8 @@ export class QueryPlanBuilder {
       new Set(Object.keys(this.state.relations ?? {})),
     );
 
-    const whereExpr = this.state.whereIr ? exprBuilder.convert(this.state.whereIr.node) : null;
+    const whereExpr =
+      hasFilter && this.state.whereIr ? exprBuilder.convert(this.state.whereIr.node) : null;
     const havingExpr =
       isSelect && this.state.havingIr ? exprBuilder.convert(this.state.havingIr.node) : null;
     const orderBy = isSelect ? this.buildOrderBy(exprBuilder) : [];
@@ -419,6 +420,9 @@ export class QueryPlanBuilder {
 
   private activeAnalysis(): ExprIrAnalysis {
     if (this.operation.kind === "select") return this.analysis.all;
+    if (this.operation.kind === "insert" || this.operation.kind === "insertMany") {
+      return EMPTY_EXPR_IR_ANALYSIS;
+    }
     return mergeExprIrAnalysis(this.analysis.where, this.analysis.orderBy);
   }
 
@@ -493,6 +497,7 @@ export class QueryPlanBuilder {
    */
   private canSkipRelationAnalysis(): boolean {
     if (this.operation.kind === "select") return false;
+    if (this.operation.kind === "insert" || this.operation.kind === "insertMany") return true;
     if (this.state.joinHints?.length) return false;
     const relations = this.state.relations;
     if (!relations) return true;
@@ -626,6 +631,13 @@ export class QueryPlanBuilder {
 const EMPTY_RELATION_DETECTION: RelationDetection = {
   joins: [],
   oneToManyExists: {},
+};
+
+const EMPTY_EXPR_IR_ANALYSIS: ExprIrAnalysis = {
+  paramNames: new Set(),
+  relationKeys: new Set(),
+  subqueryRefs: {},
+  existsNodes: [],
 };
 
 function mergeExprIrAnalysis(...items: ExprIrAnalysis[]): ExprIrAnalysis {

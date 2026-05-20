@@ -1,17 +1,17 @@
 /**
- * Multi-database types: Driver, Dialect, DialectImpl.
+ * Multi-database types: Driver and Dialect.
  */
 
-import type { Connection, ExecuteResult } from "../driver/types.js";
-import type { RelationJoinMeta } from "../orm/helpers/relations/relation-joins.js";
-import type { Dialect } from "../dialect.js";
-import type { Expr, ExprAggregate, GroupByItem } from "../orm/expr.js";
+import type { Connection, Driver, ExecuteResult, TransactionOptions } from "../driver/types.js";
+import type { DialectName } from "../dialect.js";
+import type { RegisteredEntity } from "../entity/global-driver.js";
+import type { GroupByItem } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 
-export type { Dialect };
+export type { DialectName };
 
 /** Column definition: string (all dialects) or per-dialect map. */
-export type ColumnDef = string | { [K in Dialect]?: string };
+export type ColumnDef = string | { [K in DialectName]?: string };
 
 export interface CompileResult {
   sql: string;
@@ -58,7 +58,7 @@ export type DiffAction =
     };
 
 export type { Connection, ExecuteResult };
-export type { TransactionOptions, Driver } from "../driver/types.js";
+export type { TransactionOptions, Driver };
 
 /** Options for compileSelect. */
 export interface CompileSelectOpts {
@@ -84,6 +84,20 @@ export interface CompileSelectOpts {
 export type QueryOperation =
   | { kind: "select" }
   | { kind: "count" }
+  | {
+      kind: "insert";
+      columns: string[];
+      values: unknown[];
+      pk?: string[];
+      onConflict?: OnConflictClause;
+    }
+  | {
+      kind: "insertMany";
+      columns: string[];
+      rows: unknown[][];
+      pk?: string[];
+      onConflict?: OnConflictClause;
+    }
   | { kind: "update"; set: Record<string, unknown>; returning?: boolean }
   | { kind: "delete"; returning?: boolean };
 
@@ -124,76 +138,38 @@ export interface DialectInsertCapabilities {
   supportsSequences: boolean;
 }
 
-/** Dialect: SQL compilation and schema translation. */
-export interface DialectImpl {
-  readonly name: Dialect;
+/** Schema diff and introspection for a dialect. */
+export interface DbMigrator {
+  diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]>;
+  getDbTables(driver: Driver): Promise<string[]>;
+  getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
+}
+
+/** Dialect: SQL capabilities, compiler, and migrator. */
+export interface Dialect {
+  readonly name: DialectName;
   readonly insertCapabilities: DialectInsertCapabilities;
-  compileNextSequenceValues(tableName: string, pkColumn: string, count: number): CompileResult;
-  escapeIdentifier(name: string): string;
-  placeholder(index: number): string;
-  expandPlaceholders(
-    sql: string,
-    resolvedParams: unknown[],
-    startIdx?: number,
-  ): ExpandPlaceholdersResult;
-  compileExists(
-    targetTable: string,
-    alias: string,
-    fkColumns: string[],
-    mainAlias: string,
-    mainPk: string[],
-    innerSql: string,
-  ): string;
-  compileLike(receiver: string, arg: string, mode: "startsWith" | "endsWith" | "includes"): string;
-  compileAggregate?(
-    agg: ExprAggregate,
-    compileNodeFn?: (node: Expr, params: unknown[]) => string,
-    params?: unknown[],
-  ): string;
-  /** Top-level entry point: build SQL for a fully-resolved QueryPlan. */
+  readonly queryCompiler: QueryCompiler;
+  readonly migrator: DbMigrator;
+}
+
+/** Public SQL-building surface for a dialect. */
+export interface QueryCompiler {
   compilePlan(plan: QueryPlan, opts?: CompileQueryOpts): CompileResult;
-  toColumnDef(def: ColumnDef): string;
-  compileInsert(
-    table: string,
-    columns: string[],
-    values: unknown[],
-    pk?: string[],
-    onConflict?: OnConflictClause,
-  ): CompileResult;
-  compileInsertMany(
-    table: string,
-    columns: string[],
-    rows: unknown[][],
-    pk?: string[],
-    onConflict?: OnConflictClause,
-  ): CompileResult;
-  compileCount(
-    table: string,
-    tableAlias: string,
-    whereSql: string,
-    whereParams: unknown[],
-    joinsSql?: string,
-  ): CompileResult;
-  compileUpdate(
-    table: string,
-    set: Record<string, unknown>,
-    columns: string[],
-    whereSql: string,
-    whereParams: unknown[],
-    options?: { returning?: boolean },
-  ): CompileResult;
-  compileDelete(
-    table: string,
-    whereSql: string,
-    whereParams: unknown[],
-    options?: { returning?: boolean },
-  ): CompileResult;
-  compileSelect(opts: CompileSelectOpts): CompileResult;
-  buildJoinClause(join: RelationJoinMeta, mainAlias: string): string;
+  compileMigrationUp(action: DiffAction): string;
+  compileMigrationDown(action: DiffAction): string;
+  compileCreateTableIfNotExists(table: string, schema: Record<string, ColumnDef>): string;
+  compileTrackingTable(): CompileResult;
+  compileAppliedMigrations(): CompileResult;
+  compileRecordMigration(name: string): CompileResult;
+  compileDeleteMigration(name: string): CompileResult;
+  compileListTables(): CompileResult;
+  compileListColumns(table: string): CompileResult;
+  compileNextSequenceValues(tableName: string, pkColumn: string, count: number): CompileResult;
 }
 
 /** Resolve column definition for a dialect. */
-export function getColumnDef(def: ColumnDef, dialect: Dialect): string {
+export function getColumnDef(def: ColumnDef, dialect: DialectName): string {
   if (typeof def === "string") return def;
   const resolved = def[dialect] ?? def.sqlite ?? def.postgres;
   if (resolved == null) {

@@ -1,4 +1,4 @@
-import type { Dialect } from "../dialect.js";
+import type { Dialect } from "../dbs/types.js";
 import type { Trx } from "../orm/trx.js";
 
 /** Options forwarded to the underlying driver when beginning a transaction. */

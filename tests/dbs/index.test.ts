@@ -1,40 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { getDialect, getDbMigrations, getColumnDef } from "../../src/dbs/index.js";
+import type { DialectName } from "../../src/dbs/types.js";
+import { getDialect, getColumnDef, sqliteDialect, postgresDialect } from "../../src/dbs/index.js";
 
 describe("dbs/index", () => {
   describe("getDialect", () => {
     it("returns sqlite dialect for sqlite", () => {
       const d = getDialect("sqlite");
       expect(d.name).toBe("sqlite");
+      expect(d).toBe(sqliteDialect);
     });
 
     it("returns postgres dialect for postgres", () => {
       const d = getDialect("postgres");
       expect(d.name).toBe("postgres");
+      expect(d).toBe(postgresDialect);
     });
 
     it("throws for unknown dialect", () => {
-      expect(() => getDialect("mysql")).toThrow("Unknown dialect");
-    });
-  });
-
-  describe("getDbMigrations", () => {
-    it("returns sqlite migrations for sqlite", () => {
-      const m = getDbMigrations("sqlite");
-      expect(m.dialect).toBe("sqlite");
-      expect(m.generateSql).toBeDefined();
-      expect(m.getTrackingTableDdl).toBeDefined();
+      expect(() => getDialect("mysql" as DialectName)).toThrow("Unknown dialect");
     });
 
-    it("returns postgres migrations for postgres", () => {
-      const m = getDbMigrations("postgres");
-      expect(m.dialect).toBe("postgres");
-      expect(m.generateSql).toBeDefined();
-      expect(m.getTrackingTableDdl).toBeDefined();
+    it("exposes queryCompiler on dialect", () => {
+      expect(getDialect("sqlite").queryCompiler).toBe(sqliteDialect.queryCompiler);
+      expect(getDialect("postgres").queryCompiler).toBe(postgresDialect.queryCompiler);
     });
 
-    it("throws for unknown dialect", () => {
-      expect(() => getDbMigrations("mysql")).toThrow("Unknown dialect");
+    it("exposes migrator on dialect", () => {
+      expect(getDialect("sqlite").migrator).toBe(sqliteDialect.migrator);
+      expect(getDialect("postgres").migrator).toBe(postgresDialect.migrator);
     });
   });
 

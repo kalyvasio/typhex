@@ -1,6 +1,6 @@
 /**
- * Base migration class: owns the dialect-agnostic diff and DDL logic.
- * Each dialect subclasses this and overrides the dialect-specific hooks.
+ * Base migrator: owns dialect-agnostic schema diff and introspection.
+ * Each dialect subclasses this and overrides dialect-specific hooks.
  */
 
 import type {
@@ -8,26 +8,23 @@ import type {
   ColumnDef,
   DiffAction,
   DbColumnInfo,
-  DialectImpl,
+  DbMigrator,
+  DialectName,
   Driver,
+  QueryCompiler,
 } from "./types.js";
 import { getColumnDef } from "./types.js";
-import type { Dialect } from "../dialect.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import { extractBaseType } from "../utils.js";
 
-type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
-
-export abstract class BaseMigrations {
-  abstract readonly dialect: Dialect;
-  protected abstract readonly dialectImpl: DialectImpl;
+export abstract class BaseMigrator implements DbMigrator {
+  constructor(
+    readonly dialectName: DialectName,
+    protected readonly queryCompiler: QueryCompiler,
+  ) {}
 
   abstract getDbTables(driver: Driver): Promise<string[]>;
   abstract getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
-  abstract getTrackingTableDdl(): string;
-  abstract getRecordMigrationSql(): string;
-  abstract getDeleteMigrationSql(): string;
-  protected abstract alterColumnSql(action: AlterColumnAction, reverse: boolean): string;
 
   async diffSchema(
     driver: Driver,
@@ -71,7 +68,10 @@ export abstract class BaseMigrations {
         actions.push({ kind: "add_column", table, column: col, definition: def });
         continue;
       }
-      const changes = BaseMigrations.computeColumnChanges(dbCol, getColumnDef(def, this.dialect));
+      const changes = BaseMigrator.computeColumnChanges(
+        dbCol,
+        getColumnDef(def, this.dialectName),
+      );
       if (changes.length > 0) {
         actions.push({
           kind: "alter_column",
@@ -94,46 +94,6 @@ export abstract class BaseMigrations {
     return actions;
   }
 
-  generateSql(action: DiffAction): string {
-    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
-    switch (action.kind) {
-      case "add_table": {
-        const cols = Object.entries(action.schema).map(
-          ([c, def]) => `  ${esc(c)} ${this.dialectImpl.toColumnDef(def)}`,
-        );
-        return `CREATE TABLE ${esc(action.table)} (\n${cols.join(",\n")}\n);`;
-      }
-      case "drop_table":
-        return `DROP TABLE IF EXISTS ${esc(action.table)};`;
-      case "add_column":
-        return `ALTER TABLE ${esc(action.table)} ADD COLUMN ${esc(action.column)} ${this.dialectImpl.toColumnDef(action.definition)};`;
-      case "drop_column":
-        return `ALTER TABLE ${esc(action.table)} DROP COLUMN ${esc(action.column)};`;
-      case "alter_column":
-        return this.alterColumnSql(action, false);
-    }
-  }
-
-  generateDownSql(action: DiffAction): string {
-    const esc = (n: string) => this.dialectImpl.escapeIdentifier(n);
-    switch (action.kind) {
-      case "add_table":
-        return `DROP TABLE IF EXISTS ${esc(action.table)};`;
-      case "drop_table": {
-        const cols = action.columnInfos.map(
-          (c) => `  ${esc(c.name)} ${BaseMigrations.reconstructColDef(c)}`,
-        );
-        return `CREATE TABLE IF NOT EXISTS ${esc(action.table)} (\n${cols.join(",\n")}\n);`;
-      }
-      case "add_column":
-        return `ALTER TABLE ${esc(action.table)} DROP COLUMN ${esc(action.column)};`;
-      case "drop_column":
-        return `ALTER TABLE ${esc(action.table)} ADD COLUMN ${esc(action.column)} ${BaseMigrations.reconstructColDef(action.columnInfo)};`;
-      case "alter_column":
-        return this.alterColumnSql(action, true);
-    }
-  }
-
   protected static normalizeDefault(value: string | null): string | null {
     if (value == null) return null;
     let normalized = value.trim().replace(/^\((.*)\)$/, "$1").trim();
@@ -147,7 +107,7 @@ export abstract class BaseMigrations {
 
   protected static extractDefault(def: string): string | null {
     const match = /\bdefault\s+(.+?)(?:\s+not\s+null|\s+primary\s+key|\s+unique|\s+references\b|$)/i.exec(def);
-    return BaseMigrations.normalizeDefault(match?.[1] ?? null);
+    return BaseMigrator.normalizeDefault(match?.[1] ?? null);
   }
 
   protected static computeColumnChanges(dbCol: DbColumnInfo, entityDef: string): ColumnChange[] {
@@ -171,8 +131,8 @@ export abstract class BaseMigrations {
       });
     }
 
-    const dbDefault = BaseMigrations.normalizeDefault(dbCol.dflt_value);
-    const entityDefault = BaseMigrations.extractDefault(entityDef);
+    const dbDefault = BaseMigrator.normalizeDefault(dbCol.dflt_value);
+    const entityDefault = BaseMigrator.extractDefault(entityDef);
     if (dbDefault !== entityDefault) {
       changes.push({ kind: "default", from: dbDefault, to: entityDefault });
     }
@@ -182,13 +142,5 @@ export abstract class BaseMigrations {
     }
 
     return changes;
-  }
-
-  protected static reconstructColDef(col: DbColumnInfo): string {
-    let def = col.type;
-    if (col.pk) def += " PRIMARY KEY";
-    else if (col.notnull) def += " NOT NULL";
-    if (col.dflt_value !== null) def += ` DEFAULT ${col.dflt_value}`;
-    return def;
   }
 }

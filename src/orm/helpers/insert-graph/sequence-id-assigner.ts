@@ -1,10 +1,10 @@
-import type { DialectImpl } from "../../../dbs/types.js";
+import type { QueryCompiler } from "../../../dbs/types.js";
 import type { QueryExecutor } from "../../db.js";
 import type { PlannedNode } from "./insert-graph-planner.js";
 
 export class SequenceIdAssigner {
   constructor(
-    private readonly dialect: DialectImpl,
+    private readonly compiler: QueryCompiler,
     private readonly qe: QueryExecutor,
     private readonly tableName: string,
     private readonly nodes: PlannedNode[],
@@ -32,7 +32,7 @@ export class SequenceIdAssigner {
   }
 
   private async allocateValues(pkColumn: string, count: number): Promise<unknown[]> {
-    const compiled = this.dialect.compileNextSequenceValues(this.tableName, pkColumn, count);
+    const compiled = this.compiler.compileNextSequenceValues(this.tableName, pkColumn, count);
     const rows = await this.qe.query(compiled.sql, compiled.params);
     return this.extractValues(rows, count);
   }

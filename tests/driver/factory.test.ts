@@ -7,7 +7,7 @@ import { createDriver } from "../../src/driver/factory.js";
 describe("driver/factory", () => {
   it("creates sqlite driver with dialect and path", async () => {
     const driver = createDriver({ dialect: "sqlite", path: ":memory:" });
-    expect(driver.dialect).toBe("sqlite");
+    expect(driver.dialect.name).toBe("sqlite");
     const rows = await driver.execute("SELECT 1 as x").then((r) => r.rows);
     expect(rows).toHaveLength(1);
     await driver.close();
@@ -15,7 +15,7 @@ describe("driver/factory", () => {
 
   it("creates sqlite driver with config compat (database as path)", async () => {
     const driver = createDriver({ dialect: "sqlite", database: ":memory:" });
-    expect(driver.dialect).toBe("sqlite");
+    expect(driver.dialect.name).toBe("sqlite");
     await driver.close();
   });
 
@@ -37,7 +37,7 @@ describe("driver/factory", () => {
       dialect: "postgres",
       connectionString: "postgresql://localhost:5432/typhex_test",
     });
-    expect(driver.dialect).toBe("postgres");
+    expect(driver.dialect.name).toBe("postgres");
     await driver.close();
   });
 
@@ -46,7 +46,7 @@ describe("driver/factory", () => {
       dialect: "postgres",
       url: "postgresql://localhost:5432/typhex_test",
     });
-    expect(driver.dialect).toBe("postgres");
+    expect(driver.dialect.name).toBe("postgres");
     await driver.close();
   });
 
@@ -57,7 +57,7 @@ describe("driver/factory", () => {
       port: 5432,
       database: "typhex_test",
     });
-    expect(driver.dialect).toBe("postgres");
+    expect(driver.dialect.name).toBe("postgres");
     await driver.close();
   });
 

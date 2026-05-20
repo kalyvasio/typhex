@@ -31,7 +31,7 @@ import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
 import {
   DEFAULT_ROW_PARAM,
   QueryPlanBuilder,
-  getDialectOrThrow,
+  getQueryCompilerOrThrow,
 } from "./helpers/query-plan/query-plan.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 
@@ -97,7 +97,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     if (params.length > 0) console.log("[typhex] params:", params);
   }
 
-  private buildPlan(operation: QueryOperation) {
+  protected buildPlan(operation: QueryOperation) {
     return QueryPlanBuilder.build(this.state, operation);
   }
 
@@ -313,8 +313,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   async toArray(): Promise<EntityInstance<C>[]> {
     const { hydrate, qe } = this.state;
     const plan = this.buildPlan({ kind: "select" });
-    const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(plan);
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(plan);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = (await qe.query(sql, params)) as Record<string, unknown>[];
     await new RelationResolver(plan, qe, rows).resolve();
@@ -331,8 +331,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** Execute a COUNT query and return the total number of rows matching the current WHERE clause. */
   async count(): Promise<number> {
     const { qe } = this.state;
-    const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(this.buildPlan({ kind: "count" }));
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "count" }));
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = (await qe.query(sql, params)) as [{ c: number }];
     return Number(rows[0]?.c ?? 0);
@@ -341,8 +341,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
   async update(set: Record<string, unknown>): Promise<number> {
     const { qe } = this.state;
-    const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(this.buildPlan({ kind: "update", set }));
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "update", set }));
     if (!sql) return 0;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const result = await qe.run(sql, params);
@@ -352,8 +352,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** UPDATE ... RETURNING * (when supported); returns hydrated rows. */
   async updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]> {
     const { qe, hydrate } = this.state;
-    const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(
       this.buildPlan({ kind: "update", set, returning: true }),
     );
     if (!sql) return [];
@@ -366,8 +366,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** Execute a DELETE for the current WHERE clause and return the number of affected rows. */
   async delete(): Promise<number> {
     const { qe } = this.state;
-    const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(this.buildPlan({ kind: "delete" }));
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "delete" }));
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const result = await qe.run(sql, params);
     return result.changes;
@@ -376,8 +376,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** DELETE ... RETURNING * (when supported). */
   async deleteReturning(): Promise<EntityInstance<C>[]> {
     const { qe, hydrate } = this.state;
-    const dialect = getDialectOrThrow(this.state);
-    const { sql, params } = dialect.compilePlan(
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(
       this.buildPlan({ kind: "delete", returning: true }),
     );
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
@@ -449,13 +449,21 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     row: Record<string, unknown>,
     onConflict?: OnConflictClause,
   ): Promise<EntityInstance<C> | undefined> {
-    const { tableName, columnNames, qe, hydrate } = this.state;
-    const dialect = getDialectOrThrow(this.state);
+    const { columnNames, qe, hydrate } = this.state;
+    const compiler = getQueryCompilerOrThrow(this.state);
     const cols = columnNames.filter((c) => row[c] !== undefined);
     const params = cols.map((c) => row[c]);
     const pkCols = this.state.pkColumns;
 
-    const compiled = dialect.compileInsert(tableName, cols, params, pkCols, onConflict);
+    const compiled = compiler.compilePlan(
+      this.buildPlan({
+        kind: "insert",
+        columns: cols,
+        values: params,
+        pk: pkCols,
+        onConflict,
+      }),
+    );
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
 
     if (compiled.returningRow) {
@@ -482,15 +490,23 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     onConflict?: OnConflictClause,
   ): Promise<EntityInstance<C>[]> {
     if (rows.length === 0) return [];
-    const { tableName, columnNames, qe, hydrate } = this.state;
-    const dialect = getDialectOrThrow(this.state);
+    const { columnNames, qe, hydrate } = this.state;
+    const compiler = getQueryCompilerOrThrow(this.state);
     const pkCols = this.state.pkColumns;
 
     // Collect columns in entity-defined order, keeping any column present in at least one row.
     const cols = columnNames.filter((c) => rows.some((r) => r[c] !== undefined));
     const paramRows = rows.map((r) => cols.map((c) => r[c] ?? null));
 
-    const compiled = dialect.compileInsertMany(tableName, cols, paramRows, pkCols, onConflict);
+    const compiled = compiler.compilePlan(
+      this.buildPlan({
+        kind: "insertMany",
+        columns: cols,
+        rows: paramRows,
+        pk: pkCols,
+        onConflict,
+      }),
+    );
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
 
     if (compiled.returningRow) {

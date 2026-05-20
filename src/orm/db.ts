@@ -5,9 +5,8 @@
  */
 
 import type { Driver, TransactionOptions } from "../driver/types.js";
-import type { Dialect } from "../dialect.js";
+import type { Dialect, DialectName } from "../dbs/types.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
-import { getDbMigrations, getDialect } from "../dbs/index.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
 import {
@@ -39,7 +38,7 @@ export interface QueryExecutor {
 export type DbOptions =
   | { driver: Driver; migrationsFolder?: string }
   | {
-      dialect: "sqlite" | "postgres";
+      dialect: DialectName;
       database?: string;
       url?: string;
       migrationsFolder?: string;
@@ -139,8 +138,7 @@ export class Db implements QueryExecutor {
 
   /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
   async migrate(): Promise<void> {
-    const dialect = getDialect(this._driver.dialect);
-    const esc = dialect.escapeIdentifier.bind(dialect);
+    const compiler = this._driver.dialect.queryCompiler;
     const entities = getRegisteredEntities();
     const deps = parseFkDependencies(entities);
     const names = entities.map((e) => e.table._table);
@@ -151,21 +149,17 @@ export class Db implements QueryExecutor {
       const entity = byName.get(name);
       if (!entity) continue;
       const { _schema: schema } = entity.table;
-      const colDefs = Object.entries(schema)
-        .map(([c, def]) => `${esc(c)} ${def}`)
-        .join(", ");
-      await this.run(`CREATE TABLE IF NOT EXISTS ${esc(name)} (${colDefs})`);
+      await this.run(compiler.compileCreateTableIfNotExists(name, schema));
     }
   }
 
   /** Validate all registered entities against the database. Throws on mismatch. */
   async validate(): Promise<void> {
-    const migrations = getDbMigrations(this._driver.dialect);
     for (const entity of getRegisteredEntities()) {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
-      const rows = await migrations.getDbColumns(this._driver, name);
+      const rows = await this._driver.dialect.migrator.getDbColumns(this._driver, name);
 
       if (rows.length === 0) {
         throw new Error(`validate: table "${name}" does not exist in the database.`);
