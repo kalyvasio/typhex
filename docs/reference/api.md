@@ -246,7 +246,7 @@ const row = await query.first();
 
 ### `.count()`
 
-Execute and return the count of matching rows.
+Execute and return how many rows the query would produce without `limit`, `offset`, or `orderBy`. With `groupBy`, counts groups rather than base rows (Objection.js `resultSize()` semantics).
 
 ```ts
 const n = await query.count();

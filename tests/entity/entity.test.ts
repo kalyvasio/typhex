@@ -117,6 +117,16 @@ describe("Entity()", () => {
       ).toBe(1);
     });
 
+    it("count ignores limit and offset", async () => {
+      const User = Entity("users", userSchema);
+      await db.migrate();
+      await User.query().insert({ name: "Alice", age: 30 });
+      await User.query().insert({ name: "Bob", age: 25 });
+      await User.query().insert({ name: "Carol", age: 28 });
+      expect(await User.query().limit(1).count()).toBe(3);
+      expect(await User.query().limit(1).offset(1).count()).toBe(3);
+    });
+
     it("first returns single row or undefined", async () => {
       const User = Entity("users", userSchema);
       await db.migrate();

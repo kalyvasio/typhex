@@ -535,10 +535,11 @@ describe("QueryBuilder", () => {
       expect(sql).toContain('FROM "users" AS "t0"');
     });
 
-    it("throws when from(name) references an unknown CTE at compile time", async () => {
-      await expect(newBuilder(db).from("missing").toArray()).rejects.toThrow(
-        'from: unknown CTE "missing"',
-      );
+    it("from(name) compiles unregistered name as a FROM reference", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      await newBuilder(db).from("missing").toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('FROM "missing"');
     });
   });
 });

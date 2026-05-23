@@ -192,15 +192,15 @@ export function Entity<
   }
 
   function baseState(executor?: QueryExecutor): QueryState<unknown> {
-    return {
+    return new QueryState({
       tableName,
       columnNames: cols,
       qe: executor ?? resolveDb(),
       pkColumns: pkCols,
       whereIr: null,
-      whereParams: {} as Record<string, unknown>,
+      whereParams: {},
       subqueryParams: {},
-      orderBy: [] as any[],
+      orderBy: [],
       havingIr: null,
       havingParams: {},
       limitNum: null,
@@ -208,7 +208,7 @@ export function Entity<
       selectIr: null,
       relations: rels as RelationsMap,
       resolveRelationTarget,
-    };
+    });
   }
 
   function runHook(self: any, name: string): Promise<void> {

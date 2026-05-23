@@ -1,5 +1,5 @@
 import { BaseQueryCompiler } from "../query-compiler.js";
-import type { CompileResult, DiffAction, ExpandPlaceholdersResult } from "../types.js";
+import type { CompileResult, DiffAction, ExpandPlaceholdersResult, CompiledCteBody } from "../types.js";
 import { SQL_DEFAULT } from "../types.js";
 import type { ExprAggregate } from "../../orm/expr.js";
 
@@ -51,6 +51,20 @@ export class SqliteQueryCompiler extends BaseQueryCompiler {
       return "?";
     });
     return { sql: newSql, params: newParams };
+  }
+
+  protected compileWithClause(
+    coreSql: string,
+    coreParams: unknown[],
+    bodies: CompiledCteBody[],
+  ): CompileResult {
+    const merged: unknown[] = [];
+    for (const body of bodies) merged.push(...body.bodyParams);
+    merged.push(...coreParams);
+    const parts = bodies
+      .map((body) => `${this.escapeIdentifier(body.name)} AS (${body.bodySql})`)
+      .join(", ");
+    return { sql: `WITH ${parts} ${coreSql}`, params: merged };
   }
 
   compileAggregate(agg: ExprAggregate, params: unknown[] = []): string {

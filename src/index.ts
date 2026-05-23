@@ -37,7 +37,7 @@ export type { Driver, Connection, ExecuteResult, TransactionOptions } from "./dr
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export type { PostgresDriverOptions } from "./dbs/index.js";
 export type { ColumnDef } from "./dbs/types.js";
-export type { WithClause, RenderedWithClause } from "./dbs/types.js";
+export type { WithClause, CompiledCteBody } from "./dbs/types.js";
 export type { FromSource } from "./orm/query-state.js";
 
 // Entity machinery

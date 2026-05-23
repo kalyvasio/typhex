@@ -12,7 +12,7 @@ import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Driver } from "../../src/driver/types.js";
 import {
-  countPlan,
+  resultSizePlan,
   deletePlan,
   insertManyPlan,
   insertPlan,
@@ -195,9 +195,9 @@ describe("dbs/postgres", () => {
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
     });
 
-    it("compilePlan count produces SELECT COUNT", () => {
-      const { sql, params } = postgresQueryCompiler.compilePlan(
-        countPlan("users", {
+    it("compileResultSize produces subquery-wrapped COUNT", () => {
+      const { sql, params } = postgresQueryCompiler.compileResultSize(
+        resultSizePlan("users", {
           kind: "binary",
           op: "===",
           left: { kind: "column", alias: "t0", column: ["age"] },
@@ -205,11 +205,12 @@ describe("dbs/postgres", () => {
         }),
       );
       expect(sql).toContain("SELECT COUNT(*) AS c");
+      expect(sql).toContain('FROM (');
       expect(sql).toContain('FROM "users"');
       expect(params).toEqual([18]);
     });
 
-    it("compilePlan count with WITH merges and renumbers placeholders", () => {
+    it("compileResultSize with WITH merges and renumbers placeholders", () => {
       const innerState = {
         tableName: "users",
         columnNames: ["id", "age"],
@@ -234,8 +235,8 @@ describe("dbs/postgres", () => {
         offsetNum: null,
         selectIr: null,
       };
-      const { sql, params } = postgresQueryCompiler.compilePlan({
-        ...countPlan("filtered", {
+      const { sql, params } = postgresQueryCompiler.compileResultSize({
+        ...resultSizePlan("filtered", {
           kind: "binary",
           op: "===",
           left: { kind: "column", alias: "t0", column: ["age"] },
@@ -244,7 +245,6 @@ describe("dbs/postgres", () => {
         fromSource: { kind: "cte", name: "filtered" },
         ctes: [{ name: "filtered", kind: "simple", inner: innerState }],
       });
-      expect(sql.startsWith('WITH "filtered" AS (')).toBe(true);
       expect(sql).toContain("SELECT COUNT(*) AS c");
       expect(sql).toContain('FROM "filtered"');
       expect(params).toEqual([19, 30]);

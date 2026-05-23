@@ -14,9 +14,8 @@ import type {
   ExpandPlaceholdersResult,
   OnConflictClause,
   QueryCompiler,
-  RenderedWithClause,
+  CompiledCteBody,
 } from "./types.js";
-import { wrapWithPostgres, wrapWithSqlite } from "./with-clause.js";
 import { getColumnDef, resolveParamSentinels, SQL_DEFAULT } from "./types.js";
 import type {
   Expr,
@@ -28,15 +27,23 @@ import type {
   SelectItem,
 } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
-import {
-  assertFromSourceAllowed,
-  renderCtes,
-  resolveFromClause as resolvePlanFromClause,
-} from "./cte-render.js";
-import type { DialectName } from "./types.js";
+import { QueryPlanBuilder } from "../orm/helpers/query-plan/query-plan.js";
+import type { FromSource, QueryState } from "../orm/query-state.js";
+import type { DialectName, WithClause } from "./types.js";
 import type { JoinType } from "../ir/types.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
+
+type PreparedReadPlan = {
+  compiledCteBodies: CompiledCteBody[];
+  fromResolved: { fromClause: string; fromParams: unknown[] };
+  joinsSql: string;
+  expand: (
+    compiled: { sql: string; params: unknown[] },
+    paramValues: Record<string, unknown>,
+  ) => ExpandPlaceholdersResult;
+  paramStartIndex: number;
+};
 
 export abstract class BaseQueryCompiler implements QueryCompiler {
   protected static readonly JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
@@ -106,8 +113,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     switch (operation.kind) {
       case "select":
         return this.compileSelectPlan(plan, options);
-      case "count":
-        return this.compileCountPlan(plan);
       case "insert":
         return this.compileInsert(
           plan.tableName,
@@ -129,6 +134,126 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       case "delete":
         return this.compileDeletePlan(plan);
     }
+  }
+
+  compileResultSize(plan: QueryPlan): CompileResult {
+    const inner = this.compileSelectPlan(
+      { ...plan, orderBy: [], limitNum: null, offsetNum: null },
+      { wrap: true },
+    );
+    return {
+      sql: `SELECT COUNT(*) AS c FROM ${inner.sql} AS ${this.escapeIdentifier("_count")}`,
+      params: inner.params,
+    };
+  }
+
+  protected compileCteBodies(
+    ctes: WithClause[] | undefined,
+    allowedCteNames: string[] = [],
+  ): CompiledCteBody[] {
+    if (!ctes?.length) return [];
+
+    const bodies: CompiledCteBody[] = [];
+    let paramStartIndex = 1;
+
+    for (const clause of ctes) {
+      const innerState = clause.inner as QueryState<unknown>;
+      const innerPlan = QueryPlanBuilder.build(innerState, { kind: "select" });
+      const priorNames = [...allowedCteNames, ...bodies.map((c) => c.name)];
+      const body = this.compilePlan(innerPlan, {
+        paramStartIndex,
+        allowedCteNames: priorNames,
+      });
+      bodies.push({
+        name: clause.name,
+        bodySql: body.sql,
+        bodyParams: body.params,
+      });
+      paramStartIndex += body.params.length;
+    }
+
+    return bodies;
+  }
+
+  protected resolvePlanFromClause(
+    plan: {
+      tableName: string;
+      tableAlias: string;
+      fromSource?: FromSource;
+    },
+    allowedCteNames: string[],
+    paramStartIndex: number,
+    compileOptions: CompileQueryOpts = {},
+  ): { fromClause: string; fromParams: unknown[] } {
+    const source = plan.fromSource ?? { kind: "table" as const };
+    const alias = this.escapeIdentifier(plan.tableAlias);
+
+    switch (source.kind) {
+      case "table":
+        return {
+          fromClause: `${this.escapeIdentifier(plan.tableName)} AS ${alias}`,
+          fromParams: [],
+        };
+      case "cte":
+        return {
+          fromClause: `${this.escapeIdentifier(source.name)} AS ${alias}`,
+          fromParams: [],
+        };
+      case "subquery": {
+        const innerPlan = QueryPlanBuilder.build(source.state, { kind: "select" });
+        const compiled = this.compilePlan(innerPlan, {
+          wrap: true,
+          paramStartIndex,
+          allowedCteNames: compileOptions.allowedCteNames,
+        });
+        return {
+          fromClause: `${compiled.sql} AS ${alias}`,
+          fromParams: compiled.params,
+        };
+      }
+    }
+  }
+
+  protected prepareReadPlan(plan: QueryPlan, options: CompileQueryOpts): PreparedReadPlan {
+    const compiledCteBodies = this.compileCteBodies(plan.ctes, options.allowedCteNames);
+    const allowedCteNames = [
+      ...(options.allowedCteNames ?? []),
+      ...compiledCteBodies.map((c) => c.name),
+    ];
+
+    const fromResolved = this.resolvePlanFromClause(
+      plan,
+      allowedCteNames,
+      options.paramStartIndex ?? 1,
+      options,
+    );
+    const { expand, paramStartIndex } = this.createExpander({
+      ...options,
+      paramStartIndex: (options.paramStartIndex ?? 1) + fromResolved.fromParams.length,
+    });
+    const joinsSql = plan.joins.map((j) => this.buildJoinClause(j, plan.tableAlias)).join("");
+
+    return {
+      compiledCteBodies,
+      fromResolved,
+      joinsSql,
+      expand,
+      paramStartIndex,
+    };
+  }
+
+  protected abstract compileWithClause(
+    coreSql: string,
+    coreParams: unknown[],
+    bodies: CompiledCteBody[],
+  ): CompileResult;
+
+  protected attachCteBodies(
+    core: CompileResult,
+    bodies: CompiledCteBody[],
+  ): CompileResult {
+    if (!bodies.length) return core;
+    return this.compileWithClause(core.sql, core.params, bodies);
   }
 
   compileMigrationUp(action: DiffAction): string {
@@ -275,27 +400,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected compileSelectPlan(plan: QueryPlan, options: CompileQueryOpts): CompileResult {
-    const renderedCtes = renderCtes(this, plan.ctes, options.allowedCteNames);
-    const allowedCteNames = [
-      ...(options.allowedCteNames ?? []),
-      ...renderedCtes.map((c) => c.name),
-    ];
-    assertFromSourceAllowed(plan.fromSource, allowedCteNames);
-
-    const fromResolved = resolvePlanFromClause(
-      this,
-      plan,
-      allowedCteNames,
-      options.paramStartIndex ?? 1,
-      options,
-      (name) => this.escapeIdentifier(name),
-    );
-    const { expand, paramStartIndex } = this.createExpander({
-      ...options,
-      paramStartIndex: (options.paramStartIndex ?? 1) + fromResolved.fromParams.length,
-    });
-    const joinsSql = plan.joins.map((j) => this.buildJoinClause(j, plan.tableAlias)).join("");
-    const selectListExpanded = expand(
+    const prepared = this.prepareReadPlan(plan, options);
+    const selectListExpanded = prepared.expand(
       this.compileSelectListExpr(
         plan.selectItems,
         plan.selectAll,
@@ -304,16 +410,16 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ),
       plan.whereParams,
     );
-    const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
+    const whereExpanded = prepared.expand(this.compileWhereExpr(plan.where), plan.whereParams);
     const havingExpanded = plan.having
-      ? expand(this.compileWhereExpr(plan.having), plan.havingParams)
+      ? prepared.expand(this.compileWhereExpr(plan.having), plan.havingParams)
       : null;
-    const orderByExpanded = expand(this.compileOrderByExpr(plan.orderBy), plan.whereParams);
+    const orderByExpanded = prepared.expand(this.compileOrderByExpr(plan.orderBy), plan.whereParams);
     const result = this.compileSelect({
       table: plan.tableName,
       tableAlias: plan.tableAlias,
-      fromClause: fromResolved.fromClause,
-      fromParams: fromResolved.fromParams,
+      fromClause: prepared.fromResolved.fromClause,
+      fromParams: prepared.fromResolved.fromParams,
       selectList: selectListExpanded.sql,
       selectListParams: selectListExpanded.params,
       whereSql: whereExpanded.sql,
@@ -322,57 +428,14 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       orderByParams: orderByExpanded.params,
       limitNum: plan.limitNum,
       offsetNum: plan.offsetNum,
-      joinsSql: joinsSql || undefined,
+      joinsSql: prepared.joinsSql || undefined,
       groupBy: plan.groupBy.length > 0 ? plan.groupBy : undefined,
       havingSql: havingExpanded?.sql,
       havingParams: havingExpanded?.params,
-      paramStartIndex,
+      paramStartIndex: prepared.paramStartIndex,
     });
-    const wrapped = this.wrapWithRenderedCtes(result, renderedCtes);
+    const wrapped = this.attachCteBodies(result, prepared.compiledCteBodies);
     return options.wrap ? { sql: `(${wrapped.sql})`, params: wrapped.params } : wrapped;
-  }
-
-  protected compileCountPlan(plan: QueryPlan): CompileResult {
-    const renderedCtes = renderCtes(this, plan.ctes);
-    const allowedCteNames = renderedCtes.map((c) => c.name);
-    assertFromSourceAllowed(plan.fromSource, allowedCteNames);
-
-    const fromResolved = resolvePlanFromClause(
-      this,
-      plan,
-      allowedCteNames,
-      1,
-      {},
-      (name) => this.escapeIdentifier(name),
-    );
-    const { expand } = this.createExpander({
-      paramStartIndex: 1 + fromResolved.fromParams.length,
-    });
-    const joinsSql = plan.joins.map((j) => this.buildJoinClause(j, plan.tableAlias)).join("");
-    const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    return this.wrapWithRenderedCtes(
-      this.compileCount(
-        plan.tableName,
-        plan.tableAlias,
-        whereExpanded.sql,
-        whereExpanded.params,
-        joinsSql || undefined,
-        fromResolved.fromClause,
-        fromResolved.fromParams,
-      ),
-      renderedCtes,
-    );
-  }
-
-  protected wrapWithRenderedCtes(
-    result: CompileResult,
-    rendered: RenderedWithClause[],
-  ): CompileResult {
-    if (!rendered.length) return result;
-    if (this.dialect === "postgres") {
-      return wrapWithPostgres(result.sql, result.params, rendered);
-    }
-    return wrapWithSqlite(result.sql, result.params, rendered);
   }
 
   protected compileUpdatePlan(plan: QueryPlan): CompileResult {
@@ -427,23 +490,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return {
       sql: `SELECT ${opts.selectList} FROM ${fromPart}${opts.joinsSql ?? ""} WHERE ${opts.whereSql}${groupByClause}${havingClause}${orderClause}${limitClause}${offsetClause}`,
       params,
-    };
-  }
-
-  protected compileCount(
-    table: string,
-    tableAlias: string,
-    whereSql: string,
-    whereParams: unknown[],
-    joinsSql?: string,
-    fromClause?: string,
-    fromParams?: unknown[],
-  ): CompileResult {
-    const fromPart =
-      fromClause ?? `${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(tableAlias)}`;
-    return {
-      sql: `SELECT COUNT(*) AS c FROM ${fromPart}${joinsSql ?? ""} WHERE ${whereSql}`,
-      params: [...(fromParams ?? []), ...whereParams],
     };
   }
 

@@ -67,8 +67,8 @@ export interface WithClause {
   inner: unknown;
 }
 
-/** Compiled CTE body passed to WITH-clause SQL merge helpers. */
-export interface RenderedWithClause {
+/** Compiled CTE body before prepending to outer SQL. */
+export interface CompiledCteBody {
   name: string;
   bodySql: string;
   bodyParams: unknown[];
@@ -101,7 +101,6 @@ export interface CompileSelectOpts {
 
 export type QueryOperation =
   | { kind: "select" }
-  | { kind: "count" }
   | {
       kind: "insert";
       columns: string[];
@@ -176,6 +175,7 @@ export interface Dialect {
 /** Public SQL-building surface for a dialect. */
 export interface QueryCompiler {
   compilePlan(plan: QueryPlan, opts?: CompileQueryOpts): CompileResult;
+  compileResultSize(plan: QueryPlan): CompileResult;
   compileMigrationUp(action: DiffAction): string;
   compileMigrationDown(action: DiffAction): string;
   compileCreateTableIfNotExists(table: string, schema: Record<string, ColumnDef>): string;

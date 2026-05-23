@@ -6,7 +6,7 @@ import type {
 } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { RelationAssembler } from "../../src/orm/helpers/relations/relation-assembler.js";
 import type { IrHaving, IrSelect, IrWhere } from "../../src/ir/types.js";
-import type { QueryState } from "../../src/orm/query-builder.js";
+import { QueryState } from "../../src/orm/query-builder.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 import { sqliteDialect } from "../../src/dbs/index.js";
 
@@ -69,7 +69,7 @@ function buildState(args: {
   havingIr?: IrHaving | null;
   pkColumns?: string[] | null;
 }): QueryState<unknown> {
-  return {
+  return new QueryState({
     tableName: "contacts",
     columnNames: ["id", "name", "companyId"],
     qe: makeQe(),
@@ -92,7 +92,7 @@ function buildState(args: {
             : null;
         }
       : undefined,
-  } as QueryState<unknown>;
+  });
 }
 
 function planFor(args: {
