@@ -39,7 +39,8 @@ import type {
   RelationOptions,
   JunctionOptions,
 } from "../../../entity/relations.js";
-import { getPkColumnsFromSchema, type AnyEntityClass } from "../../../entity/entity.js";
+import { getPkColumnsFromSchema } from "../../../entity/pk-columns.js";
+import type { AnyEntityClass } from "../../../entity/entity.js";
 import { toArray } from "../../../utils.js";
 import type { RelationFetchMetadata, JoinedProjection } from "./query-plan.js";
 

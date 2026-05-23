@@ -2,7 +2,7 @@
  * Build WITH (CTE) prefixes and merge bound parameters for nested SELECT bodies.
  */
 
-import type { WithClause } from "./types.js";
+import type { RenderedWithClause } from "./types.js";
 
 function quoteId(name: string): string {
   return '"' + String(name).replaceAll('"', '""') + '"';
@@ -18,7 +18,7 @@ export function shiftPostgresPlaceholders(sql: string, delta: number): string {
 export function wrapWithPostgres(
   coreSql: string,
   coreParams: unknown[],
-  withClauses: WithClause[] | undefined
+  withClauses: RenderedWithClause[] | undefined,
 ): { sql: string; params: unknown[] } {
   if (!withClauses?.length) return { sql: coreSql, params: coreParams };
   const esc = quoteId;
@@ -39,7 +39,7 @@ export function wrapWithPostgres(
 export function wrapWithSqlite(
   coreSql: string,
   coreParams: unknown[],
-  withClauses: WithClause[] | undefined
+  withClauses: RenderedWithClause[] | undefined,
 ): { sql: string; params: unknown[] } {
   if (!withClauses?.length) return { sql: coreSql, params: coreParams };
   const esc = quoteId;

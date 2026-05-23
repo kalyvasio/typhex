@@ -1,5 +1,5 @@
 /**
- * CTE (WITH clause) example: withCte / fromCte — runtime (no transformer).
+ * CTE (WITH clause) example: withCte / from — runtime (no transformer).
  * Run: npx tsx examples/cte/cte.ts  (from project root)
  *   or: npm run cte  (from examples/)
  */
@@ -28,9 +28,19 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   const adults = User.query().where((u) => u.age >= 18);
   const workingAge = await User.query()
     .withCte("adults", adults)
-    .fromCte("adults")
+    .from("adults")
     .where((u) => u.age < 65)
     .toArray();
+  // SQL:
+  // WITH "adults" AS (
+  //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //   FROM "users" AS "t0"
+  //   WHERE ("t0"."age" >= ?)
+  // )
+  // SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  // FROM "adults" AS "t0"
+  // WHERE ("t0"."age" < ?)
+  // params: [18, 65]
 
   console.log(
     "1. Working-age adults:",
@@ -42,20 +52,50 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
 
 {
   const usOnly = User.query().where((u) => u.country === "US");
-  const total = await User.query().withCte("us_users", usOnly).fromCte("us_users").count();
+  const total = await User.query().withCte("us_users", usOnly).from("us_users").count();
+  // SQL:
+  // WITH "us_users" AS (
+  //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //   FROM "users" AS "t0"
+  //   WHERE ("t0"."country" = ?)
+  // )
+  // SELECT COUNT(*) AS c FROM "us_users" AS "t0" WHERE 1=1
+  // params: ["US"]
+
   console.log("2. Total US users (via CTE count):", total);
 }
 
-// --- 3. Nested CTE guard ---
+// --- 3. Referencing CTE: second CTE reads from the first ---
 
 {
-  const base = User.query().where((u) => u.id > 0);
-  const inner = User.query().withCte("inner_cte", base);
-  try {
-    User.query().withCte("outer", inner);
-  } catch (e) {
-    console.log("3. Nested CTE rejected:", (e as Error).message);
-  }
+  const adults = User.query().where((u) => u.age >= 18);
+  const ukAdults = User.query()
+    .from("adults")
+    .where((u) => u.country === "UK");
+  const rows = await User.query()
+    .withCte("adults", adults)
+    .withCte("uk_adults", ukAdults)
+    .from("uk_adults")
+    .toArray();
+  // SQL:
+  // WITH "adults" AS (
+  //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //   FROM "users" AS "t0"
+  //   WHERE ("t0"."age" >= ?)
+  // ), "uk_adults" AS (
+  //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //   FROM "adults" AS "t0"
+  //   WHERE ("t0"."country" = ?)
+  // )
+  // SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  // FROM "uk_adults" AS "t0"
+  // WHERE 1=1
+  // params: [18, "UK"]
+
+  console.log(
+    "3. UK adults via referencing CTE:",
+    rows.map((u) => `${u.name} (${u.age})`),
+  );
 }
 
 await db.close();

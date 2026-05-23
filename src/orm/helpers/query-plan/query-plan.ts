@@ -60,7 +60,7 @@ import {
   type RelationJoinMeta,
   type OneToManyExistsMeta,
 } from "../relations/relation-joins.js";
-import type { QueryState } from "../../query-builder.js";
+import type { FromSource, QueryState } from "../../query-state.js";
 import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../expr.js";
 import { ExprBuilder, type SubqueryPlans } from "./expr-builder.js";
 import { SelectClassifier, EMPTY_CLASSIFIED, type ClassifiedSelect } from "./select-classifier.js";
@@ -178,10 +178,10 @@ export interface QueryPlan {
   whereParams: Record<string, unknown>;
   havingParams: Record<string, unknown>;
 
-  /** WITH clause bodies (full SELECT each); merged when compiling the outer query. */
+  /** WITH clauses (uncompiled); rendered during compilation. */
   ctes?: WithClause[];
-  /** When set, the outer FROM uses this CTE name instead of the entity table. */
-  fromCteName?: string;
+  /** Outer FROM source (base table, CTE name, or inline subquery). */
+  fromSource?: FromSource;
 }
 
 /**
@@ -343,7 +343,7 @@ export class QueryPlanBuilder {
       whereParams: this.state.whereParams,
       havingParams: this.state.havingParams,
       ctes: this.state.ctes,
-      fromCteName: this.state.fromCteName ?? undefined,
+      fromSource: this.state.fromSource ?? undefined,
     };
   }
 

@@ -210,6 +210,30 @@ describe("dbs/postgres", () => {
     });
 
     it("compilePlan count with WITH merges and renumbers placeholders", () => {
+      const innerState = {
+        tableName: "users",
+        columnNames: ["id", "age"],
+        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
+        pkColumns: ["id"],
+        whereIr: {
+          node: {
+            kind: "binary",
+            op: ">=",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 19 },
+          },
+          rootParam: "u",
+          localParamNames: ["u"],
+        },
+        whereParams: {},
+        subqueryParams: {},
+        orderBy: [],
+        havingIr: null,
+        havingParams: {},
+        limitNum: null,
+        offsetNum: null,
+        selectIr: null,
+      };
       const { sql, params } = postgresQueryCompiler.compilePlan({
         ...countPlan("filtered", {
           kind: "binary",
@@ -217,19 +241,13 @@ describe("dbs/postgres", () => {
           left: { kind: "column", alias: "t0", column: ["age"] },
           right: { kind: "const", value: 30 },
         }),
-        fromCteName: "filtered",
-        ctes: [
-          {
-            name: "filtered",
-            bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`,
-            bodyParams: [18, 19],
-          },
-        ],
+        fromSource: { kind: "cte", name: "filtered" },
+        ctes: [{ name: "filtered", kind: "simple", inner: innerState }],
       });
       expect(sql.startsWith('WITH "filtered" AS (')).toBe(true);
       expect(sql).toContain("SELECT COUNT(*) AS c");
       expect(sql).toContain('FROM "filtered"');
-      expect(params).toEqual([18, 19, 30]);
+      expect(params).toEqual([19, 30]);
     });
 
     it("compilePlan update produces UPDATE with renumbered placeholders", () => {

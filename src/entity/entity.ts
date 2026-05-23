@@ -27,6 +27,8 @@ import type {
 import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
 import { getActiveTrx } from "../orm/db.js";
+import { getPkColumns } from "./pk-columns.js";
+export { getPkColumnsFromSchema } from "./pk-columns.js";
 
 /** Resolved relation value type for a `RelationDef` R: an array for to-many, a single instance for to-one. */
 export type RelationLoadedValue<R> =
@@ -119,20 +121,6 @@ export type EntityRow<E> = E extends AnyEntityClass ? EntityInstance<E> : never;
 export type EntityClassOf<T> =
   T extends EntityInstance<infer E> ? E : T extends AnyEntityClass ? T : never;
 
-function hasPrimaryKey(def: string): boolean {
-  const stripped = def.replaceAll(/'[^']*'/g, "").replaceAll(/--[^\n]*/g, "");
-  return /\bprimary\s+key\b/i.test(stripped);
-}
-
-function getPkColumns(schema: Record<string, string>): string[] {
-  const names = Object.keys(schema);
-  return names.filter((c) => hasPrimaryKey(schema[c]));
-}
-
-/** Public helper for relation loading: primary key column names from a schema map. */
-export function getPkColumnsFromSchema(schema: Record<string, string>): string[] {
-  return getPkColumns(schema);
-}
 
 function createTableDef<
   TTable extends string,
