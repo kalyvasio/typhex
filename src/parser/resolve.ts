@@ -36,6 +36,21 @@ export function resolveHavingIr(
   return resolveWhereIr(input, paramKeys, subqueryKeys);
 }
 
+/** Resolve an entity-table join ON input (pre-built predicate IR or arrow fn) to an IrWhere. */
+export function resolveJoinOnIr(
+  joinType: string,
+  input: IrWhere | ((joined: unknown, row: unknown) => boolean),
+): IrWhere {
+  if (isIrWhere(input)) return input;
+  try {
+    return parseArrowToIrPredicate(input as (...args: any[]) => boolean);
+  } catch (e) {
+    throw new Error(
+      `Failed to parse ${joinType}Join ON predicate: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+}
+
 /** Resolve an orderBy input (pre-built IrOrderBy, string, or arrow fn) to an IrOrderBy. */
 export function resolveOrderBy(
   input: IrOrderBy | string | ((row: unknown) => unknown),

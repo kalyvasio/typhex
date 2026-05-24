@@ -522,7 +522,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   findById(id: unknown): Promise<EntityInstance<C> | null>;
   first(): Promise<EntityInstance<C> | undefined>;
   from(): QueryBuilder<C, T>;
-  from<Row>(source: string | QueryBuilder<any, Row>): QueryBuilder<C, Row>;
+  from(source: string): QueryBuilder<C, T>;
+  from<Row>(source: QueryBuilder<any, Row>): QueryBuilder<C, Row>;
   fullJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
   groupBy(
     columnOrFn: string | string[] | number | number[] | ((row: EntityInstance<C>) => unknown),

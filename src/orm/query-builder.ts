@@ -14,19 +14,17 @@ import {
   type JoinHint,
   type JoinType,
 } from "../ir/types.js";
-import type { QueryExecutor } from "./db.js";
-import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
 import {
   resolveWhereIr,
   resolveHavingIr,
+  resolveJoinOnIr,
   resolveOrderBy,
   resolveSelectIr,
   resolveGroupByPaths,
   resolveJoinKeys,
 } from "../parser/resolve.js";
 import { type OnConflictClause, type QueryOperation } from "../dbs/types.js";
-import { parseArrowToIrPredicate } from "../parser/parse-arrow.js";
 import { RelationResolver } from "./helpers/relations/relation-resolver.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
 import {
@@ -38,7 +36,6 @@ import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.
 import {
   QueryState,
   type CapturedSubquery,
-  type FromSource,
   type QueryStateInit,
 } from "./query-state.js";
 
@@ -202,7 +199,10 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       if (!onFn) {
         throw new Error(`${joinType}Join(entity): ON callback is required`);
       }
-      const onIr = parseArrowToIrPredicate(onFn as (...args: any[]) => boolean);
+      const onIr = resolveJoinOnIr(
+        joinType,
+        onFn as (joined: unknown, row: unknown) => boolean,
+      );
       this.state.entityJoinHints = [
         ...(this.state.entityJoinHints ?? []),
         { joinType, entity: keysOrFnOrEntity, onIr },
@@ -280,7 +280,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
    * Set the outer FROM source: registered CTE name, inline subquery, or base table.
    * Omit the argument to read from the entity's base table.
    */
-  from<Row>(source: string | QueryBuilder<any, Row>): QueryBuilder<C, Row>;
+  from(source: string): QueryBuilder<C, T>;
+  from<Row>(source: QueryBuilder<any, Row>): QueryBuilder<C, Row>;
   from(): QueryBuilder<C, T>;
   from<Row>(source?: string | QueryBuilder<any, Row>): QueryBuilder<C, Row | T> {
     const next = this.clone();
@@ -290,7 +291,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     }
     if (typeof source === "string") {
       next.state.fromSource = { kind: "cte", name: source };
-      return next as unknown as QueryBuilder<C, Row>;
+      return next;
     }
     next.state.fromSource = { kind: "subquery", state: source.state.clone() };
     return next as unknown as QueryBuilder<C, Row>;

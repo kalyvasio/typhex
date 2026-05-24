@@ -563,6 +563,15 @@ describe("QueryBuilder", () => {
       expect(sql).toContain("UNION ALL");
     });
 
+    it("unionAll wraps branches that use limit in parentheses", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const anchor = newBuilder(db).limit(1);
+      const other = newBuilder(db);
+      await anchor.unionAll(other).toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toMatch(/\(SELECT[\s\S]+LIMIT[\s\S]+\) UNION ALL SELECT/);
+    });
+
     it("withRecursiveCte emits WITH RECURSIVE", async () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
       const ageGte21: IrNode = {
@@ -597,6 +606,14 @@ describe("QueryBuilder", () => {
       expect(sql).toContain('INNER JOIN "mock" AS "t1" ON');
       expect(sql).toContain('"t1"."age"');
       expect(sql).toContain('"t0"."age"');
+    });
+
+    it("innerJoin(entity, on) throws a join-specific error when ON parsing fails", () => {
+      expect(() =>
+        newBuilder(db).innerJoin(MockEntity, function (child, parent) {
+          return child.age === parent.age;
+        }),
+      ).toThrow("Failed to parse innerJoin ON predicate:");
     });
   });
 });

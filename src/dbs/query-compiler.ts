@@ -46,6 +46,14 @@ type PreparedReadPlan = {
   paramStartIndex: number;
 };
 
+function wrapUnionAllBranchSql(
+  sql: string,
+  plan: Pick<QueryPlan, "orderBy" | "limitNum" | "offsetNum">,
+): string {
+  const needsParens = plan.orderBy.length > 0 || plan.limitNum != null || plan.offsetNum != null; 
+  return needsParens ? `(${sql})` : sql;
+}
+
 export abstract class BaseQueryCompiler implements QueryCompiler {
   protected static readonly JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
     inner: "INNER JOIN",
@@ -469,8 +477,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
         wrap: false,
         paramStartIndex: unionStart,
       });
+      const left = wrapUnionAllBranchSql(result.sql, plan);
+      const right = wrapUnionAllBranchSql(unionCompiled.sql, plan.unionAll);
       result = {
-        sql: `${result.sql} UNION ALL ${unionCompiled.sql}`,
+        sql: `${left} UNION ALL ${right}`,
         params: [...result.params, ...unionCompiled.params],
       };
     }

@@ -1,5 +1,5 @@
 /**
- * CTE (WITH clause) example: withCte / from — runtime (no transformer).
+ * CTE (WITH clause) examples: withCte, withRecursiveCte, unionAll, entity joins.
  * Run: npx tsx examples/cte/cte.ts  (from project root)
  *   or: npm run cte  (from examples/)
  */
@@ -99,6 +99,74 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   console.log(
     "3. UK adults via referencing CTE:",
     rows.map((u) => `${u.name} (${u.age})`),
+  );
+}
+
+// --- 4. unionAll: combine two SELECT branches ---
+
+{
+  const young = User.query().where((u) => u.age < 25);
+  const senior = User.query().where((u) => u.age >= 65);
+  const ends = await User.query()
+    .withCte("ends", young.unionAll(senior))
+    .from("ends")
+    .orderBy("name", "asc")
+    .toArray();
+  // SQL:
+  // WITH "ends" AS (
+  //   SELECT ... FROM "users" WHERE ("t0"."age" < ?)
+  //   UNION ALL
+  //   SELECT ... FROM "users" WHERE ("t0"."age" >= ?)
+  // )
+  // SELECT ... FROM "ends" AS "t0" ORDER BY "t0"."name" ASC
+  // params: [25, 65]
+
+  console.log(
+    "4. Young or senior (unionAll via CTE):",
+    ends.map((u) => `${u.name} (${u.age})`),
+  );
+}
+
+// --- 5. Recursive CTE: anchor + self-referencing recursive step ---
+
+{
+  const anchor = User.query().where((u) => u.age >= 65);
+  const recursive = User.query().from("seniors").where((u) => u.age >= 100);
+  const body = anchor.unionAll(recursive);
+  const seniors = await User.query().withRecursiveCte("seniors", body).from("seniors").toArray();
+  // SQL:
+  // WITH RECURSIVE "seniors" AS (
+  //   SELECT ... FROM "users" WHERE ("t0"."age" >= ?)
+  //   UNION ALL
+  //   SELECT ... FROM "seniors" AS "t0" WHERE ("t0"."age" >= ?)
+  // )
+  // SELECT ... FROM "seniors" AS "t0"
+  // params: [65, 100]
+
+  console.log(
+    "5. Seniors (recursive CTE, recursive step adds no rows here):",
+    seniors.map((u) => `${u.name} (${u.age})`),
+  );
+}
+
+// --- 6. Entity-table join: innerJoin(Entity, on) ---
+
+{
+  const withPeer = await User.query()
+    .innerJoin(User, (peer, u) => peer.country === u.country && peer.id !== u.id)
+    .where((u) => u.name === "Alice")
+    .toArray();
+  // SQL:
+  // SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  // FROM "users" AS "t0"
+  // INNER JOIN "users" AS "t1"
+  //   ON (("t1"."country" = "t0"."country") AND ("t1"."id" <> "t0"."id"))
+  // WHERE ("t0"."name" = ?)
+  // params: ["Alice"]
+
+  console.log(
+    "6. Alice has a same-country peer:",
+    withPeer.length === 1 ? withPeer[0]!.name : "(none)",
   );
 }
 
