@@ -8,6 +8,7 @@ describe("compileWithClause", () => {
       `SELECT $1 FROM "users" AS t0 WHERE "t0"."id" = $2`,
       [1, 2],
       [{ name: "a", bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`, bodyParams: [21, 22] }],
+      1,
     );
     expect(sql.startsWith(`WITH "a" AS (`)).toBe(true);
     expect(params).toEqual([21, 22, 1, 2]);
@@ -20,8 +21,22 @@ describe("compileWithClause", () => {
       `SELECT ? FROM "users" AS t0 WHERE "t0"."id" = ?`,
       [1, 2],
       [{ name: "a", bodySql: `SELECT ? FROM "users" AS t0 WHERE "t0"."age" >= ?`, bodyParams: [21, 22] }],
+      1,
     );
     expect(sql.startsWith(`WITH "a" AS (`)).toBe(true);
     expect(params).toEqual([21, 22, 1, 2]);
+  });
+
+  it("Postgres: applies paramStartIndex base offset to all CTE and core placeholders", () => {
+    const { sql, params } = postgresQueryCompiler["compileWithClause"](
+      `SELECT $1 FROM "users" AS t0 WHERE "t0"."id" = $2`,
+      [1, 2],
+      [{ name: "a", bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`, bodyParams: [21, 22] }],
+      5,
+    );
+    expect(params).toEqual([21, 22, 1, 2]);
+    expect(sql).toContain(`SELECT $7 FROM`);
+    expect(sql).toContain(`$8`);
+    expect(sql).toContain(`"t0"."age" >= $6`);
   });
 });

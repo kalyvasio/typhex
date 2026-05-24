@@ -154,14 +154,13 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (!ctes?.length) return [];
 
     const bodies: CompiledCteBody[] = [];
-    let paramStartIndex = 1;
 
     for (const clause of ctes) {
       const innerState = clause.inner as QueryState<unknown>;
       const innerPlan = QueryPlanBuilder.build(innerState, { kind: "select" });
       const priorNames = [...allowedCteNames, ...bodies.map((c) => c.name)];
       const body = this.compilePlan(innerPlan, {
-        paramStartIndex,
+        paramStartIndex: 1,
         allowedCteNames: priorNames,
       });
       bodies.push({
@@ -169,7 +168,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
         bodySql: body.sql,
         bodyParams: body.params,
       });
-      paramStartIndex += body.params.length;
     }
 
     return bodies;
@@ -246,14 +244,16 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     coreSql: string,
     coreParams: unknown[],
     bodies: CompiledCteBody[],
+    paramStartIndex: number,
   ): CompileResult;
 
   protected attachCteBodies(
     core: CompileResult,
     bodies: CompiledCteBody[],
+    paramStartIndex: number,
   ): CompileResult {
     if (!bodies.length) return core;
-    return this.compileWithClause(core.sql, core.params, bodies);
+    return this.compileWithClause(core.sql, core.params, bodies, paramStartIndex);
   }
 
   compileMigrationUp(action: DiffAction): string {
@@ -434,7 +434,11 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       havingParams: havingExpanded?.params,
       paramStartIndex: prepared.paramStartIndex,
     });
-    const wrapped = this.attachCteBodies(result, prepared.compiledCteBodies);
+    const wrapped = this.attachCteBodies(
+      result,
+      prepared.compiledCteBodies,
+      options.paramStartIndex ?? 1,
+    );
     return options.wrap ? { sql: `(${wrapped.sql})`, params: wrapped.params } : wrapped;
   }
 
@@ -477,7 +481,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (opts.orderByParams && opts.orderByParams.length > 0) {
       params.push(...opts.orderByParams);
     }
-    let paramIdx = (opts.paramStartIndex ?? 1) + params.length;
+    const fromParamCount = opts.fromParams?.length ?? 0;
+    let paramIdx = (opts.paramStartIndex ?? 1) + params.length - fromParamCount;
     const nextPlaceholder = () => this.placeholder(paramIdx++);
     const limitClause = opts.limitNum != null ? ` LIMIT ${nextPlaceholder()}` : "";
     if (opts.limitNum != null) params.push(opts.limitNum);

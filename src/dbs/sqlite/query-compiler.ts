@@ -57,6 +57,7 @@ export class SqliteQueryCompiler extends BaseQueryCompiler {
     coreSql: string,
     coreParams: unknown[],
     bodies: CompiledCteBody[],
+    _paramStartIndex: number,
   ): CompileResult {
     const merged: unknown[] = [];
     for (const body of bodies) merged.push(...body.bodyParams);

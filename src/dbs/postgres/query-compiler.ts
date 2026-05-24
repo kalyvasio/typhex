@@ -83,8 +83,9 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
     coreSql: string,
     coreParams: unknown[],
     bodies: CompiledCteBody[],
+    paramStartIndex: number,
   ): CompileResult {
-    let offset = 0;
+    let offset = paramStartIndex - 1;
     const merged: unknown[] = [];
     const parts: string[] = [];
     for (const body of bodies) {
