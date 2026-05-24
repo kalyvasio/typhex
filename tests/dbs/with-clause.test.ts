@@ -39,4 +39,24 @@ describe("compileWithClause", () => {
     expect(sql).toContain(`$8`);
     expect(sql).toContain(`"t0"."age" >= $6`);
   });
+
+  it("Postgres: uses WITH RECURSIVE when a clause is recursive", () => {
+    const { sql } = postgresQueryCompiler["compileWithClause"](
+      `SELECT 1`,
+      [],
+      [{ name: "tree", bodySql: `SELECT 1`, bodyParams: [], recursive: true }],
+      1,
+    );
+    expect(sql.startsWith("WITH RECURSIVE")).toBe(true);
+  });
+
+  it("SQLite: uses WITH RECURSIVE when a clause is recursive", () => {
+    const { sql } = sqliteQueryCompiler["compileWithClause"](
+      `SELECT 1`,
+      [],
+      [{ name: "tree", bodySql: `SELECT 1`, bodyParams: [], recursive: true }],
+      1,
+    );
+    expect(sql.startsWith("WITH RECURSIVE")).toBe(true);
+  });
 });

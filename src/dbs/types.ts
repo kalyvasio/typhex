@@ -63,7 +63,7 @@ export type { TransactionOptions, Driver };
 /** Registered CTE (uncompiled). The authoritative inner shape is `QueryState` from `query-state.ts`. */
 export interface WithClause {
   name: string;
-  kind: "simple";
+  kind: "simple" | "recursive";
   inner: unknown;
 }
 
@@ -72,6 +72,7 @@ export interface CompiledCteBody {
   name: string;
   bodySql: string;
   bodyParams: unknown[];
+  recursive?: boolean;
 }
 
 /** Options for compileSelect. */
@@ -95,6 +96,8 @@ export interface CompileSelectOpts {
   fromClause?: string;
   /** Params bound to placeholders inside `fromClause` (inline subquery). */
   fromParams?: unknown[];
+  /** Params bound to placeholders in JOIN … ON clauses. */
+  joinParams?: unknown[];
   /** Absolute index for the next placeholder. */
   paramStartIndex?: number;
 }
@@ -125,6 +128,8 @@ export interface CompileQueryOpts {
   paramStartIndex?: number;
   /** CTE names already defined earlier in the same WITH list (inner body compilation). */
   allowedCteNames?: string[];
+  /** Skip rendering WITH clauses (when compiling a UNION ALL branch). */
+  skipCteRender?: boolean;
 }
 
 /** Sentinel that tells a dialect to emit the column's DB default rather than a value. */

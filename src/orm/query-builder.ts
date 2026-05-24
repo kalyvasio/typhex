@@ -14,12 +14,11 @@ import {
   type JoinHint,
   type JoinType,
 } from "../ir/types.js";
-import type { QueryExecutor } from "./db.js";
-import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
 import {
   resolveWhereIr,
   resolveHavingIr,
+  resolveJoinOnIr,
   resolveOrderBy,
   resolveSelectIr,
   resolveGroupByPaths,
@@ -37,7 +36,6 @@ import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.
 import {
   QueryState,
   type CapturedSubquery,
-  type FromSource,
   type QueryStateInit,
 } from "./query-state.js";
 
@@ -135,19 +133,43 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
-  /** Adds an INNER JOIN for the given relation keys or accessor function. */
-  innerJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
-    return this.addJoinHints(keysOrFn, "inner");
+  /** Adds an INNER JOIN for relation keys, or to an entity table with a custom ON. */
+  innerJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  innerJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
+  innerJoin(
+    keysOrFnOrEntity: string[] | ((row: T) => unknown) | AnyEntityClass,
+    onFn?: (joined: EntityInstance<any>, row: T) => boolean,
+  ): this {
+    return this.addJoin(keysOrFnOrEntity, onFn, "inner");
   }
 
-  /** Adds a LEFT JOIN for the given relation keys or accessor function. */
-  leftJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
-    return this.addJoinHints(keysOrFn, "left");
+  /** Adds a LEFT JOIN for relation keys, or to an entity table with a custom ON. */
+  leftJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  leftJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
+  leftJoin(
+    keysOrFnOrEntity: string[] | ((row: T) => unknown) | AnyEntityClass,
+    onFn?: (joined: EntityInstance<any>, row: T) => boolean,
+  ): this {
+    return this.addJoin(keysOrFnOrEntity, onFn, "left");
   }
 
-  /** Adds a RIGHT JOIN for the given relation keys or accessor function. */
-  rightJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
-    return this.addJoinHints(keysOrFn, "right");
+  /** Adds a RIGHT JOIN for relation keys, or to an entity table with a custom ON. */
+  rightJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  rightJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
+  rightJoin(
+    keysOrFnOrEntity: string[] | ((row: T) => unknown) | AnyEntityClass,
+    onFn?: (joined: EntityInstance<any>, row: T) => boolean,
+  ): this {
+    return this.addJoin(keysOrFnOrEntity, onFn, "right");
   }
 
   /** Adds a CROSS JOIN for the given relation keys or accessor function. */
@@ -155,9 +177,45 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this.addJoinHints(keysOrFn, "cross");
   }
 
-  /** Adds a FULL OUTER JOIN for the given relation keys or accessor function. */
-  fullJoin(keysOrFn: string[] | ((row: T) => unknown)): this {
-    return this.addJoinHints(keysOrFn, "full");
+  /** Adds a FULL OUTER JOIN for relation keys, or to an entity table with a custom ON. */
+  fullJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  fullJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
+  fullJoin(
+    keysOrFnOrEntity: string[] | ((row: T) => unknown) | AnyEntityClass,
+    onFn?: (joined: EntityInstance<any>, row: T) => boolean,
+  ): this {
+    return this.addJoin(keysOrFnOrEntity, onFn, "full");
+  }
+
+  private addJoin(
+    keysOrFnOrEntity: string[] | ((row: T) => unknown) | AnyEntityClass,
+    onFn: ((joined: EntityInstance<any>, row: T) => boolean) | undefined,
+    joinType: JoinType,
+  ): this {
+    if (QueryBuilder.isEntityClass(keysOrFnOrEntity)) {
+      if (!onFn) {
+        throw new Error(`${joinType}Join(entity): ON callback is required`);
+      }
+      const onIr = resolveJoinOnIr(
+        joinType,
+        onFn as (joined: unknown, row: unknown) => boolean,
+      );
+      this.state.entityJoinHints = [
+        ...(this.state.entityJoinHints ?? []),
+        { joinType, entity: keysOrFnOrEntity, onIr },
+      ];
+      return this;
+    }
+    return this.addJoinHints(keysOrFnOrEntity as string[] | ((row: T) => unknown), joinType);
+  }
+
+  private static isEntityClass(value: unknown): value is AnyEntityClass {
+    if (typeof value !== "function" || value == null) return false;
+    const cls = value as unknown as AnyEntityClass;
+    return typeof cls.table?._table === "string";
   }
 
   private addJoinHints(keysOrFn: string[] | ((row: T) => unknown), joinType: JoinType): this {
@@ -196,10 +254,34 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   }
 
   /**
+   * Register a recursive CTE: `WITH RECURSIVE name AS (<anchor> UNION ALL <recursive>)`.
+   * The body should use `.unionAll()` for the recursive step and may `.from(name)` for self-reference.
+   */
+  withRecursiveCte<IC extends AnyEntityClass, IT>(
+    name: string,
+    subquery: QueryBuilder<IC, IT>,
+  ): QueryBuilder<C, T> {
+    const next = this.clone();
+    next.state.ctes = [
+      ...(next.state.ctes ?? []),
+      { name, kind: "recursive", inner: subquery.state.clone() },
+    ];
+    return next;
+  }
+
+  /** Append a `UNION ALL` branch to this SELECT (used for recursive CTE bodies). */
+  unionAll<OC extends AnyEntityClass, OT>(other: QueryBuilder<OC, OT>): QueryBuilder<C, T> {
+    const next = this.clone();
+    next.state.unionAll = other.state.clone();
+    return next;
+  }
+
+  /**
    * Set the outer FROM source: registered CTE name, inline subquery, or base table.
    * Omit the argument to read from the entity's base table.
    */
-  from<Row>(source: string | QueryBuilder<any, Row>): QueryBuilder<C, Row>;
+  from(source: string): QueryBuilder<C, T>;
+  from<Row>(source: QueryBuilder<any, Row>): QueryBuilder<C, Row>;
   from(): QueryBuilder<C, T>;
   from<Row>(source?: string | QueryBuilder<any, Row>): QueryBuilder<C, Row | T> {
     const next = this.clone();
@@ -209,7 +291,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     }
     if (typeof source === "string") {
       next.state.fromSource = { kind: "cte", name: source };
-      return next as unknown as QueryBuilder<C, Row>;
+      return next;
     }
     next.state.fromSource = { kind: "subquery", state: source.state.clone() };
     return next as unknown as QueryBuilder<C, Row>;

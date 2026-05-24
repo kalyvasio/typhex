@@ -38,12 +38,21 @@ type PreparedReadPlan = {
   compiledCteBodies: CompiledCteBody[];
   fromResolved: { fromClause: string; fromParams: unknown[] };
   joinsSql: string;
+  joinParams: unknown[];
   expand: (
     compiled: { sql: string; params: unknown[] },
     paramValues: Record<string, unknown>,
   ) => ExpandPlaceholdersResult;
   paramStartIndex: number;
 };
+
+function wrapUnionAllBranchSql(
+  sql: string,
+  plan: Pick<QueryPlan, "orderBy" | "limitNum" | "offsetNum">,
+): string {
+  const needsParens = plan.orderBy.length > 0 || plan.limitNum != null || plan.offsetNum != null; 
+  return needsParens ? `(${sql})` : sql;
+}
 
 export abstract class BaseQueryCompiler implements QueryCompiler {
   protected static readonly JOIN_SQL_KEYWORDS: Record<JoinType, string> = {
@@ -159,14 +168,17 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       const innerState = clause.inner as QueryState<unknown>;
       const innerPlan = QueryPlanBuilder.build(innerState, { kind: "select" });
       const priorNames = [...allowedCteNames, ...bodies.map((c) => c.name)];
+      const allowedForInner =
+        clause.kind === "recursive" ? [...priorNames, clause.name] : priorNames;
       const body = this.compilePlan(innerPlan, {
         paramStartIndex: 1,
-        allowedCteNames: priorNames,
+        allowedCteNames: allowedForInner,
       });
       bodies.push({
         name: clause.name,
         bodySql: body.sql,
         bodyParams: body.params,
+        recursive: clause.kind === "recursive",
       });
     }
 
@@ -213,7 +225,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected prepareReadPlan(plan: QueryPlan, options: CompileQueryOpts): PreparedReadPlan {
-    const compiledCteBodies = this.compileCteBodies(plan.ctes, options.allowedCteNames);
+    const compiledCteBodies = options.skipCteRender
+      ? []
+      : this.compileCteBodies(plan.ctes, options.allowedCteNames);
     const allowedCteNames = [
       ...(options.allowedCteNames ?? []),
       ...compiledCteBodies.map((c) => c.name),
@@ -229,15 +243,34 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ...options,
       paramStartIndex: (options.paramStartIndex ?? 1) + fromResolved.fromParams.length,
     });
-    const joinsSql = plan.joins.map((j) => this.buildJoinClause(j, plan.tableAlias)).join("");
+    const joinsExpanded = this.compileJoinsSql(plan, expand);
 
     return {
       compiledCteBodies,
       fromResolved,
-      joinsSql,
+      joinsSql: joinsExpanded.sql,
+      joinParams: joinsExpanded.params,
       expand,
       paramStartIndex,
     };
+  }
+
+  private compileJoinsSql(
+    plan: QueryPlan,
+    expand: ReturnType<BaseQueryCompiler["createExpander"]>["expand"],
+  ): { sql: string; params: unknown[] } {
+    const parts: string[] = [];
+    const params: unknown[] = [];
+    for (const join of plan.joins) {
+      if (join.on) {
+        const onExpanded = expand(this.compileWhereExpr(join.on), plan.whereParams);
+        params.push(...onExpanded.params);
+        parts.push(this.buildJoinClause(join, plan.tableAlias, onExpanded.sql));
+      } else {
+        parts.push(this.buildJoinClause(join, plan.tableAlias));
+      }
+    }
+    return { sql: parts.join(""), params };
   }
 
   protected abstract compileWithClause(
@@ -415,11 +448,12 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ? prepared.expand(this.compileWhereExpr(plan.having), plan.havingParams)
       : null;
     const orderByExpanded = prepared.expand(this.compileOrderByExpr(plan.orderBy), plan.whereParams);
-    const result = this.compileSelect({
+    let result = this.compileSelect({
       table: plan.tableName,
       tableAlias: plan.tableAlias,
       fromClause: prepared.fromResolved.fromClause,
       fromParams: prepared.fromResolved.fromParams,
+      joinParams: prepared.joinParams,
       selectList: selectListExpanded.sql,
       selectListParams: selectListExpanded.params,
       whereSql: whereExpanded.sql,
@@ -434,11 +468,30 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       havingParams: havingExpanded?.params,
       paramStartIndex: prepared.paramStartIndex,
     });
-    const wrapped = this.attachCteBodies(
-      result,
-      prepared.compiledCteBodies,
-      options.paramStartIndex ?? 1,
-    );
+
+    if (plan.unionAll) {
+      const unionStart = (options.paramStartIndex ?? 1) + result.params.length;
+      const unionCompiled = this.compileSelectPlan(plan.unionAll, {
+        ...options,
+        skipCteRender: true,
+        wrap: false,
+        paramStartIndex: unionStart,
+      });
+      const left = wrapUnionAllBranchSql(result.sql, plan);
+      const right = wrapUnionAllBranchSql(unionCompiled.sql, plan.unionAll);
+      result = {
+        sql: `${left} UNION ALL ${right}`,
+        params: [...result.params, ...unionCompiled.params],
+      };
+    }
+
+    const wrapped = options.skipCteRender
+      ? result
+      : this.attachCteBodies(
+          result,
+          prepared.compiledCteBodies,
+          options.paramStartIndex ?? 1,
+        );
     return options.wrap ? { sql: `(${wrapped.sql})`, params: wrapped.params } : wrapped;
   }
 
@@ -470,7 +523,12 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected compileSelect(opts: CompileSelectOpts): CompileResult {
-    const params = [...(opts.fromParams ?? []), ...(opts.selectListParams ?? []), ...opts.whereParams];
+    const params = [
+      ...(opts.fromParams ?? []),
+      ...(opts.joinParams ?? []),
+      ...(opts.selectListParams ?? []),
+      ...opts.whereParams,
+    ];
     const groupByClause =
       opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${this.compileGroupBy(opts.groupBy)}` : "";
     let havingClause = "";
@@ -724,8 +782,11 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     }
   }
 
-  protected buildJoinClause(join: JoinSpec, mainAlias: string): string {
+  protected buildJoinClause(join: JoinSpec, mainAlias: string, onSql?: string): string {
     const kw = BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
+    if (join.on) {
+      return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${onSql}`;
+    }
     const on = join.foreignKeys
       .map(
         (fk, i) =>
