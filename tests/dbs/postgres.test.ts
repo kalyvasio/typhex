@@ -12,7 +12,7 @@ import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Driver } from "../../src/driver/types.js";
 import {
-  countPlan,
+  resultSizePlan,
   deletePlan,
   insertManyPlan,
   insertPlan,
@@ -195,9 +195,9 @@ describe("dbs/postgres", () => {
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
     });
 
-    it("compilePlan count produces SELECT COUNT", () => {
-      const { sql, params } = postgresQueryCompiler.compilePlan(
-        countPlan("users", {
+    it("compileResultSize produces subquery-wrapped COUNT", () => {
+      const { sql, params } = postgresQueryCompiler.compileResultSize(
+        resultSizePlan("users", {
           kind: "binary",
           op: "===",
           left: { kind: "column", alias: "t0", column: ["age"] },
@@ -205,8 +205,161 @@ describe("dbs/postgres", () => {
         }),
       );
       expect(sql).toContain("SELECT COUNT(*) AS c");
+      expect(sql).toContain('FROM (');
       expect(sql).toContain('FROM "users"');
       expect(params).toEqual([18]);
+    });
+
+    it("compileResultSize with WITH merges and renumbers placeholders", () => {
+      const innerState = {
+        tableName: "users",
+        columnNames: ["id", "age"],
+        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
+        pkColumns: ["id"],
+        whereIr: {
+          node: {
+            kind: "binary",
+            op: ">=",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 19 },
+          },
+          rootParam: "u",
+          localParamNames: ["u"],
+        },
+        whereParams: {},
+        subqueryParams: {},
+        orderBy: [],
+        havingIr: null,
+        havingParams: {},
+        limitNum: null,
+        offsetNum: null,
+        selectIr: null,
+      };
+      const { sql, params } = postgresQueryCompiler.compileResultSize({
+        ...resultSizePlan("filtered", {
+          kind: "binary",
+          op: "===",
+          left: { kind: "column", alias: "t0", column: ["age"] },
+          right: { kind: "const", value: 30 },
+        }),
+        fromSource: { kind: "cte", name: "filtered" },
+        ctes: [{ name: "filtered", kind: "simple", inner: innerState }],
+      });
+      expect(sql).toContain("SELECT COUNT(*) AS c");
+      expect(sql).toContain('FROM "filtered"');
+      expect(params).toEqual([19, 30]);
+    });
+
+    it("compilePlan with two CTEs keeps sequential $N placeholders", () => {
+      const adultsState = {
+        tableName: "users",
+        columnNames: ["id", "age"],
+        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
+        pkColumns: ["id"],
+        whereIr: {
+          node: {
+            kind: "binary",
+            op: ">=",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 19 },
+          },
+          rootParam: "u",
+          localParamNames: ["u"],
+        },
+        whereParams: {},
+        subqueryParams: {},
+        orderBy: [],
+        havingIr: null,
+        havingParams: {},
+        limitNum: null,
+        offsetNum: null,
+        selectIr: null,
+      };
+      const workingState = {
+        ...adultsState,
+        fromSource: { kind: "cte", name: "adults" },
+        whereIr: {
+          node: {
+            kind: "binary",
+            op: "<",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 65 },
+          },
+          rootParam: "u",
+          localParamNames: ["u"],
+        },
+      };
+      const { sql, params } = postgresQueryCompiler.compilePlan({
+        ...selectPlan("working", {
+          columnNames: ["id", "age"],
+          selectAll: true,
+          where: {
+            kind: "binary",
+            op: ">",
+            left: { kind: "column", alias: "t0", column: ["age"] },
+            right: { kind: "const", value: 25 },
+          },
+        }),
+        fromSource: { kind: "cte", name: "working" },
+        ctes: [
+          { name: "adults", kind: "simple", inner: adultsState },
+          { name: "working", kind: "simple", inner: workingState },
+        ],
+      });
+      expect(params).toEqual([19, 65, 25]);
+      expect(sql).toContain('"adults" AS (');
+      expect(sql).toContain('"working" AS (');
+      expect(sql).toMatch(/\$1/);
+      expect(sql).toMatch(/\$2/);
+      expect(sql).toMatch(/\$3/);
+      expect(sql).not.toMatch(/\$4/);
+    });
+
+    it("compilePlan subquery FROM with limit uses correct placeholder after from params", () => {
+      const innerState = {
+        tableName: "users",
+        columnNames: ["id", "age"],
+        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
+        pkColumns: ["id"],
+        whereIr: {
+          node: {
+            kind: "binary",
+            op: ">=",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 19 },
+          },
+          rootParam: "u",
+          localParamNames: ["u"],
+        },
+        whereParams: {},
+        subqueryParams: {},
+        orderBy: [],
+        havingIr: null,
+        havingParams: {},
+        limitNum: null,
+        offsetNum: null,
+        selectIr: null,
+      };
+      const { sql, params } = postgresQueryCompiler.compilePlan(
+        {
+          ...selectPlan("users", {
+            columnNames: ["id", "age"],
+            selectAll: true,
+            where: {
+              kind: "binary",
+              op: "===",
+              left: { kind: "column", alias: "t0", column: ["id"] },
+              right: { kind: "const", value: 1 },
+            },
+            limitNum: 10,
+          }),
+          fromSource: { kind: "subquery", state: innerState },
+        },
+        { paramStartIndex: 5 },
+      );
+      expect(params).toEqual([19, 1, 10]);
+      expect(sql).toContain(" LIMIT $7");
+      expect(sql).toContain('"t0"."id" = $6');
     });
 
     it("compilePlan update produces UPDATE with renumbered placeholders", () => {

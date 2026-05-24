@@ -469,4 +469,77 @@ describe("QueryBuilder", () => {
       expect(row).toBeNull();
     });
   });
+
+  describe("CTE (withCte / from)", () => {
+    it("prepends WITH and reads from CTE alias", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const ageGte21: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 21 },
+      };
+      const ageLt65: IrNode = {
+        kind: "binary",
+        op: "<",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 65 },
+      };
+      const inner = newBuilder(db).where(where(ageGte21));
+      const q = newBuilder(db).withCte("adults", inner).from("adults").where(where(ageLt65));
+      await q.toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toMatch(/^WITH/);
+      expect(sql).toContain('"adults" AS (');
+      expect(sql).toContain('FROM "adults" AS "t0"');
+    });
+
+    it("second CTE can reference the first via from(name)", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const ageGte21: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 21 },
+      };
+      const ageLt65: IrNode = {
+        kind: "binary",
+        op: "<",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 65 },
+      };
+      const adults = newBuilder(db).where(where(ageGte21));
+      const working = newBuilder(db).from("adults").where(where(ageLt65));
+      const q = newBuilder(db).withCte("adults", adults).withCte("working", working).from("working");
+      await q.toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('WITH "adults" AS (');
+      expect(sql).toContain('"working" AS (');
+      expect(sql).toContain('FROM "adults" AS "t0"');
+      expect(sql).toContain('FROM "working" AS "t0"');
+    });
+
+    it("inline from(QueryBuilder) uses a subquery in FROM without WITH", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const ageGte21: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 21 },
+      };
+      const inner = newBuilder(db).where(where(ageGte21));
+      await newBuilder(db).from(inner).toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).not.toMatch(/^WITH/);
+      expect(sql).toContain("FROM (");
+      expect(sql).toContain('FROM "users" AS "t0"');
+    });
+
+    it("from(name) compiles unregistered name as a FROM reference", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      await newBuilder(db).from("missing").toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('FROM "missing"');
+    });
+  });
 });

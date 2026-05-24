@@ -25,6 +25,7 @@
     "start:transformer": "node out/transformer/with-transformer.js",
     "start:subqueries": "node out/subqueries/subqueries.js",
     "insert-many": "tsx insert-many/insert-many.ts",
+    "cte": "tsx cte/cte.ts",
     "transformer": "npm run build:transformer && npm run start:transformer",
     "subqueries": "npm run build:transformer && npm run start:subqueries"
   }

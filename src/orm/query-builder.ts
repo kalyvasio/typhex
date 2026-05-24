@@ -34,35 +34,15 @@ import {
   getQueryCompilerOrThrow,
 } from "./helpers/query-plan/query-plan.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
+import {
+  QueryState,
+  type CapturedSubquery,
+  type FromSource,
+  type QueryStateInit,
+} from "./query-state.js";
 
-/** @internal — internal builder state */
-export interface CapturedSubquery {
-  state: QueryState<unknown>;
-}
-
-export interface QueryState<T = unknown> {
-  tableName: string;
-  columnNames: string[];
-  qe: QueryExecutor;
-  /** Primary key column names (single, composite, or empty for keyless tables). */
-  pkColumns: string[];
-  whereIr: IrWhere | null;
-  whereParams: Record<string, unknown>;
-  subqueryParams: Record<string, CapturedSubquery>;
-  orderBy: IrOrderBy[];
-  limitNum: number | null;
-  offsetNum: number | null;
-  selectIr: IrSelect | null;
-  relations?: RelationsMap;
-  hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
-  resolveRelationTarget?: (
-    rel: RelationDef,
-  ) => { table: string; pk: string[]; schema: Record<string, string> } | null;
-  joinHints?: JoinHint[];
-  havingIr: IrHaving | null;
-  havingParams: Record<string, unknown>;
-  entity?: AnyEntityClass;
-}
+export { QueryState } from "./query-state.js";
+export type { CapturedSubquery, FromSource, QueryStateInit } from "./query-state.js";
 
 /** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
 export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityInstance<C>> {
@@ -75,20 +55,14 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** @internal */
   protected state: QueryState<T>;
   /** @internal */
-  constructor(state: QueryState<T>) {
-    this.state = state;
+  constructor(state: QueryState<T> | QueryStateInit<T>) {
+    this.state = state instanceof QueryState ? state : new QueryState(state);
   }
 
   /** Return a shallow copy of this builder with mutable state (params, orderBy) deep-copied,
    *  so chained calls do not mutate the original. */
   clone(): QueryBuilder<C, T> {
-    return new QueryBuilder({
-      ...this.state,
-      whereParams: { ...this.state.whereParams },
-      subqueryParams: { ...this.state.subqueryParams },
-      orderBy: [...this.state.orderBy],
-      joinHints: this.state.joinHints ? [...this.state.joinHints] : undefined,
-    });
+    return new QueryBuilder(this.state.clone());
   }
 
   /** @internal — Print the SQL and parameters to stdout when TYPHEX_DEBUG is enabled. */
@@ -205,6 +179,42 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
+  /**
+   * Register a common table expression: `WITH name AS (<subquery>)`.
+   * The inner query is compiled when the outer query runs.
+   */
+  withCte<IC extends AnyEntityClass, IT>(
+    name: string,
+    subquery: QueryBuilder<IC, IT>,
+  ): QueryBuilder<C, T> {
+    const next = this.clone();
+    next.state.ctes = [
+      ...(next.state.ctes ?? []),
+      { name, kind: "simple", inner: subquery.state.clone() },
+    ];
+    return next;
+  }
+
+  /**
+   * Set the outer FROM source: registered CTE name, inline subquery, or base table.
+   * Omit the argument to read from the entity's base table.
+   */
+  from<Row>(source: string | QueryBuilder<any, Row>): QueryBuilder<C, Row>;
+  from(): QueryBuilder<C, T>;
+  from<Row>(source?: string | QueryBuilder<any, Row>): QueryBuilder<C, Row | T> {
+    const next = this.clone();
+    if (source === undefined) {
+      next.state.fromSource = { kind: "table" };
+      return next;
+    }
+    if (typeof source === "string") {
+      next.state.fromSource = { kind: "cte", name: source };
+      return next as unknown as QueryBuilder<C, Row>;
+    }
+    next.state.fromSource = { kind: "subquery", state: source.state.clone() };
+    return next as unknown as QueryBuilder<C, Row>;
+  }
+
   /** Sets the SELECT projection using an arrow function parsed at runtime or by the TypeScript transformer. */
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U>;
   /** Sets the SELECT projection using an explicit list of column names. */
@@ -271,6 +281,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       limitNum: null,
       offsetNum: null,
       selectIr: null,
+      ctes: undefined,
+      fromSource: undefined,
     });
     return (await fresh.first()) ?? null;
   }
@@ -328,11 +340,12 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return arr[0];
   }
 
-  /** Execute a COUNT query and return the total number of rows matching the current WHERE clause. */
+  /** Execute a COUNT query and return rows the query would produce without limit/offset/orderBy. */
   async count(): Promise<number> {
     const { qe } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "count" }));
+    const plan = this.buildPlan({ kind: "select" });
+    const { sql, params } = compiler.compileResultSize(plan);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const rows = (await qe.query(sql, params)) as [{ c: number }];
     return Number(rows[0]?.c ?? 0);

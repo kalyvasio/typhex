@@ -73,12 +73,12 @@ export function deletePlan(table: string, where: Expr, returning?: boolean): Que
   return basePlan(table, { kind: "delete", returning }, { where });
 }
 
-export function countPlan(
+export function resultSizePlan(
   table: string,
   where: Expr,
   joins: JoinSpec[] = [],
 ): QueryPlan {
-  return basePlan(table, { kind: "count" }, { where, joins });
+  return basePlan(table, { kind: "select" }, { where, joins });
 }
 
 export function selectPlan(

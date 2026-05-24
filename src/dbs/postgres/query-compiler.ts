@@ -1,5 +1,5 @@
 import { BaseQueryCompiler } from "../query-compiler.js";
-import type { CompileResult, DiffAction, ExpandPlaceholdersResult } from "../types.js";
+import type { CompileResult, DiffAction, ExpandPlaceholdersResult, CompiledCteBody } from "../types.js";
 import type { Expr, ExprAggregate, JoinSpec } from "../../orm/expr.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
@@ -77,6 +77,32 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
       return `$${paramIndex++}`;
     });
     return { sql: newSql, params: newParams };
+  }
+
+  protected compileWithClause(
+    coreSql: string,
+    coreParams: unknown[],
+    bodies: CompiledCteBody[],
+    paramStartIndex: number,
+  ): CompileResult {
+    let offset = paramStartIndex - 1;
+    const merged: unknown[] = [];
+    const parts: string[] = [];
+    for (const body of bodies) {
+      parts.push(
+        `${this.escapeIdentifier(body.name)} AS (${this.shiftPlaceholders(body.bodySql, offset)})`,
+      );
+      merged.push(...body.bodyParams);
+      offset += body.bodyParams.length;
+    }
+    const outer = this.shiftPlaceholders(coreSql, offset);
+    merged.push(...coreParams);
+    return { sql: `WITH ${parts.join(", ")} ${outer}`, params: merged };
+  }
+
+  private shiftPlaceholders(sql: string, delta: number): string {
+    if (delta === 0) return sql;
+    return sql.replace(/\$(\d+)/g, (_, n) => `$${Number(n) + delta}`);
   }
 
   compileAggregate(agg: ExprAggregate, params: unknown[] = []): string {

@@ -60,6 +60,20 @@ export type DiffAction =
 export type { Connection, ExecuteResult };
 export type { TransactionOptions, Driver };
 
+/** Registered CTE (uncompiled). The authoritative inner shape is `QueryState` from `query-state.ts`. */
+export interface WithClause {
+  name: string;
+  kind: "simple";
+  inner: unknown;
+}
+
+/** Compiled CTE body before prepending to outer SQL. */
+export interface CompiledCteBody {
+  name: string;
+  bodySql: string;
+  bodyParams: unknown[];
+}
+
 /** Options for compileSelect. */
 export interface CompileSelectOpts {
   table: string;
@@ -77,13 +91,16 @@ export interface CompileSelectOpts {
   groupBy?: GroupByItem[];
   havingSql?: string;
   havingParams?: unknown[];
+  /** Pre-rendered FROM clause (table, CTE alias, or inline subquery). */
+  fromClause?: string;
+  /** Params bound to placeholders inside `fromClause` (inline subquery). */
+  fromParams?: unknown[];
   /** Absolute index for the next placeholder. */
   paramStartIndex?: number;
 }
 
 export type QueryOperation =
   | { kind: "select" }
-  | { kind: "count" }
   | {
       kind: "insert";
       columns: string[];
@@ -106,6 +123,8 @@ export interface CompileQueryOpts {
    *  for use as a subquery. */
   wrap?: boolean;
   paramStartIndex?: number;
+  /** CTE names already defined earlier in the same WITH list (inner body compilation). */
+  allowedCteNames?: string[];
 }
 
 /** Sentinel that tells a dialect to emit the column's DB default rather than a value. */
@@ -156,6 +175,7 @@ export interface Dialect {
 /** Public SQL-building surface for a dialect. */
 export interface QueryCompiler {
   compilePlan(plan: QueryPlan, opts?: CompileQueryOpts): CompileResult;
+  compileResultSize(plan: QueryPlan): CompileResult;
   compileMigrationUp(action: DiffAction): string;
   compileMigrationDown(action: DiffAction): string;
   compileCreateTableIfNotExists(table: string, schema: Record<string, ColumnDef>): string;
