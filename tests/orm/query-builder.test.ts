@@ -541,5 +541,62 @@ describe("QueryBuilder", () => {
       const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('FROM "missing"');
     });
+
+    it("unionAll produces UNION ALL in SQL", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const ageGte21: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 21 },
+      };
+      const ageGte65: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 65 },
+      };
+      const anchor = newBuilder(db).where(where(ageGte21));
+      const recursive = newBuilder(db).where(where(ageGte65));
+      await anchor.unionAll(recursive).toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain("UNION ALL");
+    });
+
+    it("withRecursiveCte emits WITH RECURSIVE", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const ageGte21: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 21 },
+      };
+      const ageGte65: IrNode = {
+        kind: "binary",
+        op: ">=",
+        left: { kind: "member", param: "u", path: ["age"] },
+        right: { kind: "const", value: 65 },
+      };
+      const anchor = newBuilder(db).where(where(ageGte21));
+      const recursive = newBuilder(db).from("tree").where(where(ageGte65));
+      const body = anchor.unionAll(recursive);
+      await newBuilder(db).withRecursiveCte("tree", body).from("tree").toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toMatch(/^WITH RECURSIVE/);
+      expect(sql).toContain('"tree" AS (');
+      expect(sql).toContain("UNION ALL");
+      expect(sql).toContain('FROM "tree" AS "t0"');
+    });
+
+    it("innerJoin(entity, on) adds entity table JOIN with custom ON", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      await newBuilder(db)
+        .innerJoin(MockEntity, (child, parent) => child.age === parent.age)
+        .toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('INNER JOIN "mock" AS "t1" ON');
+      expect(sql).toContain('"t1"."age"');
+      expect(sql).toContain('"t0"."age"');
+    });
   });
 });

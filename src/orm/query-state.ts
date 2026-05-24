@@ -3,7 +3,7 @@
  */
 
 import type { WithClause } from "../dbs/types.js";
-import type { IrHaving, IrOrderBy, IrSelect, IrWhere, JoinHint } from "../ir/types.js";
+import type { IrHaving, IrOrderBy, IrSelect, IrWhere, EntityJoinHint, JoinHint } from "../ir/types.js";
 import type { AnyEntityClass } from "../entity/entity.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { QueryExecutor } from "./db.js";
@@ -37,9 +37,13 @@ export interface QueryStateInit<T = unknown> {
     rel: RelationDef,
   ) => { table: string; pk: string[]; schema: Record<string, string> } | null;
   joinHints?: JoinHint[];
+  /** JOIN to entity tables with custom ON (e.g. recursive CTE self-join). */
+  entityJoinHints?: EntityJoinHint[];
   havingIr: IrHaving | null;
   havingParams: Record<string, unknown>;
   entity?: AnyEntityClass;
+  /** UNION ALL branch appended to this SELECT (anchor.unionAll(recursive)). */
+  unionAll?: QueryState<unknown>;
   ctes?: WithClause[];
   fromSource?: FromSource | null;
 }
@@ -63,9 +67,11 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     rel: RelationDef,
   ) => { table: string; pk: string[]; schema: Record<string, string> } | null;
   joinHints?: JoinHint[];
+  entityJoinHints?: EntityJoinHint[];
   havingIr: IrHaving | null;
   havingParams: Record<string, unknown>;
   entity?: AnyEntityClass;
+  unionAll?: QueryState<unknown>;
   ctes?: WithClause[];
   fromSource?: FromSource | null;
 
@@ -85,9 +91,11 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     this.hydrate = init.hydrate;
     this.resolveRelationTarget = init.resolveRelationTarget;
     this.joinHints = init.joinHints;
+    this.entityJoinHints = init.entityJoinHints;
     this.havingIr = init.havingIr;
     this.havingParams = init.havingParams;
     this.entity = init.entity;
+    this.unionAll = init.unionAll;
     this.ctes = init.ctes;
     this.fromSource = init.fromSource;
   }
@@ -115,12 +123,18 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
       hydrate: this.hydrate,
       resolveRelationTarget: this.resolveRelationTarget,
       joinHints: this.joinHints ? [...this.joinHints] : undefined,
+      entityJoinHints: this.entityJoinHints?.map((h) => ({
+        joinType: h.joinType,
+        entity: h.entity,
+        onIr: h.onIr,
+      })),
       havingIr: this.havingIr,
       havingParams: { ...this.havingParams },
       entity: this.entity,
+      unionAll: this.unionAll?.clone(),
       ctes: this.ctes?.map((c) => ({
         name: c.name,
-        kind: "simple" as const,
+        kind: c.kind,
         inner: (c.inner as QueryState<unknown>).clone(),
       })),
       fromSource: QueryState.cloneFromSource(this.fromSource),

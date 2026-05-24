@@ -141,4 +141,6 @@ export interface JoinSpec {
   foreignKeys: string[];
   relType: "many-to-one" | "one-to-one";
   joinType: JoinType;
+  /** Custom ON for entity-table joins; when set, FK columns are ignored. */
+  on?: Expr;
 }

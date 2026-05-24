@@ -153,6 +153,13 @@ export interface JoinHint {
   joinType: JoinType;
 }
 
+/** JOIN to an entity table with a custom ON predicate (not a declared relation). */
+export interface EntityJoinHint {
+  joinType: JoinType;
+  entity: { table: { _table: string; _schema: Record<string, string> } };
+  onIr: IrWhere;
+}
+
 export function isIrOrderBy(value: unknown): value is IrOrderBy {
   if (value == null || typeof value !== "object" || Array.isArray(value)) return false;
   const v = value as Record<string, unknown>;

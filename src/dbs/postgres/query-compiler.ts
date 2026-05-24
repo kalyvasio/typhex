@@ -97,7 +97,8 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
     }
     const outer = this.shiftPlaceholders(coreSql, offset);
     merged.push(...coreParams);
-    return { sql: `WITH ${parts.join(", ")} ${outer}`, params: merged };
+    const keyword = bodies.some((b) => b.recursive) ? "WITH RECURSIVE" : "WITH";
+    return { sql: `${keyword} ${parts.join(", ")} ${outer}`, params: merged };
   }
 
   private shiftPlaceholders(sql: string, delta: number): string {
@@ -118,11 +119,14 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
     }
   }
 
-  protected buildJoinClause(join: JoinSpec, mainAlias: string): string {
+  protected buildJoinClause(join: JoinSpec, mainAlias: string, onSql?: string): string {
     const kw =
       join.joinType === "cross"
         ? "INNER JOIN"
         : (BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
+    if (join.on) {
+      return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${onSql}`;
+    }
     const on = join.foreignKeys
       .map(
         (fk, i) =>

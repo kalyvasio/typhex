@@ -65,7 +65,8 @@ export class SqliteQueryCompiler extends BaseQueryCompiler {
     const parts = bodies
       .map((body) => `${this.escapeIdentifier(body.name)} AS (${body.bodySql})`)
       .join(", ");
-    return { sql: `WITH ${parts} ${coreSql}`, params: merged };
+    const keyword = bodies.some((b) => b.recursive) ? "WITH RECURSIVE" : "WITH";
+    return { sql: `${keyword} ${parts} ${coreSql}`, params: merged };
   }
 
   compileAggregate(agg: ExprAggregate, params: unknown[] = []): string {

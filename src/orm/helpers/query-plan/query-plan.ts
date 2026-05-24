@@ -182,6 +182,8 @@ export interface QueryPlan {
   ctes?: WithClause[];
   /** Outer FROM source (base table, CTE name, or inline subquery). */
   fromSource?: FromSource;
+  /** UNION ALL branch for this SELECT. */
+  unionAll?: QueryPlan;
 }
 
 /**
@@ -322,6 +324,14 @@ export class QueryPlanBuilder {
     const selectItems = isSelect ? this.buildSelectItems(classified, exprBuilder) : [];
 
     const selectAll = !this.state.selectIr || this.state.selectIr.paths.length === 0;
+    const relationJoinSpecs = joins.map(toJoinSpec);
+    const entityJoinSpecs = this.buildEntityJoins(
+      paramToAlias,
+      relationPathToAlias,
+      oneToManyExists,
+      subqueryPlans,
+      relationJoinSpecs.length,
+    );
 
     return {
       operation: this.operation,
@@ -336,7 +346,7 @@ export class QueryPlanBuilder {
       offsetNum: isSelect ? this.state.offsetNum : null,
       selectItems,
       selectAll: isSelect ? selectAll : false,
-      joins: joins.map(toJoinSpec),
+      joins: [...relationJoinSpecs, ...entityJoinSpecs],
       relationFetches: classified.relationFetches,
       joinedProjections: classified.joinedProjections,
       skipLoadFor: classified.skipLoadFor,
@@ -344,7 +354,45 @@ export class QueryPlanBuilder {
       havingParams: this.state.havingParams,
       ctes: this.state.ctes,
       fromSource: this.state.fromSource ?? undefined,
+      unionAll:
+        isSelect && this.state.unionAll
+          ? QueryPlanBuilder.build(this.state.unionAll, { kind: "select" })
+          : undefined,
     };
+  }
+
+  private buildEntityJoins(
+    paramToAlias: Record<string, string>,
+    relationPathToAlias: Record<string, string>,
+    oneToManyExists: Record<string, OneToManyExistsMeta>,
+    subqueryPlans: SubqueryPlans,
+    relationJoinCount: number,
+  ): JoinSpec[] {
+    const hints = this.state.entityJoinHints;
+    if (!hints?.length) return [];
+
+    return hints.map((hint, i) => {
+      const alias = `t${relationJoinCount + i + 1}`;
+      const joinedParam = hint.onIr.localParamNames?.[0] ?? "a";
+      const rowParam = hint.onIr.localParamNames?.[1] ?? this.rootParam;
+      const onBuilder = new ExprBuilder(
+        { ...paramToAlias, [joinedParam]: alias, [rowParam]: this.tableAlias },
+        relationPathToAlias,
+        oneToManyExists,
+        subqueryPlans,
+        new Set(Object.keys(this.state.relations ?? {})),
+      );
+      return {
+        relationKey: "",
+        alias,
+        targetTable: hint.entity.table._table,
+        targetPkColumns: [],
+        foreignKeys: [],
+        relType: "many-to-one" as const,
+        joinType: hint.joinType,
+        on: onBuilder.convert(hint.onIr.node),
+      };
+    });
   }
 
   // ─── alias / paramToAlias ───────────────────────────────────────────────────
@@ -506,6 +554,7 @@ export class QueryPlanBuilder {
     if (this.operation.kind === "select") return false;
     if (this.operation.kind === "insert" || this.operation.kind === "insertMany") return true;
     if (this.state.joinHints?.length) return false;
+    if (this.state.entityJoinHints?.length) return false;
     const relations = this.state.relations;
     if (!relations) return true;
     return this.analysis.joinRelationKeys.size === 0;
