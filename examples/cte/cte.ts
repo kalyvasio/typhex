@@ -1,5 +1,5 @@
 /**
- * CTE (WITH clause) examples: withCte, withRecursiveCte, unionAll, entity joins.
+ * CTE (WITH clause) examples: withCte, withRecursiveCte, unionAll, entity joins, update, delete.
  * Run: npx tsx examples/cte/cte.ts  (from project root)
  *   or: npm run cte  (from examples/)
  */
@@ -168,6 +168,56 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
     "6. Alice has a same-country peer:",
     withPeer.length === 1 ? withPeer[0]!.name : "(none)",
   );
+}
+
+// --- 7. UPDATE via CTE: mutate rows selected through a registered CTE ---
+
+{
+  const adults = User.query().where((u) => u.age >= 18);
+  await User.query()
+    .withCte("adults", adults)
+    .from("adults")
+    .where((u) => u.age === 35)
+    .update({ name: "Robert" });
+  // SQL:
+  // WITH "adults" AS (
+  //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //   FROM "users" AS "t0"
+  //   WHERE ("t0"."age" >= ?)
+  // )
+  // UPDATE "users" AS "t0"
+  // SET "name" = ?
+  // FROM "adults"
+  // WHERE ("t0"."id" = "adults"."id") AND ("t0"."age" = ?)
+  // params: [18, "Robert", 35]
+
+  const bob = await User.query().where((u) => u.name === "Robert").first();
+  console.log("7. Bob renamed via CTE update:", bob ? `${bob.name} (${bob.age})` : "(not found)");
+}
+
+// --- 8. DELETE via CTE: remove rows matching a filter on a CTE result ---
+
+{
+  const ukAdults = User.query().where((u) => u.country === "UK" && u.age >= 18);
+  const removed = await User.query()
+    .withCte("uk_adults", ukAdults)
+    .from("uk_adults")
+    .where((u) => u.age >= 65)
+    .delete();
+  // SQL:
+  // WITH "uk_adults" AS (
+  //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //   FROM "users" AS "t0"
+  //   WHERE (("t0"."country" = ?) AND ("t0"."age" >= ?))
+  // )
+  // DELETE FROM "users" AS "t0"
+  // WHERE EXISTS (
+  //   SELECT 1 FROM "uk_adults"
+  //   WHERE ("t0"."id" = "uk_adults"."id") AND ("t0"."age" >= ?)
+  // )
+  // params: ["UK", 18, 65]
+
+  console.log("8. UK seniors deleted via CTE:", removed);
 }
 
 await db.close();

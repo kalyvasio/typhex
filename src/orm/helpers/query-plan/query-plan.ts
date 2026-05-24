@@ -184,6 +184,8 @@ export interface QueryPlan {
   fromSource?: FromSource;
   /** UNION ALL branch for this SELECT. */
   unionAll?: QueryPlan;
+  /** Primary key columns (mutations joining to a CTE source). */
+  pkColumns: string[];
 }
 
 /**
@@ -358,6 +360,7 @@ export class QueryPlanBuilder {
         isSelect && this.state.unionAll
           ? QueryPlanBuilder.build(this.state.unionAll, { kind: "select" })
           : undefined,
+      pkColumns: this.state.pkColumns,
     };
   }
 

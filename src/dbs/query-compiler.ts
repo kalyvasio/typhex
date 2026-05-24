@@ -499,27 +499,49 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (plan.operation.kind !== "update") {
       throw new Error("compileUpdatePlan expects an update operation");
     }
+    this.assertMutationFromCte(plan);
+    const bodies = this.compileCteBodies(plan.ctes);
+    const allowedCteNames = bodies.map((c) => c.name);
+    this.assertFromCteRegistered(plan.fromSource, allowedCteNames);
+
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    return this.compileUpdate(
+    const fromCte = plan.fromSource?.kind === "cte" ? plan.fromSource.name : undefined;
+    const result = this.compileUpdate(
       plan.tableName,
       plan.operation.set,
       plan.columnNames,
       whereExpanded.sql,
       whereExpanded.params,
-      { returning: plan.operation.returning },
+      {
+        returning: plan.operation.returning,
+        fromCte,
+        tableAlias: plan.tableAlias,
+        pkColumns: plan.pkColumns,
+      },
     );
+    return this.attachCteBodies(result, bodies, 1);
   }
 
   protected compileDeletePlan(plan: QueryPlan): CompileResult {
     if (plan.operation.kind !== "delete") {
       throw new Error("compileDeletePlan expects a delete operation");
     }
+    this.assertMutationFromCte(plan);
+    const bodies = this.compileCteBodies(plan.ctes);
+    const allowedCteNames = bodies.map((c) => c.name);
+    this.assertFromCteRegistered(plan.fromSource, allowedCteNames);
+
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    return this.compileDelete(plan.tableName, whereExpanded.sql, whereExpanded.params, {
+    const fromCte = plan.fromSource?.kind === "cte" ? plan.fromSource.name : undefined;
+    const result = this.compileDelete(plan.tableName, whereExpanded.sql, whereExpanded.params, {
       returning: plan.operation.returning,
+      fromCte,
+      tableAlias: plan.tableAlias,
+      pkColumns: plan.pkColumns,
     });
+    return this.attachCteBodies(result, bodies, 1);
   }
 
   protected compileSelect(opts: CompileSelectOpts): CompileResult {
@@ -621,16 +643,35 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     columns: string[],
     whereSql: string,
     whereParams: unknown[],
-    options?: { returning?: boolean },
+    options?: {
+      returning?: boolean;
+      fromCte?: string;
+      tableAlias?: string;
+      pkColumns?: string[];
+    },
   ): CompileResult {
     const cols = Object.keys(set).filter((k) => columns.includes(k));
     if (cols.length === 0) return { sql: "", params: [] };
     const assignments = cols
       .map((c, i) => `${this.escapeIdentifier(c)} = ${this.placeholder(i + 1)}`)
       .join(", ");
-    const fixedWhere = this.fixMutationWhereAlias(table, whereSql);
+    const alias = options?.tableAlias ?? "t0";
+    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, !!options?.fromCte);
     const where = this.renumberUpdateWhereParams(fixedWhere, cols.length);
-    let sql = `UPDATE ${this.escapeIdentifier(table)} SET ${assignments} WHERE ${where}`;
+    let sql: string;
+    if (options?.fromCte && options.pkColumns?.length) {
+      const cte = this.escapeIdentifier(options.fromCte);
+      const pkJoin = options.pkColumns
+        .map(
+          (pk) =>
+            `${this.escapeIdentifier(alias)}.${this.escapeIdentifier(pk)} = ${cte}.${this.escapeIdentifier(pk)}`,
+        )
+        .join(" AND ");
+      const whereClause = where ? `${pkJoin} AND ${where}` : pkJoin;
+      sql = `UPDATE ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} SET ${assignments} FROM ${cte} WHERE ${whereClause}`;
+    } else {
+      sql = `UPDATE ${this.escapeIdentifier(table)} SET ${assignments} WHERE ${where}`;
+    }
     if (options?.returning) sql += " RETURNING *";
     return {
       sql,
@@ -643,9 +684,29 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     table: string,
     whereSql: string,
     whereParams: unknown[],
-    options?: { returning?: boolean },
+    options?: {
+      returning?: boolean;
+      fromCte?: string;
+      tableAlias?: string;
+      pkColumns?: string[];
+    },
   ): CompileResult {
-    let sql = `DELETE FROM ${this.escapeIdentifier(table)} WHERE ${this.fixMutationWhereAlias(table, whereSql)}`;
+    const alias = options?.tableAlias ?? "t0";
+    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, !!options?.fromCte);
+    let sql: string;
+    if (options?.fromCte && options.pkColumns?.length) {
+      const cte = this.escapeIdentifier(options.fromCte);
+      const pkJoin = options.pkColumns
+        .map(
+          (pk) =>
+            `${this.escapeIdentifier(alias)}.${this.escapeIdentifier(pk)} = ${cte}.${this.escapeIdentifier(pk)}`,
+        )
+        .join(" AND ");
+      const existsWhere = fixedWhere ? `${pkJoin} AND ${fixedWhere}` : pkJoin;
+      sql = `DELETE FROM ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} WHERE EXISTS (SELECT 1 FROM ${cte} WHERE ${existsWhere})`;
+    } else {
+      sql = `DELETE FROM ${this.escapeIdentifier(table)} WHERE ${fixedWhere}`;
+    }
     if (options?.returning) sql += " RETURNING *";
     return { sql, params: whereParams, returningRow: !!options?.returning };
   }
@@ -834,7 +895,33 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return whereSql.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + offset}`);
   }
 
-  protected fixMutationWhereAlias(table: string, whereSql: string): string {
+  protected assertMutationFromCte(plan: QueryPlan): void {
+    if (!plan.ctes?.length) return;
+    if (plan.operation.kind !== "update" && plan.operation.kind !== "delete") return;
+    if (plan.fromSource?.kind !== "cte") {
+      throw new Error("update/delete with CTE requires .from(cteName)");
+    }
+  }
+
+  protected assertFromCteRegistered(
+    fromSource: FromSource | undefined,
+    allowedCteNames: string[],
+  ): void {
+    if (fromSource?.kind !== "cte") return;
+    if (!allowedCteNames.includes(fromSource.name)) {
+      throw new Error(
+        `from: unknown CTE ${JSON.stringify(fromSource.name)} — register it with withCte first`,
+      );
+    }
+  }
+
+  protected fixMutationWhereAlias(
+    table: string,
+    whereSql: string,
+    alias = "t0",
+    keepAlias = false,
+  ): string {
+    if (keepAlias) return whereSql;
     return whereSql.replaceAll('"t0".', `${this.escapeIdentifier(table)}.`);
   }
 
