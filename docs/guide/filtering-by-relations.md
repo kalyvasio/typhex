@@ -133,9 +133,10 @@ const acmeCount = await Contact.query()
 ```
 
 ```sql
-SELECT COUNT(*) AS c
-FROM contacts
-LEFT JOIN companies ON companies.id = contacts.companyId
-WHERE companies.name = ?
+SELECT COUNT(*) AS c FROM (
+  SELECT ... FROM "contacts" AS "t0"
+  LEFT JOIN "companies" AS "t1" ON "t1"."id" = "t0"."companyId"
+  WHERE ("t1"."name" = ?)
+) AS "_count"
 -- params: ["Acme Corp"]
 ```

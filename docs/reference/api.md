@@ -228,6 +228,68 @@ SELECT id AS userId, name AS name FROM users
 .offset(20)
 ```
 
+### `.withCte(name, query)`
+
+Register a common table expression (`WITH name AS (…)`). The inner query is compiled when the outer query runs. Chain `.from(name)` on the outer query to read from the CTE.
+
+```ts
+const adults = User.query().where((u) => u.age >= 18);
+const rows = await User.query()
+  .withCte("adults", adults)
+  .from("adults")
+  .where((u) => u.age < 65)
+  .toArray();
+```
+
+```sql
+WITH "adults" AS (
+  SELECT "t0"."id", "t0"."name", "t0"."age"
+  FROM "users" AS "t0"
+  WHERE ("t0"."age" >= ?)
+)
+SELECT "t0"."id", "t0"."name", "t0"."age"
+FROM "adults" AS "t0"
+WHERE ("t0"."age" < ?)
+-- params: [18, 65]
+```
+
+Later CTEs can reference earlier ones via `.from("earlier_name")`:
+
+```ts
+const adults = User.query().where((u) => u.age >= 18);
+const ukAdults = User.query()
+  .from("adults")
+  .where((u) => u.country === "UK");
+await User.query()
+  .withCte("adults", adults)
+  .withCte("uk_adults", ukAdults)
+  .from("uk_adults")
+  .toArray();
+```
+
+### `.from(source?)`
+
+Set the outer `FROM` source:
+
+- omit — read from the entity's base table
+- `string` — registered CTE name from `.withCte()` on this builder
+- `QueryBuilder` — inline subquery: `FROM (SELECT …) AS t0`
+
+```ts
+const inner = User.query().where((u) => u.age >= 18);
+await User.query()
+  .from(inner)
+  .where((u) => u.country === "US")
+  .toArray();
+```
+
+```sql
+SELECT ... FROM (
+  SELECT ... FROM "users" AS "t0" WHERE ("t0"."age" >= ?)
+) AS "t0"
+WHERE ("t0"."country" = ?)
+```
+
 ### `.toArray()`
 
 Execute and return all matching rows.
@@ -248,8 +310,32 @@ const row = await query.first();
 
 Execute and return how many rows the query would produce without `limit`, `offset`, or `orderBy`. With `groupBy`, counts groups rather than base rows (Objection.js `resultSize()` semantics).
 
+The query is compiled as a subquery and wrapped:
+
+```sql
+SELECT COUNT(*) AS c FROM (<inner SELECT …>) AS "_count"
+```
+
+`limit`, `offset`, and `orderBy` are stripped from the inner SELECT; `where`, joins, `groupBy`, `having`, and CTEs are kept.
+
 ```ts
 const n = await query.count();
+await User.query().withCte("us_users", usOnly).from("us_users").count();
+```
+
+```sql
+-- simple filter
+SELECT COUNT(*) AS c FROM (
+  SELECT "t0"."id", "t0"."name" FROM "users" AS "t0" WHERE ("t0"."country" = ?)
+) AS "_count"
+
+-- with CTE
+SELECT COUNT(*) AS c FROM (
+  WITH "us_users" AS (
+    SELECT ... FROM "users" AS "t0" WHERE ("t0"."country" = ?)
+  )
+  SELECT ... FROM "us_users" AS "t0" WHERE 1=1
+) AS "_count"
 ```
 
 ### `.insert(data)`

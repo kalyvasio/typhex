@@ -54,12 +54,16 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   const usOnly = User.query().where((u) => u.country === "US");
   const total = await User.query().withCte("us_users", usOnly).from("us_users").count();
   // SQL:
-  // WITH "us_users" AS (
+  // SELECT COUNT(*) AS c FROM (
+  //   WITH "us_users" AS (
+  //     SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
+  //     FROM "users" AS "t0"
+  //     WHERE ("t0"."country" = ?)
+  //   )
   //   SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
-  //   FROM "users" AS "t0"
-  //   WHERE ("t0"."country" = ?)
-  // )
-  // SELECT COUNT(*) AS c FROM "us_users" AS "t0" WHERE 1=1
+  //   FROM "us_users" AS "t0"
+  //   WHERE 1=1
+  // ) AS "_count"
   // params: ["US"]
 
   console.log("2. Total US users (via CTE count):", total);

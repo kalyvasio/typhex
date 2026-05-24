@@ -208,7 +208,9 @@ const n = await User.query()
 
 ```sql
 SELECT ... FROM users WHERE id = ? LIMIT 1           -- params: [1]
-SELECT COUNT(*) AS c FROM users WHERE country = ?    -- params: ["US"]
+SELECT COUNT(*) AS c FROM (
+  SELECT ... FROM "users" AS "t0" WHERE ("t0"."country" = ?)
+) AS "_count"                                        -- params: ["US"]
 ```
 
 ## Update, Patch, and Delete
