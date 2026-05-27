@@ -176,8 +176,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   const adults = User.query().where((u) => u.age >= 18);
   await User.query()
     .withCte("adults", adults)
-    .from("adults")
-    .where((u) => u.age === 35)
+    .where((u) => u.age === 35 && u.id === u.adults.id)
     .update({ name: "Robert" });
   // SQL:
   // WITH "adults" AS (
@@ -188,7 +187,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   // UPDATE "users" AS "t0"
   // SET "name" = ?
   // FROM "adults"
-  // WHERE ("t0"."id" = "adults"."id") AND ("t0"."age" = ?)
+  // WHERE ("t0"."age" = ?) AND ("t0"."id" = "adults"."id")
   // params: [18, "Robert", 35]
 
   const bob = await User.query().where((u) => u.name === "Robert").first();
@@ -201,8 +200,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   const ukAdults = User.query().where((u) => u.country === "UK" && u.age >= 18);
   const removed = await User.query()
     .withCte("uk_adults", ukAdults)
-    .from("uk_adults")
-    .where((u) => u.age >= 65)
+    .where((u) => u.age >= 65 && u.id === u.uk_adults.id)
     .delete();
   // SQL:
   // WITH "uk_adults" AS (
@@ -213,7 +211,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   // DELETE FROM "users" AS "t0"
   // WHERE EXISTS (
   //   SELECT 1 FROM "uk_adults"
-  //   WHERE ("t0"."id" = "uk_adults"."id") AND ("t0"."age" >= ?)
+  //   WHERE ("t0"."age" >= ?) AND ("t0"."id" = "uk_adults"."id")
   // )
   // params: ["UK", 18, 65]
 

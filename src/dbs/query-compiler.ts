@@ -499,49 +499,46 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (plan.operation.kind !== "update") {
       throw new Error("compileUpdatePlan expects an update operation");
     }
-    this.assertMutationFromCte(plan);
-    const bodies = this.compileCteBodies(plan.ctes);
-    const allowedCteNames = bodies.map((c) => c.name);
-    this.assertFromCteRegistered(plan.fromSource, allowedCteNames);
+    const registered = this.registeredCteNames(plan);
+    const referenced = this.collectMutationCteRefs(plan, registered);
+    const fromCtes = this.orderedReferencedCtes(plan, referenced);
+    const bodies = referenced.size > 0 ? this.compileCteBodies(plan.ctes) : [];
 
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    const fromCte = plan.fromSource?.kind === "cte" ? plan.fromSource.name : undefined;
     const result = this.compileUpdate(
       plan.tableName,
-      plan.operation.set,
+      plan.updateSet ?? {},
       plan.columnNames,
       whereExpanded.sql,
       whereExpanded.params,
       {
         returning: plan.operation.returning,
-        fromCte,
+        fromCtes,
         tableAlias: plan.tableAlias,
-        pkColumns: plan.pkColumns,
+        registeredCteNames: registered,
       },
     );
-    return this.attachCteBodies(result, bodies, 1);
+    return referenced.size > 0 ? this.attachCteBodies(result, bodies, 1) : result;
   }
 
   protected compileDeletePlan(plan: QueryPlan): CompileResult {
     if (plan.operation.kind !== "delete") {
       throw new Error("compileDeletePlan expects a delete operation");
     }
-    this.assertMutationFromCte(plan);
-    const bodies = this.compileCteBodies(plan.ctes);
-    const allowedCteNames = bodies.map((c) => c.name);
-    this.assertFromCteRegistered(plan.fromSource, allowedCteNames);
+    const registered = this.registeredCteNames(plan);
+    const referenced = this.collectReferencedCteNames(plan.where, registered);
+    const fromCtes = this.orderedReferencedCtes(plan, referenced);
+    const bodies = referenced.size > 0 ? this.compileCteBodies(plan.ctes) : [];
 
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    const fromCte = plan.fromSource?.kind === "cte" ? plan.fromSource.name : undefined;
     const result = this.compileDelete(plan.tableName, whereExpanded.sql, whereExpanded.params, {
       returning: plan.operation.returning,
-      fromCte,
+      fromCtes,
       tableAlias: plan.tableAlias,
-      pkColumns: plan.pkColumns,
     });
-    return this.attachCteBodies(result, bodies, 1);
+    return referenced.size > 0 ? this.attachCteBodies(result, bodies, 1) : result;
   }
 
   protected compileSelect(opts: CompileSelectOpts): CompileResult {
@@ -639,45 +636,50 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileUpdate(
     table: string,
-    set: Record<string, unknown>,
+    updateSet: Record<string, Expr>,
     columns: string[],
     whereSql: string,
     whereParams: unknown[],
     options?: {
       returning?: boolean;
-      fromCte?: string;
+      fromCtes?: string[];
       tableAlias?: string;
-      pkColumns?: string[];
+      registeredCteNames?: Set<string>;
     },
   ): CompileResult {
-    const cols = Object.keys(set).filter((k) => columns.includes(k));
+    const cols = Object.keys(updateSet).filter((k) => columns.includes(k));
     if (cols.length === 0) return { sql: "", params: [] };
-    const assignments = cols
-      .map((c, i) => `${this.escapeIdentifier(c)} = ${this.placeholder(i + 1)}`)
-      .join(", ");
+    const cteNames = options?.registeredCteNames ?? new Set<string>();
+    const fromCtes = options?.fromCtes ?? [];
+    const useFrom = fromCtes.length > 0;
     const alias = options?.tableAlias ?? "t0";
-    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, !!options?.fromCte);
-    const where = this.renumberUpdateWhereParams(fixedWhere, cols.length);
+    const params: unknown[] = [];
+    const assignments = cols
+      .map((c) => {
+        const expr = updateSet[c]!;
+        if (expr.kind === "column" && cteNames.has(expr.alias)) {
+          return `${this.escapeIdentifier(c)} = ${this.renderColumn(expr)}`;
+        }
+        if (expr.kind === "const") {
+          params.push(expr.value);
+          return `${this.escapeIdentifier(c)} = ${this.placeholder(params.length)}`;
+        }
+        throw new Error(`compileUpdate: unsupported SET expression for column "${c}"`);
+      })
+      .join(", ");
+    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, useFrom);
+    const where = this.renumberUpdateWhereParams(fixedWhere, params.length);
+    params.push(...whereParams);
     let sql: string;
-    if (options?.fromCte && options.pkColumns?.length) {
-      const cte = this.escapeIdentifier(options.fromCte);
-      const pkJoin = options.pkColumns
-        .map(
-          (pk) =>
-            `${this.escapeIdentifier(alias)}.${this.escapeIdentifier(pk)} = ${cte}.${this.escapeIdentifier(pk)}`,
-        )
-        .join(" AND ");
-      const whereClause = where ? `${pkJoin} AND ${where}` : pkJoin;
-      sql = `UPDATE ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} SET ${assignments} FROM ${cte} WHERE ${whereClause}`;
+    if (useFrom) {
+      const fromList = fromCtes.map((n) => this.escapeIdentifier(n)).join(", ");
+      const whereClause = where ? ` WHERE ${where}` : "";
+      sql = `UPDATE ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} SET ${assignments} FROM ${fromList}${whereClause}`;
     } else {
       sql = `UPDATE ${this.escapeIdentifier(table)} SET ${assignments} WHERE ${where}`;
     }
     if (options?.returning) sql += " RETURNING *";
-    return {
-      sql,
-      params: [...cols.map((c) => set[c]), ...whereParams],
-      returningRow: !!options?.returning,
-    };
+    return { sql, params, returningRow: !!options?.returning };
   }
 
   protected compileDelete(
@@ -686,24 +688,19 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     whereParams: unknown[],
     options?: {
       returning?: boolean;
-      fromCte?: string;
+      fromCtes?: string[];
       tableAlias?: string;
-      pkColumns?: string[];
     },
   ): CompileResult {
+    const fromCtes = options?.fromCtes ?? [];
+    const useFrom = fromCtes.length > 0;
     const alias = options?.tableAlias ?? "t0";
-    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, !!options?.fromCte);
+    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, useFrom);
     let sql: string;
-    if (options?.fromCte && options.pkColumns?.length) {
-      const cte = this.escapeIdentifier(options.fromCte);
-      const pkJoin = options.pkColumns
-        .map(
-          (pk) =>
-            `${this.escapeIdentifier(alias)}.${this.escapeIdentifier(pk)} = ${cte}.${this.escapeIdentifier(pk)}`,
-        )
-        .join(" AND ");
-      const existsWhere = fixedWhere ? `${pkJoin} AND ${fixedWhere}` : pkJoin;
-      sql = `DELETE FROM ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} WHERE EXISTS (SELECT 1 FROM ${cte} WHERE ${existsWhere})`;
+    if (useFrom) {
+      const fromList = fromCtes.map((n) => this.escapeIdentifier(n)).join(", ");
+      const existsWhere = fixedWhere || "1=1";
+      sql = `DELETE FROM ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} WHERE EXISTS (SELECT 1 FROM ${fromList} WHERE ${existsWhere})`;
     } else {
       sql = `DELETE FROM ${this.escapeIdentifier(table)} WHERE ${fixedWhere}`;
     }
@@ -895,12 +892,68 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return whereSql.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + offset}`);
   }
 
-  protected assertMutationFromCte(plan: QueryPlan): void {
-    if (!plan.ctes?.length) return;
-    if (plan.operation.kind !== "update" && plan.operation.kind !== "delete") return;
-    if (plan.fromSource?.kind !== "cte") {
-      throw new Error("update/delete with CTE requires .from(cteName)");
+  protected registeredCteNames(plan: QueryPlan): Set<string> {
+    return new Set(plan.ctes?.map((c) => c.name) ?? []);
+  }
+
+  protected collectReferencedCteNames(
+    expr: Expr | null | undefined,
+    registered: Set<string>,
+  ): Set<string> {
+    const refs = new Set<string>();
+    if (!expr) return refs;
+    const walk = (node: Expr): void => {
+      switch (node.kind) {
+        case "column":
+          if (registered.has(node.alias)) refs.add(node.alias);
+          break;
+        case "binary":
+          walk(node.left);
+          walk(node.right);
+          break;
+        case "unary":
+          walk(node.operand);
+          break;
+        case "in":
+          walk(node.left);
+          if (node.right.kind === "subquery" && node.right.plan.where) {
+            walk(node.right.plan.where);
+          }
+          break;
+        case "call":
+          walk(node.receiver);
+          for (const arg of node.args) walk(arg);
+          break;
+        case "exists":
+          walk(node.predicate);
+          break;
+        case "aggregate":
+          if (node.arg) walk(node.arg);
+          break;
+        case "subquery":
+          if (node.plan.where) walk(node.plan.where);
+          break;
+        case "const":
+        case "param":
+          break;
+      }
+    };
+    walk(expr);
+    return refs;
+  }
+
+  protected orderedReferencedCtes(plan: QueryPlan, referenced: Set<string>): string[] {
+    return (plan.ctes ?? []).map((c) => c.name).filter((n) => referenced.has(n));
+  }
+
+  protected collectMutationCteRefs(plan: QueryPlan, registered: Set<string>): Set<string> {
+    const refs = this.collectReferencedCteNames(plan.where, registered);
+    for (const expr of Object.values(plan.updateSet ?? {})) {
+      for (const name of this.collectReferencedCteNames(expr, registered)) {
+        refs.add(name);
+      }
     }
+    return refs;
   }
 
   protected assertFromCteRegistered(

@@ -22,7 +22,7 @@ function basePlan(table: string, operation: QueryOperation, overrides: Partial<Q
     skipLoadFor: new Set(),
     whereParams: {},
     havingParams: {},
-    subqueryParams: {},
+    pkColumns: [],
     ...overrides,
   };
 }
@@ -62,10 +62,14 @@ export function updatePlan(
   where: Expr,
   returning?: boolean,
 ): QueryPlan {
+  const updateSet: Record<string, Expr> = {};
+  for (const [key, value] of Object.entries(set)) {
+    updateSet[key] = { kind: "const", value };
+  }
   return basePlan(
     table,
     { kind: "update", set, returning },
-    { columnNames, where },
+    { columnNames, where, updateSet },
   );
 }
 

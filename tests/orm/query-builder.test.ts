@@ -616,34 +616,48 @@ describe("QueryBuilder", () => {
       ).toThrow("Failed to parse innerJoin ON predicate:");
     });
 
-    it("update with CTE requires from(cteName) and emits WITH … UPDATE … FROM", async () => {
+    it("update with CTE correlates via where and emits WITH … UPDATE … FROM", async () => {
       (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       await newBuilder(db)
         .withCte("adults", inner)
-        .from("adults")
-        .where(whereColumnEq("age", 30))
+        .where((u: { id: number; age: number; adults: { id: number } }) =>
+          u.age === 30 && u.id === u.adults.id,
+        )
         .update({ name: "Senior" });
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toMatch(/^WITH/);
       expect(sql).toContain("UPDATE");
       expect(sql).toContain('FROM "adults"');
+      expect(sql).toContain('"adults"."id"');
     });
 
-    it("update with CTE throws without from(cteName)", async () => {
-      const inner = newBuilder(db).where(whereColumnEq("age", 21));
-      await expect(
-        newBuilder(db).withCte("adults", inner).update({ name: "Senior" }),
-      ).rejects.toThrow("update/delete with CTE requires .from(cteName)");
-    });
-
-    it("delete with CTE requires from(cteName) and emits WITH … DELETE … EXISTS", async () => {
+    it("update with SET from CTE column via lambda", async () => {
       (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       await newBuilder(db)
         .withCte("adults", inner)
-        .from("adults")
-        .where(whereColumnEq("age", 30))
+        .where((u: { id: number; adults: { name: string } }) => u.id === u.adults.id)
+        .update((u: { adults: { name: string } }) => ({ name: u.adults.name }));
+      const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"name" = "adults"."name"');
+    });
+
+    it("update throws after from(cteName) on a SELECT chain", async () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await expect(
+        newBuilder(db).withCte("adults", inner).from("adults").update({ name: "Senior" }),
+      ).rejects.toThrow("update cannot run after .from(cteName)");
+    });
+
+    it("delete with CTE correlates via where and emits WITH … DELETE … EXISTS", async () => {
+      (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await newBuilder(db)
+        .withCte("adults", inner)
+        .where((u: { id: number; age: number; adults: { id: number } }) =>
+          u.age === 30 && u.id === u.adults.id,
+        )
         .delete();
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toMatch(/^WITH/);
@@ -652,10 +666,10 @@ describe("QueryBuilder", () => {
       expect(sql).toContain("EXISTS");
     });
 
-    it("delete with CTE throws without from(cteName)", async () => {
+    it("delete throws after from(cteName) on a SELECT chain", async () => {
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
-      await expect(newBuilder(db).withCte("adults", inner).delete()).rejects.toThrow(
-        "update/delete with CTE requires .from(cteName)",
+      await expect(newBuilder(db).withCte("adults", inner).from("adults").delete()).rejects.toThrow(
+        "delete cannot run after .from(cteName)",
       );
     });
   });

@@ -186,6 +186,8 @@ export interface QueryPlan {
   unionAll?: QueryPlan;
   /** Primary key columns (mutations joining to a CTE source). */
   pkColumns: string[];
+  /** Resolved SET expressions for UPDATE (literals and/or CTE column refs). */
+  updateSet?: Record<string, Expr>;
 }
 
 /**
@@ -309,12 +311,14 @@ export class QueryPlanBuilder {
 
     const classified = isSelect ? this.classifySelect() : EMPTY_CLASSIFIED;
 
+    const cteNames = new Set((this.state.ctes ?? []).map((c) => c.name));
     const exprBuilder = new ExprBuilder(
       paramToAlias,
       relationPathToAlias,
       oneToManyExists,
       subqueryPlans,
       new Set(Object.keys(this.state.relations ?? {})),
+      cteNames,
     );
 
     const whereExpr =
@@ -361,7 +365,21 @@ export class QueryPlanBuilder {
           ? QueryPlanBuilder.build(this.state.unionAll, { kind: "select" })
           : undefined,
       pkColumns: this.state.pkColumns,
+      updateSet: this.buildUpdateSet(exprBuilder),
     };
+  }
+
+  private buildUpdateSet(exprBuilder: ExprBuilder): Record<string, Expr> | undefined {
+    if (this.operation.kind !== "update") return undefined;
+    const out: Record<string, Expr> = {};
+    const op = this.operation;
+    for (const [key, value] of Object.entries(op.set ?? {})) {
+      out[key] = { kind: "const", value };
+    }
+    for (const [key, ir] of Object.entries(op.setIr ?? {})) {
+      out[key] = exprBuilder.convert(ir);
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
   }
 
   private buildEntityJoins(
@@ -384,6 +402,7 @@ export class QueryPlanBuilder {
         oneToManyExists,
         subqueryPlans,
         new Set(Object.keys(this.state.relations ?? {})),
+        new Set((this.state.ctes ?? []).map((c) => c.name)),
       );
       return {
         relationKey: "",
