@@ -184,7 +184,7 @@ export interface QueryPlan {
   fromSource?: FromSource;
   /** UNION ALL branch for this SELECT. */
   unionAll?: QueryPlan;
-  /** Primary key columns (mutations joining to a CTE source). */
+  /** Primary key columns of the entity table. */
   pkColumns: string[];
   /** Resolved SET expressions for UPDATE (literals and/or CTE column refs). */
   updateSet?: Record<string, Expr>;

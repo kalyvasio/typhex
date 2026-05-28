@@ -682,11 +682,10 @@ export function parseArrowToUpdateSet(
   fn: (...args: any[]) => Record<string, unknown>,
 ): Record<string, IrNode> {
   const src = fn.toString();
-  const idx = src.indexOf("=>");
-  if (idx === -1) throw new Error("update lambda must be an arrow function");
+  const body = extractArrowBody(src);
+  if (!body) throw new Error("update lambda must be an arrow function");
 
-  const body = src.slice(idx + 2).trim();
-  const paramName = src.slice(0, idx).replaceAll(/[()]/g, "").trim() || DEFAULT_ROW_PARAM;
+  const paramName = inferParamNames(src)[0] ?? DEFAULT_ROW_PARAM;
   const expr = parseExpressionSource(body.startsWith("(") ? body : `(${body})`);
   if (expr.type !== "ObjectExpression") {
     throw new Error("update lambda must return an object literal");

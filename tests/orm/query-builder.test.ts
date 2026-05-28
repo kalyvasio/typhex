@@ -643,6 +643,54 @@ describe("QueryBuilder", () => {
       expect(sql).toContain('"name" = "adults"."name"');
     });
 
+    it("update with SET from entity column via lambda", async () => {
+      (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
+      await newBuilder(db)
+        .where(whereColumnEq("id", 1))
+        .update((u: { name: string }) => ({ name: u.name }));
+      const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"name" = "t0"."name"');
+    });
+
+    it("update with empty SET and CTE in where does not run SQL", async () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      const changes = await newBuilder(db)
+        .withCte("adults", inner)
+        .where((u: { id: number; adults: { id: number } }) => u.id === u.adults.id)
+        .update({});
+      expect(changes).toBe(0);
+      expect(db.run).not.toHaveBeenCalled();
+    });
+
+    it("withCte throws when CTE name matches a relation key", () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      const q = new QueryBuilder({
+        tableName: "users",
+        columnNames: ["id", "name", "age", "country"],
+        qe: db,
+        pkColumns: ["id"],
+        whereIr: null,
+        whereParams: {},
+        subqueryParams: {},
+        orderBy: [],
+        havingIr: null,
+        havingParams: {},
+        limitNum: null,
+        offsetNum: null,
+        selectIr: null,
+        relations: {
+          adults: {
+            _relType: "one-to-many",
+            _target: () => ({}),
+            _options: { foreignKey: "userId" },
+          },
+        } as never,
+      });
+      expect(() => q.withCte("adults", inner)).toThrow(
+        'CTE name "adults" conflicts with relation "adults"',
+      );
+    });
+
     it("update throws after from(cteName) on a SELECT chain", async () => {
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       await expect(

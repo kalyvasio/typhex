@@ -289,10 +289,19 @@ export class QueryBuilder<
    * Register a common table expression: `WITH name AS (<subquery>)`.
    * The inner query is compiled when the outer query runs.
    */
+  protected assertCteNameDoesNotCollideWithRelation(name: string): void {
+    if (name in (this.state.relations ?? {})) {
+      throw new Error(
+        `[typhex] CTE name ${JSON.stringify(name)} conflicts with relation "${name}"`,
+      );
+    }
+  }
+
   withCte<const N extends string, IC extends AnyEntityClass, IT>(
     name: N,
     subquery: QueryBuilder<IC, IT>,
   ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
+    this.assertCteNameDoesNotCollideWithRelation(name);
     const next = this.clone();
     next.state.ctes = [
       ...(next.state.ctes ?? []),
@@ -309,6 +318,7 @@ export class QueryBuilder<
     name: N,
     subquery: QueryBuilder<IC, IT>,
   ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
+    this.assertCteNameDoesNotCollideWithRelation(name);
     const next = this.clone();
     next.state.ctes = [
       ...(next.state.ctes ?? []),

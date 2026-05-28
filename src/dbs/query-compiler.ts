@@ -502,7 +502,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const registered = this.registeredCteNames(plan);
     const referenced = this.collectMutationCteRefs(plan, registered);
     const fromCtes = this.orderedReferencedCtes(plan, referenced);
-    const bodies = referenced.size > 0 ? this.compileCteBodies(plan.ctes) : [];
+    const referencedCtes = (plan.ctes ?? []).filter((c) => referenced.has(c.name));
+    const bodies = referenced.size > 0 ? this.compileCteBodies(referencedCtes) : [];
 
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
@@ -519,7 +520,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
         registeredCteNames: registered,
       },
     );
-    return referenced.size > 0 ? this.attachCteBodies(result, bodies, 1) : result;
+    if (!result.sql) return result;
+    return bodies.length > 0 ? this.attachCteBodies(result, bodies, 1) : result;
   }
 
   protected compileDeletePlan(plan: QueryPlan): CompileResult {
@@ -529,7 +531,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const registered = this.registeredCteNames(plan);
     const referenced = this.collectReferencedCteNames(plan.where, registered);
     const fromCtes = this.orderedReferencedCtes(plan, referenced);
-    const bodies = referenced.size > 0 ? this.compileCteBodies(plan.ctes) : [];
+    const referencedCtes = (plan.ctes ?? []).filter((c) => referenced.has(c.name));
+    const bodies = referenced.size > 0 ? this.compileCteBodies(referencedCtes) : [];
 
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
@@ -538,7 +541,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       fromCtes,
       tableAlias: plan.tableAlias,
     });
-    return referenced.size > 0 ? this.attachCteBodies(result, bodies, 1) : result;
+    if (!result.sql) return result;
+    return bodies.length > 0 ? this.attachCteBodies(result, bodies, 1) : result;
   }
 
   protected compileSelect(opts: CompileSelectOpts): CompileResult {
@@ -657,8 +661,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const assignments = cols
       .map((c) => {
         const expr = updateSet[c]!;
-        if (expr.kind === "column" && cteNames.has(expr.alias)) {
-          return `${this.escapeIdentifier(c)} = ${this.renderColumn(expr)}`;
+        if (expr.kind === "column") {
+          if (cteNames.has(expr.alias) || expr.alias === alias) {
+            return `${this.escapeIdentifier(c)} = ${this.renderColumn(expr)}`;
+          }
         }
         if (expr.kind === "const") {
           params.push(expr.value);
@@ -956,18 +962,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return refs;
   }
 
-  protected assertFromCteRegistered(
-    fromSource: FromSource | undefined,
-    allowedCteNames: string[],
-  ): void {
-    if (fromSource?.kind !== "cte") return;
-    if (!allowedCteNames.includes(fromSource.name)) {
-      throw new Error(
-        `from: unknown CTE ${JSON.stringify(fromSource.name)} — register it with withCte first`,
-      );
-    }
-  }
-
   protected fixMutationWhereAlias(
     table: string,
     whereSql: string,
@@ -975,7 +969,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     keepAlias = false,
   ): string {
     if (keepAlias) return whereSql;
-    return whereSql.replaceAll('"t0".', `${this.escapeIdentifier(table)}.`);
+    const aliasRef = `${this.escapeIdentifier(alias)}.`;
+    return whereSql.replaceAll(aliasRef, `${this.escapeIdentifier(table)}.`);
   }
 
   protected compileCreateTable(
