@@ -1,10 +1,13 @@
 /**
  * CTE (WITH clause) examples: withCte, withRecursiveCte, unionAll, entity joins, update, delete.
- * Section 3b uses a withCte callback that correlates via ctes.* in a single-arg where — transformer-only.
  *
- * Build and run: npm run cte  (from examples/)
+ * Requires the Typhex transformer (compiles .where(arrow) to IR). From examples/:
+ *   npm install && npm run cte
+ *
+ * Section 3b: withCte callback + ctes.* in a single-arg where (transformer captures closure).
+ * Sections 7–8: two-arg where (u, ctes) for CTE correlation at runtime without closure capture.
+ *
  * Debug SQL: npm run cte:debug  (TYPHEX_DEBUG=1)
- * Validate documented SQL: npm run cte:validate-sql
  */
 
 import { Db, Entity, createSqliteDriver } from "typhex";
@@ -104,7 +107,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   );
 }
 
-// --- 3b. Later CTE: base table WHERE + prior CTE (withCte callback) ---
+// --- 3b. Later CTE: base table WHERE + registered CTE (withCte callback) ---
 // Inner query: FROM users, correlate to "adults" in WHERE (not .from("adults")).
 
 {

@@ -65,6 +65,8 @@ export function selectPlan(opts: {
     skipLoadFor: new Set(),
     whereParams: opts.whereParams ?? {},
     havingParams: opts.havingParams ?? {},
+    pkColumns: [],
+    referencedRegisteredCtes: [],
   };
 }
 

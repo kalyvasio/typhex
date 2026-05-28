@@ -434,9 +434,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileSelectPlan(plan: QueryPlan, options: CompileQueryOpts): CompileResult {
     const prepared = this.prepareReadPlan(plan, options);
-    const registered = this.registeredCteNames(plan);
-    const referenced = this.collectSelectCteRefs(plan, registered);
-    const fromCtes = this.orderedReferencedCtes(plan, referenced);
+    const fromCtes = plan.referencedRegisteredCtes;
     const fromSource = plan.fromSource ?? { kind: "table" as const };
     let fromClause = prepared.fromResolved.fromClause;
     if (fromSource.kind === "table" && fromCtes.length > 0) {
@@ -508,10 +506,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       throw new Error("compileUpdatePlan expects an update operation");
     }
     const registered = this.registeredCteNames(plan);
-    const referenced = this.collectMutationCteRefs(plan, registered);
-    const fromCtes = this.orderedReferencedCtes(plan, referenced);
-    const referencedCtes = (plan.ctes ?? []).filter((c) => referenced.has(c.name));
-    const bodies = referenced.size > 0 ? this.compileCteBodies(referencedCtes) : [];
+    const fromCtes = plan.referencedRegisteredCtes;
+    const referencedCtes = (plan.ctes ?? []).filter((c) => fromCtes.includes(c.name));
+    const bodies = fromCtes.length > 0 ? this.compileCteBodies(referencedCtes) : [];
 
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
@@ -536,11 +533,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (plan.operation.kind !== "delete") {
       throw new Error("compileDeletePlan expects a delete operation");
     }
-    const registered = this.registeredCteNames(plan);
-    const referenced = this.collectReferencedCteNames(plan.where, registered);
-    const fromCtes = this.orderedReferencedCtes(plan, referenced);
-    const referencedCtes = (plan.ctes ?? []).filter((c) => referenced.has(c.name));
-    const bodies = referenced.size > 0 ? this.compileCteBodies(referencedCtes) : [];
+    const fromCtes = plan.referencedRegisteredCtes;
+    const referencedCtes = (plan.ctes ?? []).filter((c) => fromCtes.includes(c.name));
+    const bodies = fromCtes.length > 0 ? this.compileCteBodies(referencedCtes) : [];
 
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
@@ -917,83 +912,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ...(plan.inScopeRegisteredCteNames ?? []),
       ...(plan.ctes?.map((c) => c.name) ?? []),
     ]);
-  }
-
-  protected collectReferencedCteNames(
-    expr: Expr | null | undefined,
-    registered: Set<string>,
-  ): Set<string> {
-    const refs = new Set<string>();
-    if (!expr) return refs;
-    const walk = (node: Expr): void => {
-      switch (node.kind) {
-        case "column":
-          if (registered.has(node.alias)) refs.add(node.alias);
-          break;
-        case "binary":
-          walk(node.left);
-          walk(node.right);
-          break;
-        case "unary":
-          walk(node.operand);
-          break;
-        case "in":
-          walk(node.left);
-          if (node.right.kind === "subquery" && node.right.plan.where) {
-            walk(node.right.plan.where);
-          }
-          break;
-        case "call":
-          walk(node.receiver);
-          for (const arg of node.args) walk(arg);
-          break;
-        case "exists":
-          walk(node.predicate);
-          break;
-        case "aggregate":
-          if (node.arg) walk(node.arg);
-          break;
-        case "subquery":
-          if (node.plan.where) walk(node.plan.where);
-          break;
-        case "const":
-        case "param":
-          break;
-      }
-    };
-    walk(expr);
-    return refs;
-  }
-
-  protected orderedReferencedCtes(plan: QueryPlan, referenced: Set<string>): string[] {
-    const order = [
-      ...(plan.inScopeRegisteredCteNames ?? []),
-      ...(plan.ctes?.map((c) => c.name) ?? []),
-    ];
-    const seen = new Set<string>();
-    return order.filter((n) => {
-      if (!referenced.has(n) || seen.has(n)) return false;
-      seen.add(n);
-      return true;
-    });
-  }
-
-  protected collectSelectCteRefs(plan: QueryPlan, registered: Set<string>): Set<string> {
-    const refs = this.collectReferencedCteNames(plan.where, registered);
-    for (const name of this.collectReferencedCteNames(plan.having, registered)) {
-      refs.add(name);
-    }
-    return refs;
-  }
-
-  protected collectMutationCteRefs(plan: QueryPlan, registered: Set<string>): Set<string> {
-    const refs = this.collectReferencedCteNames(plan.where, registered);
-    for (const expr of Object.values(plan.updateSet ?? {})) {
-      for (const name of this.collectReferencedCteNames(expr, registered)) {
-        refs.add(name);
-      }
-    }
-    return refs;
   }
 
   protected fixMutationWhereAlias(

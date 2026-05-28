@@ -13,7 +13,7 @@ const mockSchema = {
 } as const;
 
 // Used only in `typeof` for QueryBuilder generics (value reference for Entity()).
- 
+
 const MockEntity = Entity("mock", mockSchema);
 
 function newBuilder(db: MockDb, columnNames = ["id", "name", "age"]) {
@@ -704,7 +704,7 @@ describe("QueryBuilder", () => {
       ).rejects.toThrow("update cannot run after .from(cteName)");
     });
 
-    it("withCte callback correlates from base table to registered CTE in WHERE", async () => {
+    it("withCte callback sets inScopeRegisteredCteNames; two-arg where correlates base table to CTE", async () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
       const adults = newBuilder(db).where(whereColumnEq("age", 21));
       const ukBody = newBuilder(db);

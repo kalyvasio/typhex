@@ -5,6 +5,7 @@
 import type { WithClause } from "../dbs/types.js";
 import type {
   IrHaving,
+  IrNode,
   IrOrderBy,
   IrSelect,
   IrWhere,
@@ -55,6 +56,10 @@ export interface QueryStateInit<T = unknown> {
   /** Registered sibling CTE names in scope (bodies built via `withCte` callback). */
   inScopeRegisteredCteNames?: string[];
   fromSource?: FromSource | null;
+  /** Parsed SET column IR for UPDATE (set before plan; not cloned by default). */
+  updateSetIr?: Record<string, IrNode>;
+  /** Parsed VALUES column IR for INSERT / upsert (reserved; set before plan when supported). */
+  insertIr?: Record<string, IrNode>;
 }
 
 /** @internal — internal builder state */
@@ -84,6 +89,8 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
   ctes?: WithClause[];
   inScopeRegisteredCteNames?: string[];
   fromSource?: FromSource | null;
+  updateSetIr?: Record<string, IrNode>;
+  insertIr?: Record<string, IrNode>;
 
   constructor(init: QueryStateInit<T>) {
     this.tableName = init.tableName;
@@ -109,6 +116,8 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     this.ctes = init.ctes;
     this.inScopeRegisteredCteNames = init.inScopeRegisteredCteNames;
     this.fromSource = init.fromSource;
+    this.updateSetIr = init.updateSetIr;
+    this.insertIr = init.insertIr;
   }
 
   /** Deep-clone mutable query state bags and nested CTE / subquery bodies. */

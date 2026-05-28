@@ -29,7 +29,6 @@
     "build:cte": "cd .. && npm run build && cd examples && npx ts-patch install --silent && npx tsc -p tsconfig.cte.transformer.json",
     "cte": "npm run build:cte && npm run start:cte",
     "cte:debug": "npm run build:cte && TYPHEX_DEBUG=1 npm run start:cte",
-    "cte:validate-sql": "npm run build:cte && node cte/validate-documented-sql.mjs",
     "transformer": "npm run build:transformer && npm run start:transformer",
     "subqueries": "npm run build:transformer && npm run start:subqueries"
   }

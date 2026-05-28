@@ -85,14 +85,6 @@ export class QueryBuilder<
     return new QueryBuilder(this.state.clone());
   }
 
-  protected assertMutationNotFromCte(op: "update" | "delete"): void {
-    if (this.state.fromSource?.kind === "cte") {
-      throw new Error(
-        `${op} cannot run after .from(cteName) on a SELECT chain; call .from() to reset to the base table`,
-      );
-    }
-  }
-
   /** @internal — Print the SQL and parameters to stdout when TYPHEX_DEBUG is enabled. */
   protected logSql(sql: string, params: unknown[]): void {
     console.log("[typhex]", sql);
@@ -274,18 +266,6 @@ export class QueryBuilder<
     return this;
   }
 
-  /**
-   * Register a common table expression: `WITH name AS (<subquery>)`.
-   * The inner query is compiled when the outer query runs.
-   */
-  protected assertCteNameDoesNotCollideWithRelation(name: string): void {
-    if (name in (this.state.relations ?? {})) {
-      throw new Error(
-        `[typhex] CTE name ${JSON.stringify(name)} conflicts with relation "${name}"`,
-      );
-    }
-  }
-
   withCte<const N extends string, IC extends AnyEntityClass, IT>(
     name: N,
     subquery: QueryBuilder<IC, IT, any, any>,
@@ -300,7 +280,6 @@ export class QueryBuilder<
       | QueryBuilder<IC, IT, any, any>
       | ((ctes: RegisteredCtes<Ctes>) => QueryBuilder<IC, IT, any, any>),
   ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
-    this.assertCteNameDoesNotCollideWithRelation(name);
     const next = this.clone();
     const registeredCteNames = (next.state.ctes ?? []).map((c) => c.name);
     const inner =
@@ -323,7 +302,6 @@ export class QueryBuilder<
     name: N,
     subquery: QueryBuilder<IC, IT, any, any>,
   ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
-    this.assertCteNameDoesNotCollideWithRelation(name);
     const next = this.clone();
     next.state.ctes = [
       ...(next.state.ctes ?? []),
@@ -516,10 +494,10 @@ export class QueryBuilder<
   async update(
     setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
   ): Promise<number> {
-    this.assertMutationNotFromCte("update");
     const resolved = resolveUpdateSet(
       setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
     );
+    this.state.updateSetIr = resolved.setIr;
     const { qe } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
     const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "update", ...resolved }));
@@ -539,10 +517,10 @@ export class QueryBuilder<
   async updateReturning(
     setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
   ): Promise<EntityInstance<C>[]> {
-    this.assertMutationNotFromCte("update");
     const resolved = resolveUpdateSet(
       setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
     );
+    this.state.updateSetIr = resolved.setIr;
     const { qe, hydrate } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
     const { sql, params } = compiler.compilePlan(
@@ -557,7 +535,6 @@ export class QueryBuilder<
 
   /** Execute a DELETE for the current WHERE clause and return the number of affected rows. */
   async delete(): Promise<number> {
-    this.assertMutationNotFromCte("delete");
     const { qe } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
     const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "delete" }));
@@ -568,7 +545,6 @@ export class QueryBuilder<
 
   /** DELETE ... RETURNING * (when supported). */
   async deleteReturning(): Promise<EntityInstance<C>[]> {
-    this.assertMutationNotFromCte("delete");
     const { qe, hydrate } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
     const { sql, params } = compiler.compilePlan(
@@ -648,6 +624,7 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     const cols = columnNames.filter((c) => row[c] !== undefined);
     const params = cols.map((c) => row[c]);
     const pkCols = this.state.pkColumns;
+    this.state.insertIr = undefined;
 
     const compiled = compiler.compilePlan(
       this.buildPlan({
@@ -691,6 +668,7 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     // Collect columns in entity-defined order, keeping any column present in at least one row.
     const cols = columnNames.filter((c) => rows.some((r) => r[c] !== undefined));
     const paramRows = rows.map((r) => cols.map((c) => r[c] ?? null));
+    this.state.insertIr = undefined;
 
     const compiled = compiler.compilePlan(
       this.buildPlan({
