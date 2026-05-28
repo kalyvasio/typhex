@@ -50,7 +50,7 @@ function wrapUnionAllBranchSql(
   sql: string,
   plan: Pick<QueryPlan, "orderBy" | "limitNum" | "offsetNum">,
 ): string {
-  const needsParens = plan.orderBy.length > 0 || plan.limitNum != null || plan.offsetNum != null; 
+  const needsParens = plan.orderBy.length > 0 || plan.limitNum != null || plan.offsetNum != null;
   return needsParens ? `(${sql})` : sql;
 }
 
@@ -434,6 +434,15 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileSelectPlan(plan: QueryPlan, options: CompileQueryOpts): CompileResult {
     const prepared = this.prepareReadPlan(plan, options);
+    const registered = this.registeredCteNames(plan);
+    const referenced = this.collectSelectCteRefs(plan, registered);
+    const fromCtes = this.orderedReferencedCtes(plan, referenced);
+    const fromSource = plan.fromSource ?? { kind: "table" as const };
+    let fromClause = prepared.fromResolved.fromClause;
+    if (fromSource.kind === "table" && fromCtes.length > 0) {
+      const extra = fromCtes.map((n) => this.escapeIdentifier(n)).join(", ");
+      fromClause = `${fromClause}, ${extra}`;
+    }
     const selectListExpanded = prepared.expand(
       this.compileSelectListExpr(
         plan.selectItems,
@@ -447,11 +456,14 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const havingExpanded = plan.having
       ? prepared.expand(this.compileWhereExpr(plan.having), plan.havingParams)
       : null;
-    const orderByExpanded = prepared.expand(this.compileOrderByExpr(plan.orderBy), plan.whereParams);
+    const orderByExpanded = prepared.expand(
+      this.compileOrderByExpr(plan.orderBy),
+      plan.whereParams,
+    );
     let result = this.compileSelect({
       table: plan.tableName,
       tableAlias: plan.tableAlias,
-      fromClause: prepared.fromResolved.fromClause,
+      fromClause,
       fromParams: prepared.fromResolved.fromParams,
       joinParams: prepared.joinParams,
       selectList: selectListExpanded.sql,
@@ -487,11 +499,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
     const wrapped = options.skipCteRender
       ? result
-      : this.attachCteBodies(
-          result,
-          prepared.compiledCteBodies,
-          options.paramStartIndex ?? 1,
-        );
+      : this.attachCteBodies(result, prepared.compiledCteBodies, options.paramStartIndex ?? 1);
     return options.wrap ? { sql: `(${wrapped.sql})`, params: wrapped.params } : wrapped;
   }
 
@@ -553,7 +561,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ...opts.whereParams,
     ];
     const groupByClause =
-      opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${this.compileGroupBy(opts.groupBy)}` : "";
+      opts.groupBy && opts.groupBy.length > 0
+        ? ` GROUP BY ${this.compileGroupBy(opts.groupBy)}`
+        : "";
     let havingClause = "";
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
@@ -660,7 +670,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const params: unknown[] = [];
     const assignments = cols
       .map((c) => {
-        const expr = updateSet[c]!;
+        const expr = updateSet[c];
         if (expr.kind === "column") {
           if (cteNames.has(expr.alias) || expr.alias === alias) {
             return `${this.escapeIdentifier(c)} = ${this.renderColumn(expr)}`;
@@ -865,9 +875,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     onConflict: OnConflictClause,
     insertColumns: string[],
   ): string {
-    const conflictCols = onConflict.conflictColumns
-      .map((c) => this.escapeIdentifier(c))
-      .join(", ");
+    const conflictCols = onConflict.conflictColumns.map((c) => this.escapeIdentifier(c)).join(", ");
     if (onConflict.action === "nothing") {
       return `${baseSql} ON CONFLICT (${conflictCols}) DO NOTHING`;
     }
@@ -875,7 +883,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ? onConflict.updateColumns
       : insertColumns.filter((c) => !onConflict.conflictColumns.includes(c));
     const setClauses = updateCols
-      .map((c) => `${this.escapeIdentifier(c)} = ${this.excludedTableName()}.${this.escapeIdentifier(c)}`)
+      .map(
+        (c) =>
+          `${this.escapeIdentifier(c)} = ${this.excludedTableName()}.${this.escapeIdentifier(c)}`,
+      )
       .join(", ");
     return `${baseSql} ON CONFLICT (${conflictCols}) DO UPDATE SET ${setClauses}`;
   }
@@ -888,7 +899,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return hasPk;
   }
 
-  protected renderInsertManyValue(value: unknown, paramIndex: number): { sql: string; params: unknown[] } {
+  protected renderInsertManyValue(
+    value: unknown,
+    paramIndex: number,
+  ): { sql: string; params: unknown[] } {
     if (value === SQL_DEFAULT) return { sql: "DEFAULT", params: [] };
     return { sql: this.placeholder(paramIndex), params: [value] };
   }
@@ -899,7 +913,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected registeredCteNames(plan: QueryPlan): Set<string> {
-    return new Set(plan.ctes?.map((c) => c.name) ?? []);
+    return new Set([
+      ...(plan.inScopeRegisteredCteNames ?? []),
+      ...(plan.ctes?.map((c) => c.name) ?? []),
+    ]);
   }
 
   protected collectReferencedCteNames(
@@ -949,7 +966,24 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected orderedReferencedCtes(plan: QueryPlan, referenced: Set<string>): string[] {
-    return (plan.ctes ?? []).map((c) => c.name).filter((n) => referenced.has(n));
+    const order = [
+      ...(plan.inScopeRegisteredCteNames ?? []),
+      ...(plan.ctes?.map((c) => c.name) ?? []),
+    ];
+    const seen = new Set<string>();
+    return order.filter((n) => {
+      if (!referenced.has(n) || seen.has(n)) return false;
+      seen.add(n);
+      return true;
+    });
+  }
+
+  protected collectSelectCteRefs(plan: QueryPlan, registered: Set<string>): Set<string> {
+    const refs = this.collectReferencedCteNames(plan.where, registered);
+    for (const name of this.collectReferencedCteNames(plan.having, registered)) {
+      refs.add(name);
+    }
+    return refs;
   }
 
   protected collectMutationCteRefs(plan: QueryPlan, registered: Set<string>): Set<string> {
@@ -987,7 +1021,13 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileRecreateDroppedTable(
     table: string,
-    columnInfos: Array<{ name: string; type: string; notnull: number; dflt_value: string | null; pk: number }>,
+    columnInfos: Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>,
   ): string {
     const cols = columnInfos.map(
       (c) => `  ${this.escapeIdentifier(c.name)} ${this.reconstructColDef(c)}`,

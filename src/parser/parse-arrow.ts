@@ -685,7 +685,8 @@ export function parseArrowToUpdateSet(
   const body = extractArrowBody(src);
   if (!body) throw new Error("update lambda must be an arrow function");
 
-  const paramName = inferParamNames(src)[0] ?? DEFAULT_ROW_PARAM;
+  const paramNames = inferParamNames(src);
+  const paramName = paramNames[0] ?? DEFAULT_ROW_PARAM;
   const expr = parseExpressionSource(body.startsWith("(") ? body : `(${body})`);
   if (expr.type !== "ObjectExpression") {
     throw new Error("update lambda must return an object literal");
@@ -708,10 +709,10 @@ export function parseArrowToUpdateSet(
     const value = raw.value as N | undefined;
     if (!value) throw new Error(`update: missing value for "${keyName}"`);
     if (value.type === "MemberExpression") {
-      const resolved = resolveMemberPath(value, [paramName]);
+      const resolved = resolveMemberPath(value, paramNames);
       if (!resolved || resolved.path.length === 0) {
         throw new Error(
-          `update "${keyName}": expected ${paramName}.<column> or ${paramName}.<cte>.<column>`,
+          `update "${keyName}": expected ${paramName}.<column> or <ctes>.<cte>.<column>`,
         );
       }
       result[keyName] = { kind: "member", param: resolved.param, path: resolved.path };

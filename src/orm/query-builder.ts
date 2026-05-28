@@ -34,11 +34,7 @@ import {
   getQueryCompilerOrThrow,
 } from "./helpers/query-plan/query-plan.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
-import {
-  QueryState,
-  type CapturedSubquery,
-  type QueryStateInit,
-} from "./query-state.js";
+import { QueryState, type CapturedSubquery, type QueryStateInit } from "./query-state.js";
 
 export { QueryState } from "./query-state.js";
 export type { CapturedSubquery, FromSource, QueryStateInit } from "./query-state.js";
@@ -49,27 +45,19 @@ export type QueryFromKind = "table" | "cte";
 /** Default `Ctes` map: no registered names (`keyof` is `never`, not `string`). */
 export type NoCtes = Record<never, never>;
 
-/**
- * Row type for `where` lambdas.
- * - `.from(cteName)` on SELECT: `T` (the CTE row).
- * - `withCte` on table/mutations: `EntityInstance<C>` plus each CTE as `u.<cteName>.*`.
- */
-export type ScopedRow<
+/** Registered CTE names → row types (second arg to `where` / `withCte` callback). */
+export type RegisteredCtes<Ctes extends Record<string, unknown>> = Ctes;
+
+/** Base table row for `where` / `update` (not merged with CTE namespaces). */
+export type TableRow<
   C extends AnyEntityClass,
   T,
-  Ctes extends Record<string, unknown>,
-  FromKind extends QueryFromKind = "table",
-> = FromKind extends "cte"
-  ? T
-  : keyof Ctes extends never
-    ? T
-    : EntityInstance<C> & Ctes;
+  FromKind extends QueryFromKind,
+> = FromKind extends "cte" ? T : T extends EntityInstance<C> ? T : EntityInstance<C>;
 
-/** Row type for mutation `update` lambdas when CTEs are registered. */
-export type MutationRow<
-  C extends AnyEntityClass,
-  Ctes extends Record<string, unknown> = NoCtes,
-> = ScopedRow<C, EntityInstance<C>, Ctes, "table">;
+type HasRegisteredCtes<Ctes extends Record<string, unknown>> = keyof Ctes extends never
+  ? false
+  : true;
 
 /** C = entity; T = row shape; Ctes = registered CTE names → row types; FromKind = table vs CTE read. */
 export class QueryBuilder<
@@ -139,13 +127,17 @@ export class QueryBuilder<
 
   /** @internal — used by the TypeScript transformer */
   where(predicate: IrWhere, params?: Record<string, unknown>): this;
-  /** Set or replace the WHERE predicate. Accepts an arrow function that is parsed to IR at runtime. */
+  /** Set or replace the WHERE predicate (requires Typhex transformer when using arrows). */
   where(
-    predicate: (entity: ScopedRow<C, T, Ctes, FromKind>) => boolean,
+    predicate: FromKind extends "cte"
+      ? (row: T) => boolean
+      : HasRegisteredCtes<Ctes> extends true
+        ? (row: TableRow<C, T, FromKind>, ctes: RegisteredCtes<Ctes>) => boolean
+        : (row: TableRow<C, T, FromKind>) => boolean,
     params?: Record<string, unknown>,
   ): this;
   where(
-    predicate: IrWhere | ((entity: ScopedRow<C, T, Ctes, FromKind>) => boolean),
+    predicate: IrWhere | ((row: any, ctes?: any) => boolean),
     params?: Record<string, unknown>,
   ): this {
     const { sqlParams, subqueryParams } = QueryBuilder.splitParams(params);
@@ -247,10 +239,7 @@ export class QueryBuilder<
       if (!onFn) {
         throw new Error(`${joinType}Join(entity): ON callback is required`);
       }
-      const onIr = resolveJoinOnIr(
-        joinType,
-        onFn as (joined: unknown, row: unknown) => boolean,
-      );
+      const onIr = resolveJoinOnIr(joinType, onFn as (joined: unknown, row: unknown) => boolean);
       this.state.entityJoinHints = [
         ...(this.state.entityJoinHints ?? []),
         { joinType, entity: keysOrFnOrEntity, onIr },
@@ -299,14 +288,30 @@ export class QueryBuilder<
 
   withCte<const N extends string, IC extends AnyEntityClass, IT>(
     name: N,
-    subquery: QueryBuilder<IC, IT>,
+    subquery: QueryBuilder<IC, IT, any, any>,
+  ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
+  withCte<const N extends string, IC extends AnyEntityClass, IT>(
+    name: N,
+    build: (ctes: RegisteredCtes<Ctes>) => QueryBuilder<IC, IT, any, any>,
+  ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
+  withCte<const N extends string, IC extends AnyEntityClass, IT>(
+    name: N,
+    subqueryOrBuild:
+      | QueryBuilder<IC, IT, any, any>
+      | ((ctes: RegisteredCtes<Ctes>) => QueryBuilder<IC, IT, any, any>),
   ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
     this.assertCteNameDoesNotCollideWithRelation(name);
     const next = this.clone();
-    next.state.ctes = [
-      ...(next.state.ctes ?? []),
-      { name, kind: "simple", inner: subquery.state.clone() },
-    ];
+    const registeredCteNames = (next.state.ctes ?? []).map((c) => c.name);
+    const inner =
+      typeof subqueryOrBuild === "function"
+        ? subqueryOrBuild({} as RegisteredCtes<Ctes>)
+        : subqueryOrBuild;
+    const innerState = inner.state.clone();
+    if (typeof subqueryOrBuild === "function") {
+      innerState.inScopeRegisteredCteNames = registeredCteNames;
+    }
+    next.state.ctes = [...(next.state.ctes ?? []), { name, kind: "simple", inner: innerState }];
     return next as QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
   }
 
@@ -316,7 +321,7 @@ export class QueryBuilder<
    */
   withRecursiveCte<const N extends string, IC extends AnyEntityClass, IT>(
     name: N,
-    subquery: QueryBuilder<IC, IT>,
+    subquery: QueryBuilder<IC, IT, any, any>,
   ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
     this.assertCteNameDoesNotCollideWithRelation(name);
     const next = this.clone();
@@ -329,7 +334,7 @@ export class QueryBuilder<
 
   /** Append a `UNION ALL` branch to this SELECT (used for recursive CTE bodies). */
   unionAll<OC extends AnyEntityClass, OT>(
-    other: QueryBuilder<OC, OT>,
+    other: QueryBuilder<OC, OT, any, any>,
   ): QueryBuilder<C, T, Ctes, FromKind> {
     const next = this.clone();
     next.state.unionAll = other.state.clone();
@@ -400,9 +405,14 @@ export class QueryBuilder<
   /** @internal — used by the TypeScript transformer */
   having(predicate: IrHaving, params?: Record<string, unknown>): this;
   /** Adds a HAVING clause to filter aggregated groups (use together with `groupBy`). */
-  having(predicate: (row: EntityInstance<C>) => boolean, params?: Record<string, unknown>): this;
   having(
-    predicate: IrHaving | ((row: EntityInstance<C>) => boolean),
+    predicate: HasRegisteredCtes<Ctes> extends true
+      ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => boolean
+      : (row: EntityInstance<C>) => boolean,
+    params?: Record<string, unknown>,
+  ): this;
+  having(
+    predicate: IrHaving | ((row: any, ctes?: any) => boolean),
     params?: Record<string, unknown>,
   ): this {
     const { sqlParams, subqueryParams } = QueryBuilder.splitParams(params);
@@ -499,10 +509,12 @@ export class QueryBuilder<
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
   async update(set: Record<string, unknown>): Promise<number>;
   async update(
-    setFn: (row: MutationRow<C, Ctes>) => Record<string, unknown>,
+    setFn: HasRegisteredCtes<Ctes> extends true
+      ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown>
+      : (row: EntityInstance<C>) => Record<string, unknown>,
   ): Promise<number>;
   async update(
-    setOrFn: Record<string, unknown> | ((row: MutationRow<C, Ctes>) => Record<string, unknown>),
+    setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
   ): Promise<number> {
     this.assertMutationNotFromCte("update");
     const resolved = resolveUpdateSet(
@@ -510,9 +522,7 @@ export class QueryBuilder<
     );
     const { qe } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(
-      this.buildPlan({ kind: "update", ...resolved }),
-    );
+    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "update", ...resolved }));
     if (!sql) return 0;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const result = await qe.run(sql, params);
@@ -522,10 +532,12 @@ export class QueryBuilder<
   /** UPDATE ... RETURNING * (when supported); returns hydrated rows. */
   async updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]>;
   async updateReturning(
-    setFn: (row: MutationRow<C, Ctes>) => Record<string, unknown>,
+    setFn: HasRegisteredCtes<Ctes> extends true
+      ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown>
+      : (row: EntityInstance<C>) => Record<string, unknown>,
   ): Promise<EntityInstance<C>[]>;
   async updateReturning(
-    setOrFn: Record<string, unknown> | ((row: MutationRow<C, Ctes>) => Record<string, unknown>),
+    setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
   ): Promise<EntityInstance<C>[]> {
     this.assertMutationNotFromCte("update");
     const resolved = resolveUpdateSet(

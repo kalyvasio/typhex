@@ -188,6 +188,8 @@ export interface QueryPlan {
   pkColumns: string[];
   /** Resolved SET expressions for UPDATE (literals and/or CTE column refs). */
   updateSet?: Record<string, Expr>;
+  /** Registered sibling CTE names visible in this plan (callback `withCte` bodies). */
+  inScopeRegisteredCteNames?: string[];
 }
 
 /**
@@ -311,7 +313,10 @@ export class QueryPlanBuilder {
 
     const classified = isSelect ? this.classifySelect() : EMPTY_CLASSIFIED;
 
-    const cteNames = new Set((this.state.ctes ?? []).map((c) => c.name));
+    const cteNames = new Set([
+      ...(this.state.inScopeRegisteredCteNames ?? []),
+      ...(this.state.ctes ?? []).map((c) => c.name),
+    ]);
     const exprBuilder = new ExprBuilder(
       paramToAlias,
       relationPathToAlias,
@@ -366,6 +371,7 @@ export class QueryPlanBuilder {
           : undefined,
       pkColumns: this.state.pkColumns,
       updateSet: this.buildUpdateSet(exprBuilder),
+      inScopeRegisteredCteNames: this.state.inScopeRegisteredCteNames,
     };
   }
 
@@ -446,8 +452,13 @@ export class QueryPlanBuilder {
 
     const paramToAlias: Record<string, string> = { ...(this.outer?.paramToAlias ?? {}) };
     const localFilter = this.outer ? new Set(this.analysis.localParamNames) : null;
+    const hasCteContext =
+      (this.state.inScopeRegisteredCteNames?.length ?? 0) > 0 || (this.state.ctes?.length ?? 0) > 0;
     for (const p of referenced) {
       if (localFilter && !localFilter.has(p)) continue;
+      if (hasCteContext && p !== this.rootParam && this.analysis.localParamNames.includes(p)) {
+        continue;
+      }
       paramToAlias[p] = this.tableAlias;
     }
     return paramToAlias;

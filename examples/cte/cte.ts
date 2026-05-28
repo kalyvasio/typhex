@@ -1,10 +1,13 @@
 /**
  * CTE (WITH clause) examples: withCte, withRecursiveCte, unionAll, entity joins, update, delete.
- * Run: npx tsx examples/cte/cte.ts  (from project root)
- *   or: npm run cte  (from examples/)
+ * Section 3b uses a withCte callback that correlates via ctes.* in a single-arg where — transformer-only.
+ *
+ * Build and run: npm run cte  (from examples/)
+ * Debug SQL: npm run cte:debug  (TYPHEX_DEBUG=1)
+ * Validate documented SQL: npm run cte:validate-sql
  */
 
-import { Db, Entity, createSqliteDriver } from "../../src/index.js";
+import { Db, Entity, createSqliteDriver } from "typhex";
 
 const User = Entity("users", {
   id: "integer primary key autoincrement",
@@ -92,12 +95,39 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   //   WHERE ("t0"."country" = ?)
   // )
   // SELECT "t0"."id", "t0"."name", "t0"."age", "t0"."country"
-  // FROM "uk_adults" AS "t0"
-  // WHERE 1=1
+  // FROM "uk_adults" AS "t0" WHERE 1=1
   // params: [18, "UK"]
 
   console.log(
     "3. UK adults via referencing CTE:",
+    rows.map((u) => `${u.name} (${u.age})`),
+  );
+}
+
+// --- 3b. Later CTE: base table WHERE + prior CTE (withCte callback) ---
+// Inner query: FROM users, correlate to "adults" in WHERE (not .from("adults")).
+
+{
+  const adults = User.query().where((u) => u.age >= 18);
+  const rows = await User.query()
+    .withCte("adults", adults)
+    .withCte("uk_adults", (ctes) =>
+      User.query().where((u) => u.country === "UK" && u.id === ctes.adults.id),
+    )
+    .from("uk_adults")
+    .toArray();
+  // SQL:
+  // WITH "adults" AS (
+  //   SELECT ... FROM "users" AS "t0" WHERE ("t0"."age" >= ?)
+  // ), "uk_adults" AS (
+  //   SELECT ... FROM "users" AS "t0", "adults"
+  //   WHERE ("t0"."country" = ?) AND ("t0"."id" = "adults"."id")
+  // )
+  // SELECT ... FROM "uk_adults" AS "t0" WHERE 1=1
+  // params: [18, "UK"]
+
+  console.log(
+    "3b. UK adults (users WHERE + ctes.adults.id):",
     rows.map((u) => `${u.name} (${u.age})`),
   );
 }
@@ -118,7 +148,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   //   UNION ALL
   //   SELECT ... FROM "users" WHERE ("t0"."age" >= ?)
   // )
-  // SELECT ... FROM "ends" AS "t0" ORDER BY "t0"."name" ASC
+  // SELECT ... FROM "ends" AS "t0" WHERE 1=1 ORDER BY "t0"."name" ASC
   // params: [25, 65]
 
   console.log(
@@ -131,7 +161,9 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
 
 {
   const anchor = User.query().where((u) => u.age >= 65);
-  const recursive = User.query().from("seniors").where((u) => u.age >= 100);
+  const recursive = User.query()
+    .from("seniors")
+    .where((u) => u.age >= 100);
   const body = anchor.unionAll(recursive);
   const seniors = await User.query().withRecursiveCte("seniors", body).from("seniors").toArray();
   // SQL:
@@ -140,7 +172,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   //   UNION ALL
   //   SELECT ... FROM "seniors" AS "t0" WHERE ("t0"."age" >= ?)
   // )
-  // SELECT ... FROM "seniors" AS "t0"
+  // SELECT ... FROM "seniors" AS "t0" WHERE 1=1
   // params: [65, 100]
 
   console.log(
@@ -176,7 +208,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   const adults = User.query().where((u) => u.age >= 18);
   await User.query()
     .withCte("adults", adults)
-    .where((u) => u.age === 35 && u.id === u.adults.id)
+    .where((u, ctes) => u.age === 35 && u.id === ctes.adults.id)
     .update({ name: "Robert" });
   // SQL:
   // WITH "adults" AS (
@@ -190,7 +222,9 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   // WHERE ("t0"."age" = ?) AND ("t0"."id" = "adults"."id")
   // params: [18, "Robert", 35]
 
-  const bob = await User.query().where((u) => u.name === "Robert").first();
+  const bob = await User.query()
+    .where((u) => u.name === "Robert")
+    .first();
   console.log("7. Bob renamed via CTE update:", bob ? `${bob.name} (${bob.age})` : "(not found)");
 }
 
@@ -200,7 +234,7 @@ await User.query().insert({ name: "Eve", age: 42, country: "FR" });
   const ukAdults = User.query().where((u) => u.country === "UK" && u.age >= 18);
   const removed = await User.query()
     .withCte("uk_adults", ukAdults)
-    .where((u) => u.age >= 65 && u.id === u.uk_adults.id)
+    .where((u, ctes) => u.age >= 65 && u.id === ctes.uk_adults.id)
     .delete();
   // SQL:
   // WITH "uk_adults" AS (

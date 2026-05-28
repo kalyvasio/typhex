@@ -13,7 +13,7 @@ const mockSchema = {
 } as const;
 
 // Used only in `typeof` for QueryBuilder generics (value reference for Entity()).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- see above
+ 
 const MockEntity = Entity("mock", mockSchema);
 
 function newBuilder(db: MockDb, columnNames = ["id", "name", "age"]) {
@@ -510,7 +510,10 @@ describe("QueryBuilder", () => {
       };
       const adults = newBuilder(db).where(where(ageGte21));
       const working = newBuilder(db).from("adults").where(where(ageLt65));
-      const q = newBuilder(db).withCte("adults", adults).withCte("working", working).from("working");
+      const q = newBuilder(db)
+        .withCte("adults", adults)
+        .withCte("working", working)
+        .from("working");
       await q.toArray();
       const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('WITH "adults" AS (');
@@ -621,8 +624,9 @@ describe("QueryBuilder", () => {
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       await newBuilder(db)
         .withCte("adults", inner)
-        .where((u: { id: number; age: number; adults: { id: number } }) =>
-          u.age === 30 && u.id === u.adults.id,
+        .where(
+          (u: { id: number; age: number }, ctes: { adults: { id: number } }) =>
+            u.age === 30 && u.id === ctes.adults.id,
         )
         .update({ name: "Senior" });
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -637,8 +641,10 @@ describe("QueryBuilder", () => {
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       await newBuilder(db)
         .withCte("adults", inner)
-        .where((u: { id: number; adults: { name: string } }) => u.id === u.adults.id)
-        .update((u: { adults: { name: string } }) => ({ name: u.adults.name }));
+        .where((u: { id: number }, ctes: { adults: { name: string } }) => u.id === ctes.adults.id)
+        .update((u: { name: string }, ctes: { adults: { name: string } }) => ({
+          name: ctes.adults.name,
+        }));
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('"name" = "adults"."name"');
     });
@@ -656,7 +662,7 @@ describe("QueryBuilder", () => {
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       const changes = await newBuilder(db)
         .withCte("adults", inner)
-        .where((u: { id: number; adults: { id: number } }) => u.id === u.adults.id)
+        .where((u: { id: number }, ctes: { adults: { id: number } }) => u.id === ctes.adults.id)
         .update({});
       expect(changes).toBe(0);
       expect(db.run).not.toHaveBeenCalled();
@@ -698,13 +704,34 @@ describe("QueryBuilder", () => {
       ).rejects.toThrow("update cannot run after .from(cteName)");
     });
 
+    it("withCte callback correlates from base table to registered CTE in WHERE", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const adults = newBuilder(db).where(whereColumnEq("age", 21));
+      const ukBody = newBuilder(db);
+      await newBuilder(db)
+        .withCte("adults", adults)
+        .withCte("uk_adults", (_ctes) =>
+          ukBody.where(
+            (u: { id: number; country: string }, ctes: { adults: { id: number } }) =>
+              u.id === ctes.adults.id && u.country === "UK",
+          ),
+        )
+        .from("uk_adults")
+        .toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"uk_adults" AS (');
+      expect(sql).toContain('FROM "users" AS "t0", "adults"');
+      expect(sql).toContain('"adults"."id"');
+    });
+
     it("delete with CTE correlates via where and emits WITH … DELETE … EXISTS", async () => {
       (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
       const inner = newBuilder(db).where(whereColumnEq("age", 21));
       await newBuilder(db)
         .withCte("adults", inner)
-        .where((u: { id: number; age: number; adults: { id: number } }) =>
-          u.age === 30 && u.id === u.adults.id,
+        .where(
+          (u: { id: number; age: number }, ctes: { adults: { id: number } }) =>
+            u.age === 30 && u.id === ctes.adults.id,
         )
         .delete();
       const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];

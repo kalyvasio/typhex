@@ -3,7 +3,14 @@
  */
 
 import type { WithClause } from "../dbs/types.js";
-import type { IrHaving, IrOrderBy, IrSelect, IrWhere, EntityJoinHint, JoinHint } from "../ir/types.js";
+import type {
+  IrHaving,
+  IrOrderBy,
+  IrSelect,
+  IrWhere,
+  EntityJoinHint,
+  JoinHint,
+} from "../ir/types.js";
 import type { AnyEntityClass } from "../entity/entity.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { QueryExecutor } from "./db.js";
@@ -45,6 +52,8 @@ export interface QueryStateInit<T = unknown> {
   /** UNION ALL branch appended to this SELECT (anchor.unionAll(recursive)). */
   unionAll?: QueryState<unknown>;
   ctes?: WithClause[];
+  /** Registered sibling CTE names in scope (bodies built via `withCte` callback). */
+  inScopeRegisteredCteNames?: string[];
   fromSource?: FromSource | null;
 }
 
@@ -73,6 +82,7 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
   entity?: AnyEntityClass;
   unionAll?: QueryState<unknown>;
   ctes?: WithClause[];
+  inScopeRegisteredCteNames?: string[];
   fromSource?: FromSource | null;
 
   constructor(init: QueryStateInit<T>) {
@@ -97,6 +107,7 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     this.entity = init.entity;
     this.unionAll = init.unionAll;
     this.ctes = init.ctes;
+    this.inScopeRegisteredCteNames = init.inScopeRegisteredCteNames;
     this.fromSource = init.fromSource;
   }
 
@@ -137,6 +148,9 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
         kind: c.kind,
         inner: (c.inner as QueryState<unknown>).clone(),
       })),
+      inScopeRegisteredCteNames: this.inScopeRegisteredCteNames
+        ? [...this.inScopeRegisteredCteNames]
+        : undefined,
       fromSource: QueryState.cloneFromSource(this.fromSource),
     });
   }
