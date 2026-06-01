@@ -71,3 +71,16 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run test:postgres
+
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+    needs: [sqlite, postgres]
+    if: always()
+    steps:
+      - name: All matrix jobs passed
+        run: |
+          if [ "${{ needs.sqlite.result }}" != "success" ] || [ "${{ needs.postgres.result }}" != "success" ]; then
+            echo "sqlite: ${{ needs.sqlite.result }}, postgres: ${{ needs.postgres.result }}"
+            exit 1
+          fi
