@@ -2,7 +2,11 @@ import type { OnConflictClause, QueryOperation } from "../../src/dbs/types.js";
 import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../src/orm/expr.js";
 import type { QueryPlan } from "../../src/orm/helpers/query-plan/query-plan.js";
 
-function basePlan(table: string, operation: QueryOperation, overrides: Partial<QueryPlan> = {}): QueryPlan {
+function basePlan(
+  table: string,
+  operation: QueryOperation,
+  overrides: Partial<QueryPlan> = {},
+): QueryPlan {
   return {
     operation,
     tableName: table,
@@ -22,7 +26,8 @@ function basePlan(table: string, operation: QueryOperation, overrides: Partial<Q
     skipLoadFor: new Set(),
     whereParams: {},
     havingParams: {},
-    subqueryParams: {},
+    pkColumns: [],
+    referencedRegisteredCtes: [],
     ...overrides,
   };
 }
@@ -62,22 +67,18 @@ export function updatePlan(
   where: Expr,
   returning?: boolean,
 ): QueryPlan {
-  return basePlan(
-    table,
-    { kind: "update", set, returning },
-    { columnNames, where },
-  );
+  const updateSet: Record<string, Expr> = {};
+  for (const [key, value] of Object.entries(set)) {
+    updateSet[key] = { kind: "const", value };
+  }
+  return basePlan(table, { kind: "update", set, returning }, { columnNames, where, updateSet });
 }
 
 export function deletePlan(table: string, where: Expr, returning?: boolean): QueryPlan {
   return basePlan(table, { kind: "delete", returning }, { where });
 }
 
-export function resultSizePlan(
-  table: string,
-  where: Expr,
-  joins: JoinSpec[] = [],
-): QueryPlan {
+export function resultSizePlan(table: string, where: Expr, joins: JoinSpec[] = []): QueryPlan {
   return basePlan(table, { kind: "select" }, { where, joins });
 }
 
@@ -98,18 +99,22 @@ export function selectPlan(
     joins?: JoinSpec[];
   } = {},
 ): QueryPlan {
-  return basePlan(table, { kind: "select" }, {
-    columnNames: opts.columnNames ?? [],
-    selectItems: opts.selectItems ?? [],
-    selectAll: opts.selectAll ?? false,
-    where: opts.where ?? null,
-    whereParams: opts.whereParams ?? {},
-    having: opts.having ?? null,
-    havingParams: opts.havingParams ?? {},
-    orderBy: opts.orderBy ?? [],
-    groupBy: opts.groupBy ?? [],
-    limitNum: opts.limitNum ?? null,
-    offsetNum: opts.offsetNum ?? null,
-    joins: opts.joins ?? [],
-  });
+  return basePlan(
+    table,
+    { kind: "select" },
+    {
+      columnNames: opts.columnNames ?? [],
+      selectItems: opts.selectItems ?? [],
+      selectAll: opts.selectAll ?? false,
+      where: opts.where ?? null,
+      whereParams: opts.whereParams ?? {},
+      having: opts.having ?? null,
+      havingParams: opts.havingParams ?? {},
+      orderBy: opts.orderBy ?? [],
+      groupBy: opts.groupBy ?? [],
+      limitNum: opts.limitNum ?? null,
+      offsetNum: opts.offsetNum ?? null,
+      joins: opts.joins ?? [],
+    },
+  );
 }

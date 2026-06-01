@@ -50,6 +50,7 @@ export class ExprBuilder {
     private readonly oneToManyExists: Record<string, OneToManyExistsMeta>,
     private readonly subqueryPlans: SubqueryPlans,
     private readonly relationKeys: Set<string> = new Set(),
+    private readonly cteNames: Set<string> = new Set(),
   ) {}
 
   /**
@@ -133,6 +134,10 @@ export class ExprBuilder {
   ): ExprColumn {
     this.assertColumnPath(path);
 
+    if (path.length > 0 && this.cteNames.has(path[0])) {
+      return { kind: "column", alias: path[0], column: path.slice(1) };
+    }
+
     let alias = scope[param];
     let p = path;
     const relAlias = path.length > 1 ? this.relationPathToAlias[`${param}.${path[0]}`] : undefined;
@@ -145,7 +150,14 @@ export class ExprBuilder {
 
   private assertColumnPath(path: string[]): void {
     const key = path[0];
-    if (path.length === 1 && key && this.relationKeys.has(key)) {
+    if (!key) return;
+    if (this.cteNames.has(key)) {
+      if (path.length === 1) {
+        throw new Error(`[typhex] CTE "${key}" must reference a column`);
+      }
+      return;
+    }
+    if (path.length === 1 && this.relationKeys.has(key)) {
       throw new Error(`[typhex] relation "${key}" must reference a column`);
     }
   }

@@ -23,6 +23,7 @@ import {
   resolveSelectIr,
   resolveGroupByPaths,
   resolveJoinKeys,
+  resolveUpdateSet,
 } from "../parser/resolve.js";
 import { type OnConflictClause, type QueryOperation } from "../dbs/types.js";
 import { RelationResolver } from "./helpers/relations/relation-resolver.js";
@@ -33,17 +34,38 @@ import {
   getQueryCompilerOrThrow,
 } from "./helpers/query-plan/query-plan.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
-import {
-  QueryState,
-  type CapturedSubquery,
-  type QueryStateInit,
-} from "./query-state.js";
+import { QueryState, type CapturedSubquery, type QueryStateInit } from "./query-state.js";
 
 export { QueryState } from "./query-state.js";
 export type { CapturedSubquery, FromSource, QueryStateInit } from "./query-state.js";
 
-/** C = entity class (for EntityInstance<C> return types); T = current row/selected shape. */
-export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityInstance<C>> {
+/** Whether the builder reads from the base table or a registered CTE. */
+export type QueryFromKind = "table" | "cte";
+
+/** Default `Ctes` map: no registered names (`keyof` is `never`, not `string`). */
+export type NoCtes = Record<never, never>;
+
+/** Registered CTE names → row types (second arg to `where` / `withCte` callback). */
+export type RegisteredCtes<Ctes extends Record<string, unknown>> = Ctes;
+
+/** Base table row for `where` / `update` (not merged with CTE namespaces). */
+export type TableRow<
+  C extends AnyEntityClass,
+  T,
+  FromKind extends QueryFromKind,
+> = FromKind extends "cte" ? T : T extends EntityInstance<C> ? T : EntityInstance<C>;
+
+type HasRegisteredCtes<Ctes extends Record<string, unknown>> = keyof Ctes extends never
+  ? false
+  : true;
+
+/** C = entity; T = row shape; Ctes = registered CTE names → row types; FromKind = table vs CTE read. */
+export class QueryBuilder<
+  C extends AnyEntityClass = AnyEntityClass,
+  T = EntityInstance<C>,
+  Ctes extends Record<string, unknown> = NoCtes,
+  FromKind extends QueryFromKind = "table",
+> {
   /** @internal */
   protected static readonly isDebugSqlEnabled = ((): boolean => {
     const debugFlag = process?.env?.TYPHEX_DEBUG;
@@ -59,7 +81,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** Return a shallow copy of this builder with mutable state (params, orderBy) deep-copied,
    *  so chained calls do not mutate the original. */
-  clone(): QueryBuilder<C, T> {
+  clone(): QueryBuilder<C, T, Ctes, FromKind> {
     return new QueryBuilder(this.state.clone());
   }
 
@@ -97,9 +119,19 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
 
   /** @internal — used by the TypeScript transformer */
   where(predicate: IrWhere, params?: Record<string, unknown>): this;
-  /** Set or replace the WHERE predicate. Accepts an arrow function that is parsed to IR at runtime. */
-  where(predicate: (entity: T) => boolean, params?: Record<string, unknown>): this;
-  where(predicate: IrWhere | ((entity: T) => boolean), params?: Record<string, unknown>): this {
+  /** Set or replace the WHERE predicate (requires Typhex transformer when using arrows). */
+  where(
+    predicate: FromKind extends "cte"
+      ? (row: T) => boolean
+      : HasRegisteredCtes<Ctes> extends true
+        ? (row: TableRow<C, T, FromKind>, ctes: RegisteredCtes<Ctes>) => boolean
+        : (row: TableRow<C, T, FromKind>) => boolean,
+    params?: Record<string, unknown>,
+  ): this;
+  where(
+    predicate: IrWhere | ((row: any, ctes?: any) => boolean),
+    params?: Record<string, unknown>,
+  ): this {
     const { sqlParams, subqueryParams } = QueryBuilder.splitParams(params);
     Object.assign(this.state.whereParams, sqlParams);
     Object.assign(this.state.subqueryParams, subqueryParams);
@@ -199,10 +231,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
       if (!onFn) {
         throw new Error(`${joinType}Join(entity): ON callback is required`);
       }
-      const onIr = resolveJoinOnIr(
-        joinType,
-        onFn as (joined: unknown, row: unknown) => boolean,
-      );
+      const onIr = resolveJoinOnIr(joinType, onFn as (joined: unknown, row: unknown) => boolean);
       this.state.entityJoinHints = [
         ...(this.state.entityJoinHints ?? []),
         { joinType, entity: keysOrFnOrEntity, onIr },
@@ -237,40 +266,54 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     return this;
   }
 
-  /**
-   * Register a common table expression: `WITH name AS (<subquery>)`.
-   * The inner query is compiled when the outer query runs.
-   */
-  withCte<IC extends AnyEntityClass, IT>(
-    name: string,
-    subquery: QueryBuilder<IC, IT>,
-  ): QueryBuilder<C, T> {
+  withCte<const N extends string, IC extends AnyEntityClass, IT>(
+    name: N,
+    subquery: QueryBuilder<IC, IT, any, any>,
+  ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
+  withCte<const N extends string, IC extends AnyEntityClass, IT>(
+    name: N,
+    build: (ctes: RegisteredCtes<Ctes>) => QueryBuilder<IC, IT, any, any>,
+  ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
+  withCte<const N extends string, IC extends AnyEntityClass, IT>(
+    name: N,
+    subqueryOrBuild:
+      | QueryBuilder<IC, IT, any, any>
+      | ((ctes: RegisteredCtes<Ctes>) => QueryBuilder<IC, IT, any, any>),
+  ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
     const next = this.clone();
-    next.state.ctes = [
-      ...(next.state.ctes ?? []),
-      { name, kind: "simple", inner: subquery.state.clone() },
-    ];
-    return next;
+    const registeredCteNames = (next.state.ctes ?? []).map((c) => c.name);
+    const inner =
+      typeof subqueryOrBuild === "function"
+        ? subqueryOrBuild({} as RegisteredCtes<Ctes>)
+        : subqueryOrBuild;
+    const innerState = inner.state.clone();
+    if (typeof subqueryOrBuild === "function") {
+      innerState.inScopeRegisteredCteNames = registeredCteNames;
+    }
+    next.state.ctes = [...(next.state.ctes ?? []), { name, kind: "simple", inner: innerState }];
+    return next as QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
   }
 
   /**
    * Register a recursive CTE: `WITH RECURSIVE name AS (<anchor> UNION ALL <recursive>)`.
    * The body should use `.unionAll()` for the recursive step and may `.from(name)` for self-reference.
    */
-  withRecursiveCte<IC extends AnyEntityClass, IT>(
-    name: string,
-    subquery: QueryBuilder<IC, IT>,
-  ): QueryBuilder<C, T> {
+  withRecursiveCte<const N extends string, IC extends AnyEntityClass, IT>(
+    name: N,
+    subquery: QueryBuilder<IC, IT, any, any>,
+  ): QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind> {
     const next = this.clone();
     next.state.ctes = [
       ...(next.state.ctes ?? []),
       { name, kind: "recursive", inner: subquery.state.clone() },
     ];
-    return next;
+    return next as QueryBuilder<C, T, Ctes & Record<N, IT>, FromKind>;
   }
 
   /** Append a `UNION ALL` branch to this SELECT (used for recursive CTE bodies). */
-  unionAll<OC extends AnyEntityClass, OT>(other: QueryBuilder<OC, OT>): QueryBuilder<C, T> {
+  unionAll<OC extends AnyEntityClass, OT>(
+    other: QueryBuilder<OC, OT, any, any>,
+  ): QueryBuilder<C, T, Ctes, FromKind> {
     const next = this.clone();
     next.state.unionAll = other.state.clone();
     return next;
@@ -280,39 +323,42 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
    * Set the outer FROM source: registered CTE name, inline subquery, or base table.
    * Omit the argument to read from the entity's base table.
    */
-  from(source: string): QueryBuilder<C, T>;
-  from<Row>(source: QueryBuilder<any, Row>): QueryBuilder<C, Row>;
-  from(): QueryBuilder<C, T>;
-  from<Row>(source?: string | QueryBuilder<any, Row>): QueryBuilder<C, Row | T> {
+  from<N extends keyof Ctes & string>(name: N): QueryBuilder<C, Ctes[N], Ctes, "cte">;
+  from<Row = EntityInstance<C>>(name: string): QueryBuilder<C, Row, Ctes, "cte">;
+  from<Row>(source: QueryBuilder<any, Row>): QueryBuilder<C, Row, Ctes, "table">;
+  from(): QueryBuilder<C, EntityInstance<C>, Ctes, "table">;
+  from<Row>(
+    source?: string | QueryBuilder<any, Row>,
+  ): QueryBuilder<C, unknown, Ctes, QueryFromKind> {
     const next = this.clone();
     if (source === undefined) {
       next.state.fromSource = { kind: "table" };
-      return next;
+      return next as QueryBuilder<C, EntityInstance<C>, Ctes, "table">;
     }
     if (typeof source === "string") {
       next.state.fromSource = { kind: "cte", name: source };
-      return next;
+      return next as unknown as QueryBuilder<C, Row, Ctes, "cte">;
     }
     next.state.fromSource = { kind: "subquery", state: source.state.clone() };
-    return next as unknown as QueryBuilder<C, Row>;
+    return next as unknown as QueryBuilder<C, Row, Ctes, "table">;
   }
 
   /** Sets the SELECT projection using an arrow function parsed at runtime or by the TypeScript transformer. */
-  select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U>;
+  select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U, Ctes>;
   /** Sets the SELECT projection using an explicit list of column names. */
-  select(columns: string[]): QueryBuilder<C, T>;
+  select(columns: string[]): QueryBuilder<C, T, Ctes>;
   /** @internal — used by the TypeScript transformer */
-  select(ir: IrSelect, subqueryParams?: Record<string, unknown>): QueryBuilder<C, T>;
+  select(ir: IrSelect, subqueryParams?: Record<string, unknown>): QueryBuilder<C, T, Ctes>;
   select(
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>),
     subqueryParams?: Record<string, unknown>,
-  ): QueryBuilder<C, unknown> {
+  ): QueryBuilder<C, unknown, Ctes> {
     const { subqueryParams: captured } = QueryBuilder.splitParams(subqueryParams);
     Object.assign(this.state.subqueryParams, captured);
     this.state.selectIr = resolveSelectIr(
       columnsOrIr as string[] | IrSelect | ((row: unknown) => Record<string, unknown>),
     );
-    return this;
+    return this as QueryBuilder<C, unknown, Ctes>;
   }
 
   /** Adds a GROUP BY clause. Accepts column names, index numbers, or an arrow function selecting group-by fields. */
@@ -337,9 +383,14 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   /** @internal — used by the TypeScript transformer */
   having(predicate: IrHaving, params?: Record<string, unknown>): this;
   /** Adds a HAVING clause to filter aggregated groups (use together with `groupBy`). */
-  having(predicate: (row: EntityInstance<C>) => boolean, params?: Record<string, unknown>): this;
   having(
-    predicate: IrHaving | ((row: EntityInstance<C>) => boolean),
+    predicate: HasRegisteredCtes<Ctes> extends true
+      ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => boolean
+      : (row: EntityInstance<C>) => boolean,
+    params?: Record<string, unknown>,
+  ): this;
+  having(
+    predicate: IrHaving | ((row: any, ctes?: any) => boolean),
     params?: Record<string, unknown>,
   ): this {
     const { sqlParams, subqueryParams } = QueryBuilder.splitParams(params);
@@ -434,10 +485,22 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   }
 
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
-  async update(set: Record<string, unknown>): Promise<number> {
+  async update(set: Record<string, unknown>): Promise<number>;
+  async update(
+    setFn: HasRegisteredCtes<Ctes> extends true
+      ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown>
+      : (row: EntityInstance<C>) => Record<string, unknown>,
+  ): Promise<number>;
+  async update(
+    setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
+  ): Promise<number> {
+    const resolved = resolveUpdateSet(
+      setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
+    );
+    this.state.updateSetIr = resolved.setIr;
     const { qe } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "update", set }));
+    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "update", ...resolved }));
     if (!sql) return 0;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
     const result = await qe.run(sql, params);
@@ -445,11 +508,23 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   }
 
   /** UPDATE ... RETURNING * (when supported); returns hydrated rows. */
-  async updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]> {
+  async updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]>;
+  async updateReturning(
+    setFn: HasRegisteredCtes<Ctes> extends true
+      ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown>
+      : (row: EntityInstance<C>) => Record<string, unknown>,
+  ): Promise<EntityInstance<C>[]>;
+  async updateReturning(
+    setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
+  ): Promise<EntityInstance<C>[]> {
+    const resolved = resolveUpdateSet(
+      setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
+    );
+    this.state.updateSetIr = resolved.setIr;
     const { qe, hydrate } = this.state;
     const compiler = getQueryCompilerOrThrow(this.state);
     const { sql, params } = compiler.compilePlan(
-      this.buildPlan({ kind: "update", set, returning: true }),
+      this.buildPlan({ kind: "update", ...resolved, returning: true }),
     );
     if (!sql) return [];
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
@@ -549,6 +624,7 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     const cols = columnNames.filter((c) => row[c] !== undefined);
     const params = cols.map((c) => row[c]);
     const pkCols = this.state.pkColumns;
+    this.state.insertIr = undefined;
 
     const compiled = compiler.compilePlan(
       this.buildPlan({
@@ -592,6 +668,7 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     // Collect columns in entity-defined order, keeping any column present in at least one row.
     const cols = columnNames.filter((c) => rows.some((r) => r[c] !== undefined));
     const paramRows = rows.map((r) => cols.map((c) => r[c] ?? null));
+    this.state.insertIr = undefined;
 
     const compiled = compiler.compilePlan(
       this.buildPlan({

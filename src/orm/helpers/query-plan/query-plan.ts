@@ -184,6 +184,14 @@ export interface QueryPlan {
   fromSource?: FromSource;
   /** UNION ALL branch for this SELECT. */
   unionAll?: QueryPlan;
+  /** Primary key columns of the entity table. */
+  pkColumns: string[];
+  /** Resolved SET expressions for UPDATE (literals and/or CTE column refs). */
+  updateSet?: Record<string, Expr>;
+  /** Registered sibling CTE names visible in this plan (callback `withCte` bodies). */
+  inScopeRegisteredCteNames?: string[];
+  /** Registered CTE names referenced in where/having/update IR (planning-time). */
+  referencedRegisteredCtes: string[];
 }
 
 /**
@@ -228,8 +236,9 @@ export class QueryPlanBuilder {
    * just dialect SQL emission and relation-pipeline execution.
    */
   static build(state: QueryState<unknown>, operation: QueryOperation): QueryPlan {
-    const analysis = QueryIrAnalyzer.analyze(state, DEFAULT_ROW_PARAM);
-    return new QueryPlanBuilder(state, operation, undefined, analysis).build();
+    const irAnalyzer = new QueryIrAnalyzer(state, DEFAULT_ROW_PARAM);
+    const analysis = irAnalyzer.analyze();
+    return new QueryPlanBuilder(state, operation, undefined, analysis, irAnalyzer).build();
   }
 
   /**
@@ -247,7 +256,8 @@ export class QueryPlanBuilder {
     outer: OuterScope,
     analysis: QueryIrAnalysis,
   ): QueryPlan {
-    return new QueryPlanBuilder(state, operation, outer, analysis).build();
+    const irAnalyzer = new QueryIrAnalyzer(state, DEFAULT_ROW_PARAM);
+    return new QueryPlanBuilder(state, operation, outer, analysis, irAnalyzer).build();
   }
 
   private readonly state: QueryState<unknown>;
@@ -255,6 +265,7 @@ export class QueryPlanBuilder {
   private readonly outer?: OuterScope;
   private readonly tableAlias: string;
   private readonly analysis: QueryIrAnalysis;
+  private readonly irAnalyzer: QueryIrAnalyzer;
   /** Cached row-param for this state. */
   private readonly rootParam: string;
 
@@ -263,12 +274,14 @@ export class QueryPlanBuilder {
     operation: QueryOperation,
     outer: OuterScope | undefined,
     analysis: QueryIrAnalysis,
+    irAnalyzer: QueryIrAnalyzer,
   ) {
     this.state = state;
     this.operation = operation;
     this.outer = outer;
     this.tableAlias = outer?.subAlias ?? TABLE_ALIAS;
     this.analysis = analysis;
+    this.irAnalyzer = irAnalyzer;
     this.rootParam = analysis.rootParam;
   }
 
@@ -307,12 +320,17 @@ export class QueryPlanBuilder {
 
     const classified = isSelect ? this.classifySelect() : EMPTY_CLASSIFIED;
 
+    const cteNames = new Set([
+      ...(this.state.inScopeRegisteredCteNames ?? []),
+      ...(this.state.ctes ?? []).map((c) => c.name),
+    ]);
     const exprBuilder = new ExprBuilder(
       paramToAlias,
       relationPathToAlias,
       oneToManyExists,
       subqueryPlans,
       new Set(Object.keys(this.state.relations ?? {})),
+      cteNames,
     );
 
     const whereExpr =
@@ -358,7 +376,24 @@ export class QueryPlanBuilder {
         isSelect && this.state.unionAll
           ? QueryPlanBuilder.build(this.state.unionAll, { kind: "select" })
           : undefined,
+      pkColumns: this.state.pkColumns,
+      updateSet: this.buildUpdateSet(exprBuilder),
+      inScopeRegisteredCteNames: this.state.inScopeRegisteredCteNames,
+      referencedRegisteredCtes: this.irAnalyzer.planReferencedRegisteredCtes(this.analysis),
     };
+  }
+
+  private buildUpdateSet(exprBuilder: ExprBuilder): Record<string, Expr> | undefined {
+    if (this.operation.kind !== "update") return undefined;
+    const out: Record<string, Expr> = {};
+    const op = this.operation;
+    for (const [key, value] of Object.entries(op.set ?? {})) {
+      out[key] = { kind: "const", value };
+    }
+    for (const [key, ir] of Object.entries(op.setIr ?? {})) {
+      out[key] = exprBuilder.convert(ir);
+    }
+    return Object.keys(out).length > 0 ? out : undefined;
   }
 
   private buildEntityJoins(
@@ -381,6 +416,7 @@ export class QueryPlanBuilder {
         oneToManyExists,
         subqueryPlans,
         new Set(Object.keys(this.state.relations ?? {})),
+        new Set((this.state.ctes ?? []).map((c) => c.name)),
       );
       return {
         relationKey: "",
@@ -424,8 +460,13 @@ export class QueryPlanBuilder {
 
     const paramToAlias: Record<string, string> = { ...(this.outer?.paramToAlias ?? {}) };
     const localFilter = this.outer ? new Set(this.analysis.localParamNames) : null;
+    const hasCteContext =
+      (this.state.inScopeRegisteredCteNames?.length ?? 0) > 0 || (this.state.ctes?.length ?? 0) > 0;
     for (const p of referenced) {
       if (localFilter && !localFilter.has(p)) continue;
+      if (hasCteContext && p !== this.rootParam && this.analysis.localParamNames.includes(p)) {
+        continue;
+      }
       paramToAlias[p] = this.tableAlias;
     }
     return paramToAlias;
@@ -694,6 +735,7 @@ const EMPTY_EXPR_IR_ANALYSIS: ExprIrAnalysis = {
   relationKeys: new Set(),
   subqueryRefs: {},
   existsNodes: [],
+  referencedRegisteredCtes: new Set(),
 };
 
 function mergeExprIrAnalysis(...items: ExprIrAnalysis[]): ExprIrAnalysis {
@@ -702,12 +744,14 @@ function mergeExprIrAnalysis(...items: ExprIrAnalysis[]): ExprIrAnalysis {
     relationKeys: new Set(),
     subqueryRefs: {},
     existsNodes: [],
+    referencedRegisteredCtes: new Set(),
   };
   for (const item of items) {
     for (const param of item.paramNames) out.paramNames.add(param);
     for (const key of item.relationKeys) out.relationKeys.add(key);
     Object.assign(out.subqueryRefs, item.subqueryRefs);
     out.existsNodes.push(...item.existsNodes);
+    for (const name of item.referencedRegisteredCtes) out.referencedRegisteredCtes.add(name);
   }
   return out;
 }

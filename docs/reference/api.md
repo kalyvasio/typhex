@@ -267,6 +267,22 @@ await User.query()
   .toArray();
 ```
 
+**Callback form** — build the inner query from the base table and correlate to earlier CTEs in `WHERE` (not `.from("earlier")`). Requires the Typhex transformer so `ctes.<name>.<column>` in a single-arg `where` is compiled to IR:
+
+```ts
+await User.query()
+  .withCte("adults", adults)
+  .withCte("uk_adults", (ctes) =>
+    User.query().where((u) => u.country === "UK" && u.id === ctes.adults.id),
+  )
+  .from("uk_adults")
+  .toArray();
+```
+
+```sql
+-- uk_adults body: FROM "users" AS "t0", "adults" WHERE ... AND "t0"."id" = "adults"."id"
+```
+
 ### `.from(source?)`
 
 Set the outer `FROM` source:
@@ -354,6 +370,16 @@ Update all rows matching the current `where()` predicate.
 const updatedCount = await Entity.query().where(…).update({ age: 31 })
 ```
 
+When `.withCte()` is registered on the same builder, correlate the base table to CTE rows via a second `where` argument or `ctes.<name>.<column>` in an update SET lambda. SQLite/Postgres emit `WITH … UPDATE … FROM <cte>` when the predicate references a registered CTE:
+
+```ts
+const adults = User.query().where((u) => u.age >= 18);
+await User.query()
+  .withCte("adults", adults)
+  .where((u, ctes) => u.age === 35 && u.id === ctes.adults.id)
+  .update({ name: "Robert" });
+```
+
 Returns the number of rows updated.
 
 ### `.delete()`
@@ -362,6 +388,16 @@ Delete all rows matching the current `where()` predicate.
 
 ```ts
 const deletedCount = await Entity.query().where(…).delete()
+```
+
+With registered CTEs, correlation uses `WHERE EXISTS (SELECT 1 FROM <cte> WHERE …)`:
+
+```ts
+const ukAdults = User.query().where((u) => u.country === "UK" && u.age >= 18);
+await User.query()
+  .withCte("uk_adults", ukAdults)
+  .where((u, ctes) => u.age >= 65 && u.id === ctes.uk_adults.id)
+  .delete();
 ```
 
 Returns the number of rows deleted.

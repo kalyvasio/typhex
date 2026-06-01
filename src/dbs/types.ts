@@ -5,6 +5,7 @@
 import type { Connection, Driver, ExecuteResult, TransactionOptions } from "../driver/types.js";
 import type { DialectName } from "../dialect.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
+import type { IrNode } from "../ir/types.js";
 import type { GroupByItem } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 
@@ -118,7 +119,12 @@ export type QueryOperation =
       pk?: string[];
       onConflict?: OnConflictClause;
     }
-  | { kind: "update"; set: Record<string, unknown>; returning?: boolean }
+  | {
+      kind: "update";
+      set?: Record<string, unknown>;
+      setIr?: Record<string, IrNode>;
+      returning?: boolean;
+    }
   | { kind: "delete"; returning?: boolean };
 
 export interface CompileQueryOpts {

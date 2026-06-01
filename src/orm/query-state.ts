@@ -3,7 +3,15 @@
  */
 
 import type { WithClause } from "../dbs/types.js";
-import type { IrHaving, IrOrderBy, IrSelect, IrWhere, EntityJoinHint, JoinHint } from "../ir/types.js";
+import type {
+  IrHaving,
+  IrNode,
+  IrOrderBy,
+  IrSelect,
+  IrWhere,
+  EntityJoinHint,
+  JoinHint,
+} from "../ir/types.js";
 import type { AnyEntityClass } from "../entity/entity.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
 import type { QueryExecutor } from "./db.js";
@@ -45,7 +53,13 @@ export interface QueryStateInit<T = unknown> {
   /** UNION ALL branch appended to this SELECT (anchor.unionAll(recursive)). */
   unionAll?: QueryState<unknown>;
   ctes?: WithClause[];
+  /** Registered sibling CTE names in scope (bodies built via `withCte` callback). */
+  inScopeRegisteredCteNames?: string[];
   fromSource?: FromSource | null;
+  /** Parsed SET column IR for UPDATE (set before plan; not cloned by default). */
+  updateSetIr?: Record<string, IrNode>;
+  /** Parsed VALUES column IR for INSERT / upsert (reserved; set before plan when supported). */
+  insertIr?: Record<string, IrNode>;
 }
 
 /** @internal — internal builder state */
@@ -73,7 +87,10 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
   entity?: AnyEntityClass;
   unionAll?: QueryState<unknown>;
   ctes?: WithClause[];
+  inScopeRegisteredCteNames?: string[];
   fromSource?: FromSource | null;
+  updateSetIr?: Record<string, IrNode>;
+  insertIr?: Record<string, IrNode>;
 
   constructor(init: QueryStateInit<T>) {
     this.tableName = init.tableName;
@@ -97,7 +114,10 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     this.entity = init.entity;
     this.unionAll = init.unionAll;
     this.ctes = init.ctes;
+    this.inScopeRegisteredCteNames = init.inScopeRegisteredCteNames;
     this.fromSource = init.fromSource;
+    this.updateSetIr = init.updateSetIr;
+    this.insertIr = init.insertIr;
   }
 
   /** Deep-clone mutable query state bags and nested CTE / subquery bodies. */
@@ -137,6 +157,9 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
         kind: c.kind,
         inner: (c.inner as QueryState<unknown>).clone(),
       })),
+      inScopeRegisteredCteNames: this.inScopeRegisteredCteNames
+        ? [...this.inScopeRegisteredCteNames]
+        : undefined,
       fromSource: QueryState.cloneFromSource(this.fromSource),
     });
   }

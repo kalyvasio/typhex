@@ -50,7 +50,7 @@ function wrapUnionAllBranchSql(
   sql: string,
   plan: Pick<QueryPlan, "orderBy" | "limitNum" | "offsetNum">,
 ): string {
-  const needsParens = plan.orderBy.length > 0 || plan.limitNum != null || plan.offsetNum != null; 
+  const needsParens = plan.orderBy.length > 0 || plan.limitNum != null || plan.offsetNum != null;
   return needsParens ? `(${sql})` : sql;
 }
 
@@ -434,6 +434,13 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileSelectPlan(plan: QueryPlan, options: CompileQueryOpts): CompileResult {
     const prepared = this.prepareReadPlan(plan, options);
+    const fromCtes = plan.referencedRegisteredCtes;
+    const fromSource = plan.fromSource ?? { kind: "table" as const };
+    let fromClause = prepared.fromResolved.fromClause;
+    if (fromSource.kind === "table" && fromCtes.length > 0) {
+      const extra = fromCtes.map((n) => this.escapeIdentifier(n)).join(", ");
+      fromClause = `${fromClause}, ${extra}`;
+    }
     const selectListExpanded = prepared.expand(
       this.compileSelectListExpr(
         plan.selectItems,
@@ -447,11 +454,14 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const havingExpanded = plan.having
       ? prepared.expand(this.compileWhereExpr(plan.having), plan.havingParams)
       : null;
-    const orderByExpanded = prepared.expand(this.compileOrderByExpr(plan.orderBy), plan.whereParams);
+    const orderByExpanded = prepared.expand(
+      this.compileOrderByExpr(plan.orderBy),
+      plan.whereParams,
+    );
     let result = this.compileSelect({
       table: plan.tableName,
       tableAlias: plan.tableAlias,
-      fromClause: prepared.fromResolved.fromClause,
+      fromClause,
       fromParams: prepared.fromResolved.fromParams,
       joinParams: prepared.joinParams,
       selectList: selectListExpanded.sql,
@@ -487,11 +497,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
     const wrapped = options.skipCteRender
       ? result
-      : this.attachCteBodies(
-          result,
-          prepared.compiledCteBodies,
-          options.paramStartIndex ?? 1,
-        );
+      : this.attachCteBodies(result, prepared.compiledCteBodies, options.paramStartIndex ?? 1);
     return options.wrap ? { sql: `(${wrapped.sql})`, params: wrapped.params } : wrapped;
   }
 
@@ -499,27 +505,47 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (plan.operation.kind !== "update") {
       throw new Error("compileUpdatePlan expects an update operation");
     }
+    const registered = this.registeredCteNames(plan);
+    const fromCtes = plan.referencedRegisteredCtes;
+    const referencedCtes = (plan.ctes ?? []).filter((c) => fromCtes.includes(c.name));
+    const bodies = fromCtes.length > 0 ? this.compileCteBodies(referencedCtes) : [];
+
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    return this.compileUpdate(
+    const result = this.compileUpdate(
       plan.tableName,
-      plan.operation.set,
+      plan.updateSet ?? {},
       plan.columnNames,
       whereExpanded.sql,
       whereExpanded.params,
-      { returning: plan.operation.returning },
+      {
+        returning: plan.operation.returning,
+        fromCtes,
+        tableAlias: plan.tableAlias,
+        registeredCteNames: registered,
+      },
     );
+    if (!result.sql) return result;
+    return bodies.length > 0 ? this.attachCteBodies(result, bodies, 1) : result;
   }
 
   protected compileDeletePlan(plan: QueryPlan): CompileResult {
     if (plan.operation.kind !== "delete") {
       throw new Error("compileDeletePlan expects a delete operation");
     }
+    const fromCtes = plan.referencedRegisteredCtes;
+    const referencedCtes = (plan.ctes ?? []).filter((c) => fromCtes.includes(c.name));
+    const bodies = fromCtes.length > 0 ? this.compileCteBodies(referencedCtes) : [];
+
     const { expand } = this.createExpander({});
     const whereExpanded = expand(this.compileWhereExpr(plan.where), plan.whereParams);
-    return this.compileDelete(plan.tableName, whereExpanded.sql, whereExpanded.params, {
+    const result = this.compileDelete(plan.tableName, whereExpanded.sql, whereExpanded.params, {
       returning: plan.operation.returning,
+      fromCtes,
+      tableAlias: plan.tableAlias,
     });
+    if (!result.sql) return result;
+    return bodies.length > 0 ? this.attachCteBodies(result, bodies, 1) : result;
   }
 
   protected compileSelect(opts: CompileSelectOpts): CompileResult {
@@ -530,7 +556,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ...opts.whereParams,
     ];
     const groupByClause =
-      opts.groupBy && opts.groupBy.length > 0 ? ` GROUP BY ${this.compileGroupBy(opts.groupBy)}` : "";
+      opts.groupBy && opts.groupBy.length > 0
+        ? ` GROUP BY ${this.compileGroupBy(opts.groupBy)}`
+        : "";
     let havingClause = "";
     if (opts.havingSql) {
       havingClause = ` HAVING ${opts.havingSql}`;
@@ -617,35 +645,76 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileUpdate(
     table: string,
-    set: Record<string, unknown>,
+    updateSet: Record<string, Expr>,
     columns: string[],
     whereSql: string,
     whereParams: unknown[],
-    options?: { returning?: boolean },
+    options?: {
+      returning?: boolean;
+      fromCtes?: string[];
+      tableAlias?: string;
+      registeredCteNames?: Set<string>;
+    },
   ): CompileResult {
-    const cols = Object.keys(set).filter((k) => columns.includes(k));
+    const cols = Object.keys(updateSet).filter((k) => columns.includes(k));
     if (cols.length === 0) return { sql: "", params: [] };
+    const cteNames = options?.registeredCteNames ?? new Set<string>();
+    const fromCtes = options?.fromCtes ?? [];
+    const useFrom = fromCtes.length > 0;
+    const alias = options?.tableAlias ?? "t0";
+    const params: unknown[] = [];
     const assignments = cols
-      .map((c, i) => `${this.escapeIdentifier(c)} = ${this.placeholder(i + 1)}`)
+      .map((c) => {
+        const expr = updateSet[c];
+        if (expr.kind === "column") {
+          if (cteNames.has(expr.alias) || expr.alias === alias) {
+            return `${this.escapeIdentifier(c)} = ${this.renderColumn(expr)}`;
+          }
+        }
+        if (expr.kind === "const") {
+          params.push(expr.value);
+          return `${this.escapeIdentifier(c)} = ${this.placeholder(params.length)}`;
+        }
+        throw new Error(`compileUpdate: unsupported SET expression for column "${c}"`);
+      })
       .join(", ");
-    const fixedWhere = this.fixMutationWhereAlias(table, whereSql);
-    const where = this.renumberUpdateWhereParams(fixedWhere, cols.length);
-    let sql = `UPDATE ${this.escapeIdentifier(table)} SET ${assignments} WHERE ${where}`;
+    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, useFrom);
+    const where = this.renumberUpdateWhereParams(fixedWhere, params.length);
+    params.push(...whereParams);
+    let sql: string;
+    if (useFrom) {
+      const fromList = fromCtes.map((n) => this.escapeIdentifier(n)).join(", ");
+      const whereClause = where ? ` WHERE ${where}` : "";
+      sql = `UPDATE ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} SET ${assignments} FROM ${fromList}${whereClause}`;
+    } else {
+      sql = `UPDATE ${this.escapeIdentifier(table)} SET ${assignments} WHERE ${where}`;
+    }
     if (options?.returning) sql += " RETURNING *";
-    return {
-      sql,
-      params: [...cols.map((c) => set[c]), ...whereParams],
-      returningRow: !!options?.returning,
-    };
+    return { sql, params, returningRow: !!options?.returning };
   }
 
   protected compileDelete(
     table: string,
     whereSql: string,
     whereParams: unknown[],
-    options?: { returning?: boolean },
+    options?: {
+      returning?: boolean;
+      fromCtes?: string[];
+      tableAlias?: string;
+    },
   ): CompileResult {
-    let sql = `DELETE FROM ${this.escapeIdentifier(table)} WHERE ${this.fixMutationWhereAlias(table, whereSql)}`;
+    const fromCtes = options?.fromCtes ?? [];
+    const useFrom = fromCtes.length > 0;
+    const alias = options?.tableAlias ?? "t0";
+    const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, useFrom);
+    let sql: string;
+    if (useFrom) {
+      const fromList = fromCtes.map((n) => this.escapeIdentifier(n)).join(", ");
+      const existsWhere = fixedWhere || "1=1";
+      sql = `DELETE FROM ${this.escapeIdentifier(table)} AS ${this.escapeIdentifier(alias)} WHERE EXISTS (SELECT 1 FROM ${fromList} WHERE ${existsWhere})`;
+    } else {
+      sql = `DELETE FROM ${this.escapeIdentifier(table)} WHERE ${fixedWhere}`;
+    }
     if (options?.returning) sql += " RETURNING *";
     return { sql, params: whereParams, returningRow: !!options?.returning };
   }
@@ -801,9 +870,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     onConflict: OnConflictClause,
     insertColumns: string[],
   ): string {
-    const conflictCols = onConflict.conflictColumns
-      .map((c) => this.escapeIdentifier(c))
-      .join(", ");
+    const conflictCols = onConflict.conflictColumns.map((c) => this.escapeIdentifier(c)).join(", ");
     if (onConflict.action === "nothing") {
       return `${baseSql} ON CONFLICT (${conflictCols}) DO NOTHING`;
     }
@@ -811,7 +878,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       ? onConflict.updateColumns
       : insertColumns.filter((c) => !onConflict.conflictColumns.includes(c));
     const setClauses = updateCols
-      .map((c) => `${this.escapeIdentifier(c)} = ${this.excludedTableName()}.${this.escapeIdentifier(c)}`)
+      .map(
+        (c) =>
+          `${this.escapeIdentifier(c)} = ${this.excludedTableName()}.${this.escapeIdentifier(c)}`,
+      )
       .join(", ");
     return `${baseSql} ON CONFLICT (${conflictCols}) DO UPDATE SET ${setClauses}`;
   }
@@ -824,7 +894,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return hasPk;
   }
 
-  protected renderInsertManyValue(value: unknown, paramIndex: number): { sql: string; params: unknown[] } {
+  protected renderInsertManyValue(
+    value: unknown,
+    paramIndex: number,
+  ): { sql: string; params: unknown[] } {
     if (value === SQL_DEFAULT) return { sql: "DEFAULT", params: [] };
     return { sql: this.placeholder(paramIndex), params: [value] };
   }
@@ -834,8 +907,22 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return whereSql.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + offset}`);
   }
 
-  protected fixMutationWhereAlias(table: string, whereSql: string): string {
-    return whereSql.replaceAll('"t0".', `${this.escapeIdentifier(table)}.`);
+  protected registeredCteNames(plan: QueryPlan): Set<string> {
+    return new Set([
+      ...(plan.inScopeRegisteredCteNames ?? []),
+      ...(plan.ctes?.map((c) => c.name) ?? []),
+    ]);
+  }
+
+  protected fixMutationWhereAlias(
+    table: string,
+    whereSql: string,
+    alias = "t0",
+    keepAlias = false,
+  ): string {
+    if (keepAlias) return whereSql;
+    const aliasRef = `${this.escapeIdentifier(alias)}.`;
+    return whereSql.replaceAll(aliasRef, `${this.escapeIdentifier(table)}.`);
   }
 
   protected compileCreateTable(
@@ -852,7 +939,13 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileRecreateDroppedTable(
     table: string,
-    columnInfos: Array<{ name: string; type: string; notnull: number; dflt_value: string | null; pk: number }>,
+    columnInfos: Array<{
+      name: string;
+      type: string;
+      notnull: number;
+      dflt_value: string | null;
+      pk: number;
+    }>,
   ): string {
     const cols = columnInfos.map(
       (c) => `  ${this.escapeIdentifier(c.name)} ${this.reconstructColDef(c)}`,

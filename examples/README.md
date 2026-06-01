@@ -100,3 +100,19 @@ TypeScript transformer: predicates compiled to IR at build time. Closure variabl
 ```bash
 npm run transformer
 ```
+
+---
+
+## 9. CTE (WITH clauses)
+
+`withCte`, `withRecursiveCte`, `unionAll`, mutations correlated to registered CTEs. Built with the Typhex transformer (same toolchain as subqueries).
+
+**Prerequisites**: `npm install` in `examples/` (links `typhex` from the repo root) and `npm install` at the repo root (for `npm run build`).
+
+```bash
+npm run cte
+```
+
+Debug emitted SQL: `npm run cte:debug` (`TYPHEX_DEBUG=1`).
+
+Compiled output goes to `examples/out/cte/cte.js` (gitignored); `npm run cte` rebuilds it automatically.

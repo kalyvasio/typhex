@@ -382,6 +382,40 @@ describe("dbs/postgres", () => {
       expect(params).toEqual(["Bob", 1]);
     });
 
+    it("compilePlan update with CTE in WHERE but empty SET omits WITH", () => {
+      const { sql } = postgresQueryCompiler.compilePlan({
+        ...updatePlan("users", ["id", "name"], {}, {
+          kind: "binary",
+          op: "===",
+          left: { kind: "column", alias: "adults", column: ["id"] },
+          right: { kind: "column", alias: "t0", column: ["id"] },
+        }),
+        ctes: [
+          {
+            name: "adults",
+            kind: "simple",
+            inner: {
+              tableName: "users",
+              columnNames: ["id", "name"],
+              whereIr: null,
+              whereParams: {},
+              subqueryParams: {},
+              orderBy: [],
+              havingIr: null,
+              havingParams: {},
+              limitNum: null,
+              offsetNum: null,
+              selectIr: null,
+              qe: {} as never,
+              pkColumns: ["id"],
+            },
+          },
+        ],
+        updateSet: {},
+      });
+      expect(sql).toBe("");
+    });
+
     it("compilePlan delete produces DELETE", () => {
       const { sql, params } = postgresQueryCompiler.compilePlan(
         deletePlan("users", {

@@ -13,7 +13,7 @@ const mockSchema = {
 } as const;
 
 // Used only in `typeof` for QueryBuilder generics (value reference for Entity()).
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- see above
+
 const MockEntity = Entity("mock", mockSchema);
 
 function newBuilder(db: MockDb, columnNames = ["id", "name", "age"]) {
@@ -510,7 +510,10 @@ describe("QueryBuilder", () => {
       };
       const adults = newBuilder(db).where(where(ageGte21));
       const working = newBuilder(db).from("adults").where(where(ageLt65));
-      const q = newBuilder(db).withCte("adults", adults).withCte("working", working).from("working");
+      const q = newBuilder(db)
+        .withCte("adults", adults)
+        .withCte("working", working)
+        .from("working");
       await q.toArray();
       const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(sql).toContain('WITH "adults" AS (');
@@ -614,6 +617,135 @@ describe("QueryBuilder", () => {
           return child.age === parent.age;
         }),
       ).toThrow("Failed to parse innerJoin ON predicate:");
+    });
+
+    it("update with CTE correlates via where and emits WITH … UPDATE … FROM", async () => {
+      (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await newBuilder(db)
+        .withCte("adults", inner)
+        .where(
+          (u: { id: number; age: number }, ctes: { adults: { id: number } }) =>
+            u.age === 30 && u.id === ctes.adults.id,
+        )
+        .update({ name: "Senior" });
+      const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toMatch(/^WITH/);
+      expect(sql).toContain("UPDATE");
+      expect(sql).toContain('FROM "adults"');
+      expect(sql).toContain('"adults"."id"');
+    });
+
+    it("update with SET from CTE column via lambda", async () => {
+      (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await newBuilder(db)
+        .withCte("adults", inner)
+        .where((u: { id: number }, ctes: { adults: { name: string } }) => u.id === ctes.adults.id)
+        .update((u: { name: string }, ctes: { adults: { name: string } }) => ({
+          name: ctes.adults.name,
+        }));
+      const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"name" = "adults"."name"');
+    });
+
+    it("update with SET from entity column via lambda", async () => {
+      (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
+      await newBuilder(db)
+        .where(whereColumnEq("id", 1))
+        .update((u: { name: string }) => ({ name: u.name }));
+      const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"name" = "t0"."name"');
+    });
+
+    it("update with empty SET and CTE in where does not run SQL", async () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      const changes = await newBuilder(db)
+        .withCte("adults", inner)
+        .where((u: { id: number }, ctes: { adults: { id: number } }) => u.id === ctes.adults.id)
+        .update({});
+      expect(changes).toBe(0);
+      expect(db.run).not.toHaveBeenCalled();
+    });
+
+    it("withCte throws when CTE name matches a relation key", () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      const q = new QueryBuilder({
+        tableName: "users",
+        columnNames: ["id", "name", "age", "country"],
+        qe: db,
+        pkColumns: ["id"],
+        whereIr: null,
+        whereParams: {},
+        subqueryParams: {},
+        orderBy: [],
+        havingIr: null,
+        havingParams: {},
+        limitNum: null,
+        offsetNum: null,
+        selectIr: null,
+        relations: {
+          adults: {
+            _relType: "one-to-many",
+            _target: () => ({}),
+            _options: { foreignKey: "userId" },
+          },
+        } as never,
+      });
+      expect(() => q.withCte("adults", inner)).toThrow(
+        'CTE name "adults" conflicts with relation "adults"',
+      );
+    });
+
+    it("update throws after from(cteName) on a SELECT chain", async () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await expect(
+        newBuilder(db).withCte("adults", inner).from("adults").update({ name: "Senior" }),
+      ).rejects.toThrow("update cannot run after .from(cteName)");
+    });
+
+    it("withCte callback sets inScopeRegisteredCteNames; two-arg where correlates base table to CTE", async () => {
+      (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
+      const adults = newBuilder(db).where(whereColumnEq("age", 21));
+      const ukBody = newBuilder(db);
+      await newBuilder(db)
+        .withCte("adults", adults)
+        .withCte("uk_adults", (_ctes) =>
+          ukBody.where(
+            (u: { id: number; country: string }, ctes: { adults: { id: number } }) =>
+              u.id === ctes.adults.id && u.country === "UK",
+          ),
+        )
+        .from("uk_adults")
+        .toArray();
+      const [sql] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toContain('"uk_adults" AS (');
+      expect(sql).toContain('FROM "users" AS "t0", "adults"');
+      expect(sql).toContain('"adults"."id"');
+    });
+
+    it("delete with CTE correlates via where and emits WITH … DELETE … EXISTS", async () => {
+      (db.run as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ changes: 1 });
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await newBuilder(db)
+        .withCte("adults", inner)
+        .where(
+          (u: { id: number; age: number }, ctes: { adults: { id: number } }) =>
+            u.age === 30 && u.id === ctes.adults.id,
+        )
+        .delete();
+      const [sql] = (db.run as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(sql).toMatch(/^WITH/);
+      expect(sql).toContain("DELETE");
+      expect(sql).toContain('FROM "adults"');
+      expect(sql).toContain("EXISTS");
+    });
+
+    it("delete throws after from(cteName) on a SELECT chain", async () => {
+      const inner = newBuilder(db).where(whereColumnEq("age", 21));
+      await expect(newBuilder(db).withCte("adults", inner).from("adults").delete()).rejects.toThrow(
+        "delete cannot run after .from(cteName)",
+      );
     });
   });
 });

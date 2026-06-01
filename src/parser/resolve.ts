@@ -2,13 +2,21 @@
  * Input resolvers: normalise the three QB method input shapes
  * (pre-built IR | arrow function | string / string[]) to IR structures.
  */
-import type { IrHaving, IrOrderBy, IrSelect, IrWhere, OrderDirection } from "../ir/types.js";
+import type {
+  IrHaving,
+  IrNode,
+  IrOrderBy,
+  IrSelect,
+  IrWhere,
+  OrderDirection,
+} from "../ir/types.js";
 import { isIrSelect, isIrOrderBy, isIrWhere } from "../ir/types.js";
 import {
   parseArrowToIr,
   parseArrowToIrPredicate,
   parseArrowToIrSelect,
   parseArrowToGroupByPaths,
+  parseArrowToUpdateSet,
 } from "./parse-arrow.js";
 import { DEFAULT_ROW_PARAM } from "../orm/helpers/query-plan/query-plan.js";
 
@@ -154,5 +162,26 @@ export function resolveJoinKeys(fn: string[] | ((row: unknown) => unknown)): str
     return [];
   } catch {
     return [];
+  }
+}
+
+export interface ResolvedUpdateSet {
+  set?: Record<string, unknown>;
+  setIr?: Record<string, IrNode>;
+}
+
+/** Resolve an update input (literal map or arrow fn) for the query planner. */
+export function resolveUpdateSet(
+  input: Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
+): ResolvedUpdateSet {
+  if (typeof input !== "function") {
+    return { set: input };
+  }
+  try {
+    return { setIr: parseArrowToUpdateSet(input) };
+  } catch (e) {
+    throw new Error(
+      "Failed to parse update lambda: " + (e instanceof Error ? e.message : String(e)),
+    );
   }
 }
