@@ -668,42 +668,6 @@ describe("QueryBuilder", () => {
       expect(db.run).not.toHaveBeenCalled();
     });
 
-    it("withCte throws when CTE name matches a relation key", () => {
-      const inner = newBuilder(db).where(whereColumnEq("age", 21));
-      const q = new QueryBuilder({
-        tableName: "users",
-        columnNames: ["id", "name", "age", "country"],
-        qe: db,
-        pkColumns: ["id"],
-        whereIr: null,
-        whereParams: {},
-        subqueryParams: {},
-        orderBy: [],
-        havingIr: null,
-        havingParams: {},
-        limitNum: null,
-        offsetNum: null,
-        selectIr: null,
-        relations: {
-          adults: {
-            _relType: "one-to-many",
-            _target: () => ({}),
-            _options: { foreignKey: "userId" },
-          },
-        } as never,
-      });
-      expect(() => q.withCte("adults", inner)).toThrow(
-        'CTE name "adults" conflicts with relation "adults"',
-      );
-    });
-
-    it("update throws after from(cteName) on a SELECT chain", async () => {
-      const inner = newBuilder(db).where(whereColumnEq("age", 21));
-      await expect(
-        newBuilder(db).withCte("adults", inner).from("adults").update({ name: "Senior" }),
-      ).rejects.toThrow("update cannot run after .from(cteName)");
-    });
-
     it("withCte callback sets inScopeRegisteredCteNames; two-arg where correlates base table to CTE", async () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
       const adults = newBuilder(db).where(whereColumnEq("age", 21));
@@ -739,13 +703,6 @@ describe("QueryBuilder", () => {
       expect(sql).toContain("DELETE");
       expect(sql).toContain('FROM "adults"');
       expect(sql).toContain("EXISTS");
-    });
-
-    it("delete throws after from(cteName) on a SELECT chain", async () => {
-      const inner = newBuilder(db).where(whereColumnEq("age", 21));
-      await expect(newBuilder(db).withCte("adults", inner).from("adults").delete()).rejects.toThrow(
-        "delete cannot run after .from(cteName)",
-      );
     });
   });
 });

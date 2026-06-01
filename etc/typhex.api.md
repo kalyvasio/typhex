@@ -522,32 +522,52 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
   findById(id: unknown): Promise<EntityInstance<C> | null>;
   first(): Promise<EntityInstance<C> | undefined>;
   from(): QueryBuilder<C, T>;
-  from(source: string): QueryBuilder<C, T>;
-  from<Row>(source: QueryBuilder<any, Row>): QueryBuilder<C, Row>;
+  from<Row>(source: string | QueryBuilder<any, Row>): QueryBuilder<C, Row>;
   fullJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  fullJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
   groupBy(
     columnOrFn: string | string[] | number | number[] | ((row: EntityInstance<C>) => unknown),
     ...rest: (string | number)[]
   ): this;
   having(predicate: (row: EntityInstance<C>) => boolean, params?: Record<string, unknown>): this;
   innerJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  innerJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
   insert(row: Record<string, unknown>): InsertBuilder<C, EntityInstance<C>>;
   insertGraph(graph: Record<string, unknown>): Promise<EntityInstance<C>>;
   insertGraph(graphs: Record<string, unknown>[]): Promise<EntityInstance<C>[]>;
   insertMany(rows: Record<string, unknown>[]): InsertBuilder<C, EntityInstance<C>[]>;
   leftJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  leftJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
   limit(n: number): this;
   offset(n: number): this;
   orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
   patch(set: Record<string, unknown>): Promise<EntityInstance<C> | null>;
   rightJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
+  rightJoin<E extends AnyEntityClass>(
+    entity: E,
+    on: (joined: EntityInstance<E>, row: T) => boolean,
+  ): this;
   select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U>;
   select(columns: string[]): QueryBuilder<C, T>;
   toArray(): Promise<EntityInstance<C>[]>;
+  unionAll<OC extends AnyEntityClass, OT>(other: QueryBuilder<OC, OT>): QueryBuilder<C, T>;
   update(set: Record<string, unknown>): Promise<number>;
   updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]>;
   where(predicate: (entity: T) => boolean, params?: Record<string, unknown>): this;
   withCte<IC extends AnyEntityClass, IT>(
+    name: string,
+    subquery: QueryBuilder<IC, IT>,
+  ): QueryBuilder<C, T>;
+  withRecursiveCte<IC extends AnyEntityClass, IT>(
     name: string,
     subquery: QueryBuilder<IC, IT>,
   ): QueryBuilder<C, T>;

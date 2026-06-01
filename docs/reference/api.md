@@ -283,12 +283,44 @@ await User.query()
 -- uk_adults body: FROM "users" AS "t0", "adults" WHERE ... AND "t0"."id" = "adults"."id"
 ```
 
+### `.withRecursiveCte(name, query)`
+
+Register a recursive CTE (`WITH RECURSIVE name AS (…)`). The body should combine an anchor `SELECT` with a recursive step via `.unionAll()`. Use `.from(name)` inside the recursive branch for self-reference.
+
+```ts
+const anchor = User.query().where((u) => u.age >= 65);
+const recursive = User.query()
+  .from("seniors")
+  .where((u) => u.age >= 100);
+const body = anchor.unionAll(recursive);
+const seniors = await User.query().withRecursiveCte("seniors", body).from("seniors").toArray();
+```
+
+For hierarchies, join the base entity table in the recursive step:
+
+```ts
+await Category.query()
+  .withRecursiveCte(
+    "tree",
+    Category.query()
+      .where((c) => c.parentId === null)
+      .unionAll(
+        Category.query()
+          .from("tree")
+          .innerJoin(Category, (child, parent) => child.parentId === parent.id),
+      ),
+  )
+  .from("tree")
+  .orderBy("name")
+  .toArray();
+```
+
 ### `.from(source?)`
 
 Set the outer `FROM` source:
 
 - omit — read from the entity's base table
-- `string` — registered CTE name from `.withCte()` on this builder
+- `string` — registered CTE name from `.withCte()` or `.withRecursiveCte()` on this builder
 - `QueryBuilder` — inline subquery: `FROM (SELECT …) AS t0`
 
 ```ts
@@ -304,6 +336,20 @@ SELECT ... FROM (
   SELECT ... FROM "users" AS "t0" WHERE ("t0"."age" >= ?)
 ) AS "t0"
 WHERE ("t0"."country" = ?)
+```
+
+### `.unionAll(other)`
+
+Append a `UNION ALL` branch to the current `SELECT`. Used inside recursive CTE bodies together with `.withRecursiveCte()`, or to combine two filtered sets in a non-recursive CTE:
+
+```ts
+const young = User.query().where((u) => u.age < 25);
+const senior = User.query().where((u) => u.age >= 65);
+await User.query()
+  .withCte("ends", young.unionAll(senior))
+  .from("ends")
+  .orderBy("name", "asc")
+  .toArray();
 ```
 
 ### `.toArray()`
@@ -477,6 +523,18 @@ Override the join type for a specific relation (Typhex defaults to `LEFT JOIN` f
 Contact.query()
   .innerJoin((c) => c.company)
   .where((c) => c.company.name === "Acme");
+```
+
+Join an entity table directly with a custom `ON` predicate (for example when joining a recursive CTE to its base table, or self-joining for peer rows):
+
+```ts
+User.query()
+  .innerJoin(User, (peer, u) => peer.country === u.country && peer.id !== u.id)
+  .where((u) => u.name === "Alice");
+
+Category.query()
+  .from("tree")
+  .innerJoin(Category, (child, parent) => child.parentId === parent.id);
 ```
 
 ```sql
