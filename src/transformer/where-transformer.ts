@@ -30,8 +30,7 @@ import {
   type ParamBindings,
   type ScopeFrame,
 } from "./shared.js";
-
-const ALLOWED_METHODS = new Set(["startsWith", "endsWith", "includes"]);
+import { ALLOWED_METHODS } from "../arrow/constants.js";
 
 /** Destructured outer-arrow context. When the surrounding `.select(({ id }) => …)`
  *  arrow uses object destructuring, the inner subquery's WHERE may reference
