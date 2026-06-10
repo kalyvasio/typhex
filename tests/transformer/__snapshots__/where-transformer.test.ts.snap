@@ -21,6 +21,11 @@ orders.having({ node: { kind: "binary", op: ">=", left: { kind: "aggregate", fun
 "
 `;
 
+exports[`where transformer > preserves negated exists for relation.every() 1`] = `
+"depts.where({ node: { kind: "exists", rootParam: "d", relationKey: "employees", innerParam: "e", innerWhere: { kind: "binary", op: "===", left: { kind: "member", param: "e", path: ["active"] }, right: { kind: "const", value: true } }, negated: true }, rootParam: "d", localParamNames: ["d"] }, {});
+"
+`;
+
 exports[`where transformer > transforms ({ id }) => id > 5 — destructured outer where arrow 1`] = `
 "users.where({ node: { kind: "binary", op: ">", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: 5 } }, rootParam: "u", localParamNames: ["u"] }, {});
 "
