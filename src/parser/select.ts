@@ -3,6 +3,7 @@
  * aggregates, rest-spread, and relation query chains (`.query().where()`…).
  */
 
+import type * as ESTree from "estree";
 import type { IrSelect, IrSelectRelation, IrAggregate } from "../ir/types.js";
 import { RELATION_QUERY_METHODS } from "../arrow/constants.js";
 import type { AcornExpr } from "./acorn-types.js";
@@ -13,7 +14,21 @@ import {
   normalizeSelectBodySource,
   sliceNodeSource,
 } from "./arrow-source.js";
-import { isIdent, isLiteral } from "./acorn-helpers.js";
+import {
+  isArrowFunctionExpression,
+  isCallExpression,
+  isIdent,
+  isIdentifier,
+  isLiteral,
+  isMemberExpression,
+  isObjectExpression,
+  isProperty,
+  isSpreadElement,
+  isStringLiteral,
+  memberObjectExpr,
+  objectPropertyValue,
+  propertyKeyName,
+} from "./acorn-helpers.js";
 import { resolveMemberPath } from "./acorn-member.js";
 import { parseArrowToIrPredicate, tryParseAggregate } from "./predicate-walk.js";
 
@@ -44,29 +59,35 @@ function parseTopLevelSelectExpression(
     return { param: paramName, paths: [], aliases: [], rest: true };
   }
 
-  if (expr.type === "MemberExpression") {
+  if (isMemberExpression(expr)) {
     return parseSingleColumnSelect(expr, paramName);
   }
 
-  if (expr.type === "CallExpression") {
+  if (isCallExpression(expr)) {
     return parseSingleAggregateSelect(expr, paramName);
   }
 
-  if (expr.type === "ObjectExpression") {
+  if (isObjectExpression(expr)) {
     return parseSelectObjectLiteral(expr, paramName, fullSrc);
   }
 
   return null;
 }
 
-function parseSingleColumnSelect(expr: AcornExpr, paramName: string): IrSelect | null {
+function parseSingleColumnSelect(
+  expr: ESTree.MemberExpression,
+  paramName: string,
+): IrSelect | null {
   const resolved = resolveMemberPath(expr, [paramName]);
   if (!resolved || resolved.path.length === 0) return null;
   const alias = resolved.path[resolved.path.length - 1];
   return { param: paramName, paths: [resolved.path], aliases: [alias] };
 }
 
-function parseSingleAggregateSelect(callNode: AcornExpr, paramName: string): IrSelect | null {
+function parseSingleAggregateSelect(
+  callNode: ESTree.CallExpression,
+  paramName: string,
+): IrSelect | null {
   const parsed = safeParseAggregate(callNode, paramName);
   if (!parsed) return null;
 
@@ -80,7 +101,7 @@ function parseSingleAggregateSelect(callNode: AcornExpr, paramName: string): IrS
 }
 
 function safeParseAggregate(
-  callNode: AcornExpr,
+  callNode: ESTree.CallExpression,
   paramName: string,
 ): { ir: IrAggregate; rawName: string } | null {
   try {
@@ -91,40 +112,29 @@ function safeParseAggregate(
 }
 
 function parseSelectObjectLiteral(
-  obj: AcornExpr,
+  obj: ESTree.ObjectExpression,
   paramName: string,
   fullSrc: string,
 ): IrSelect | null {
-  const o = obj as AcornExpr & { properties?: AcornExpr[] };
   const paths: string[][] = [];
   const aliases: string[] = [];
   const relations: IrSelectRelation[] = [];
   const aggregates: IrAggregate[] = [];
   let rest = false;
 
-  for (const raw of o.properties ?? []) {
-    if (raw.type === "SpreadElement") {
-      const spread = raw as AcornExpr & { argument?: AcornExpr };
-      if (!isIdent(spread.argument as AcornExpr, paramName)) return null;
+  for (const raw of obj.properties) {
+    if (isSpreadElement(raw)) {
+      if (!isIdent(raw.argument, paramName)) return null;
       rest = true;
       continue;
     }
 
-    const prop = raw as AcornExpr & {
-      type?: string;
-      computed?: boolean;
-      key?: AcornExpr;
-      value?: AcornExpr;
-    };
-    if (prop.type !== "Property" || prop.computed) return null;
+    if (!isProperty(raw) || raw.computed) return null;
 
-    const keyNode = prop.key;
-    const keyName =
-      (keyNode as AcornExpr & { name?: string })?.name ??
-      (keyNode as AcornExpr & { value?: unknown })?.value;
-    if (typeof keyName !== "string") return null;
+    const keyName = propertyKeyName(raw.key);
+    if (!keyName) return null;
 
-    const value = prop.value;
+    const value = objectPropertyValue(raw.value);
     if (!value) return null;
 
     const handled = parseSelectProperty(value, keyName, paramName, fullSrc);
@@ -155,11 +165,11 @@ function parseSelectProperty(
   paramName: string,
   fullSrc: string,
 ): SelectPropertyResult | null {
-  if (value.type === "ObjectExpression") {
+  if (isObjectExpression(value)) {
     return parseNestedRelationProperty(value, keyName, paramName);
   }
 
-  if (value.type === "CallExpression") {
+  if (isCallExpression(value)) {
     return parseCallSelectProperty(value, keyName, paramName, fullSrc);
   }
 
@@ -169,7 +179,7 @@ function parseSelectProperty(
 }
 
 function parseNestedRelationProperty(
-  value: AcornExpr,
+  value: ESTree.ObjectExpression,
   keyName: string,
   paramName: string,
 ): SelectPropertyResult | null {
@@ -182,7 +192,7 @@ function parseNestedRelationProperty(
 }
 
 function parseCallSelectProperty(
-  value: AcornExpr,
+  value: ESTree.CallExpression,
   keyName: string,
   paramName: string,
   fullSrc: string,
@@ -220,28 +230,19 @@ function applySelectPropertyResult(
 }
 
 function parseRelationSubSelect(
-  obj: AcornExpr,
+  obj: ESTree.ObjectExpression,
   paramName: string,
 ): { relation: string; subPaths: string[][] } | null {
-  const o = obj as AcornExpr & { properties?: AcornExpr[] };
   const subPaths: string[][] = [];
   let relation: string | null = null;
 
-  for (const raw of o.properties ?? []) {
-    const prop = raw as AcornExpr & {
-      type?: string;
-      computed?: boolean;
-      key?: AcornExpr;
-      value?: AcornExpr;
-    };
-    if (prop.type !== "Property" || prop.computed) return null;
+  for (const raw of obj.properties) {
+    if (!isProperty(raw) || raw.computed) return null;
 
-    const keyName =
-      (prop.key as AcornExpr & { name?: string })?.name ??
-      (prop.key as AcornExpr & { value?: unknown })?.value;
-    if (typeof keyName !== "string") return null;
+    const keyName = propertyKeyName(raw.key);
+    if (!keyName) return null;
 
-    const value = prop.value;
+    const value = objectPropertyValue(raw.value);
     if (!value) return null;
 
     const resolved = resolveMemberPath(value, [paramName]);
@@ -261,11 +262,11 @@ function parseRelationSubSelect(
 
 interface ChainMethod {
   name: string;
-  args: AcornExpr[];
+  args: Array<ESTree.Expression | ESTree.SpreadElement>;
 }
 
 function parseRelationQueryChain(
-  node: AcornExpr,
+  node: ESTree.CallExpression,
   parentParamName: string,
   outputKey: string,
   source: string,
@@ -284,24 +285,26 @@ function parseRelationQueryChain(
   return result;
 }
 
-function collectChainMethods(node: AcornExpr): { methods: ChainMethod[]; head: AcornExpr } | null {
+function collectChainMethods(
+  node: ESTree.CallExpression,
+): { methods: ChainMethod[]; head: ESTree.MemberExpression } | null {
   const methods: ChainMethod[] = [];
   let current: AcornExpr | null = node;
 
-  while (current && current.type === "CallExpression") {
-    const n = current as AcornExpr & { callee?: AcornExpr; arguments?: AcornExpr[] };
-    const callee = n.callee as AcornExpr;
-    if (!callee || callee.type !== "MemberExpression") return null;
+  while (current && isCallExpression(current)) {
+    const callee = current.callee;
+    if (!isMemberExpression(callee)) return null;
 
-    const cal = callee as AcornExpr & { property?: AcornExpr; object?: AcornExpr };
-    const methodName = (cal.property as AcornExpr & { name?: string })?.name;
+    const methodName = isIdentifier(callee.property) ? callee.property.name : undefined;
     if (!methodName || !RELATION_QUERY_METHODS.has(methodName)) return null;
 
-    methods.push({ name: methodName, args: n.arguments ?? [] });
-    current = cal.object as AcornExpr;
+    methods.push({ name: methodName, args: current.arguments });
+    const object = memberObjectExpr(callee);
+    if (!object) return null;
+    current = object;
   }
 
-  if (!current || current.type !== "MemberExpression") return null;
+  if (!current || !isMemberExpression(current)) return null;
   return { methods, head: current };
 }
 
@@ -324,8 +327,12 @@ function applyChainMethod(method: ChainMethod, result: IrSelectRelation, source:
   }
 }
 
-function applyWhereMethod(args: AcornExpr[], result: IrSelectRelation, source: string): boolean {
-  if (args.length !== 1 || args[0].type !== "ArrowFunctionExpression") return false;
+function applyWhereMethod(
+  args: Array<ESTree.Expression | ESTree.SpreadElement>,
+  result: IrSelectRelation,
+  source: string,
+): boolean {
+  if (args.length !== 1 || !isArrowFunctionExpression(args[0])) return false;
 
   const argSrc = sliceNodeSource(args[0], source);
   if (!argSrc) return false;
@@ -341,16 +348,20 @@ function applyWhereMethod(args: AcornExpr[], result: IrSelectRelation, source: s
   }
 }
 
-function applyOrderByMethod(args: AcornExpr[], result: IrSelectRelation): boolean {
+function applyOrderByMethod(
+  args: Array<ESTree.Expression | ESTree.SpreadElement>,
+  result: IrSelectRelation,
+): boolean {
   if (args.length < 1 || args.length > 2) return false;
 
   const colNode = args[0];
-  if (!isLiteral(colNode)) return false;
-  const col = String((colNode as AcornExpr & { value?: unknown }).value);
+  if (!colNode || colNode.type === "SpreadElement" || !isLiteral(colNode)) return false;
+  const col = String(colNode.value);
   if (!col) return false;
 
+  const dirArg = args.length === 2 ? args[1] : undefined;
   const dir =
-    args.length === 2 && (args[1] as AcornExpr & { value?: unknown }).value === "desc"
+    dirArg && dirArg.type !== "SpreadElement" && isStringLiteral(dirArg) && dirArg.value === "desc"
       ? "desc"
       : "asc";
   result.orderBy = result.orderBy ?? [];
@@ -362,16 +373,16 @@ function applyOrderByMethod(args: AcornExpr[], result: IrSelectRelation): boolea
 }
 
 function applyLimitOrOffsetMethod(
-  args: AcornExpr[],
+  args: Array<ESTree.Expression | ESTree.SpreadElement>,
   result: IrSelectRelation,
   kind: "limit" | "offset",
 ): boolean {
   if (args.length !== 1) return false;
 
   const node = args[0];
-  if (!isLiteral(node)) return false;
+  if (!node || node.type === "SpreadElement" || !isLiteral(node)) return false;
 
-  const n = Number((node as AcornExpr & { value?: unknown }).value);
+  const n = Number(node.value);
   if (!Number.isFinite(n) || n < 0) return false;
 
   if (kind === "limit") result.limitNum = Math.floor(n);
@@ -379,8 +390,12 @@ function applyLimitOrOffsetMethod(
   return true;
 }
 
-function applySelectMethod(args: AcornExpr[], result: IrSelectRelation, source: string): boolean {
-  if (args.length !== 1 || args[0].type !== "ArrowFunctionExpression") return false;
+function applySelectMethod(
+  args: Array<ESTree.Expression | ESTree.SpreadElement>,
+  result: IrSelectRelation,
+  source: string,
+): boolean {
+  if (args.length !== 1 || !isArrowFunctionExpression(args[0])) return false;
 
   const argSrc = sliceNodeSource(args[0], source);
   if (!argSrc) return false;

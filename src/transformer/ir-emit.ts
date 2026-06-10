@@ -4,7 +4,7 @@
  */
 
 import ts from "typescript";
-import type { IrNode, IrSelect, IrWhere, IrBinary, IrOrderBy, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrSelect, IrWhere, IrOrderBy, IrAggregate } from "../ir/types.js";
 
 function valueToTsExpression(value: unknown, f: ts.NodeFactory): ts.Expression {
   if (value === null) return f.createNull();
@@ -68,6 +68,7 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
         f.createPropertyAssignment("left", irNodeToTsLiteral(ir.left)),
         f.createPropertyAssignment("right", irNodeToTsLiteral(ir.right)),
       );
+      if (ir.negated) props.push(f.createPropertyAssignment("negated", f.createTrue()));
       break;
     case "call":
       props.push(
@@ -86,6 +87,7 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
         f.createPropertyAssignment("innerParam", f.createStringLiteral(ir.innerParam)),
         f.createPropertyAssignment("innerWhere", irNodeToTsLiteral(ir.innerWhere)),
       );
+      if (ir.negated) props.push(f.createPropertyAssignment("negated", f.createTrue()));
       break;
     case "subqueryRef":
       props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));

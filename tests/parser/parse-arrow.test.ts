@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { parseArrowToIr, parseArrowToIrSelect } from "../../src/parser/parse-arrow.js";
+import {
+  parseArrowToGroupByPaths,
+  parseArrowToIr,
+  parseArrowToIrSelect,
+} from "../../src/parser/parse-arrow.js";
 
 describe("parser/parse-arrow", () => {
   it("parses simple comparison", () => {
@@ -104,6 +108,22 @@ describe("parser/parse-arrow", () => {
       expect(ir.innerWhere.kind).toBe("binary");
       if (ir.innerWhere.kind === "binary") {
         expect(ir.innerWhere.op).toBe("===");
+        expect((ir.innerWhere.left as { path: string[] }).path).toEqual(["name"]);
+        expect((ir.innerWhere.right as { value: unknown }).value).toBe("Alice");
+      }
+    }
+  });
+
+  it("parses relation.some() callback with block-body return", () => {
+    const fn = (d: { employees: { name: string }[] }) =>
+      d.employees.some((e) => {
+        return e.name === "Alice";
+      });
+    const ir = parseArrowToIr(fn, { paramNames: ["d"] });
+    expect(ir.kind).toBe("exists");
+    if (ir.kind === "exists") {
+      expect(ir.innerWhere.kind).toBe("binary");
+      if (ir.innerWhere.kind === "binary") {
         expect((ir.innerWhere.left as { path: string[] }).path).toEqual(["name"]);
         expect((ir.innerWhere.right as { value: unknown }).value).toBe("Alice");
       }
@@ -301,5 +321,14 @@ describe("parser/parseArrowToIrSelect", () => {
     expect(ir?.relations?.[0].orderBy).toEqual([
       { expr: { kind: "member", param: "u", path: ["title"] }, direction: "asc" },
     ]);
+  });
+});
+
+describe("parser/parseArrowToGroupByPaths", () => {
+  it("parses block-body groupBy arrow with a single return", () => {
+    const fn = (o: { category: string }) => {
+      return o.category;
+    };
+    expect(parseArrowToGroupByPaths(fn)).toEqual([["category"]]);
   });
 });

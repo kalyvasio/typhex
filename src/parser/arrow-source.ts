@@ -4,20 +4,21 @@
  */
 
 import * as acorn from "acorn";
-import type { AcornExpr } from "./acorn-types.js";
+import type { AcornExpr, AcornNode } from "./acorn-types.js";
 
 /** Parse a single JS expression source string into an acorn AST node; throws on failure. */
 export function parseExpressionSource(src: string): AcornExpr {
-  const ast = acorn.parse(src, { ecmaVersion: "latest", locations: true }) as {
-    body?: Array<{ expression?: AcornExpr }>;
-  };
-  const expr = ast.body?.[0]?.expression;
-  if (!expr) throw new Error("Expected expression: " + src);
-  return expr;
+  const ast = acorn.parse(src, { ecmaVersion: "latest", locations: true });
+  const stmt = ast.body[0];
+  if (stmt?.type !== "ExpressionStatement" || !stmt.expression) {
+    throw new Error("Expected expression: " + src);
+  }
+  // Acorn's Expression type is ESTree-compatible; assert once at the parse boundary.
+  return stmt.expression as AcornExpr;
 }
 
 /** Slice the original source text covered by an acorn node using its start/end offsets. */
-export function sliceNodeSource(node: AcornExpr, source: string): string | null {
+export function sliceNodeSource(node: AcornNode, source: string): string | null {
   const start = node.start;
   const end = node.end;
   if (typeof start !== "number" || typeof end !== "number") return null;

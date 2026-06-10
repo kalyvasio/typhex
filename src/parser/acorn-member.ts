@@ -3,6 +3,7 @@
  */
 
 import type { AcornExpr } from "./acorn-types.js";
+import { isIdentifier, isMemberExpression, memberObjectExpr } from "./acorn-helpers.js";
 
 /**
  * Walk a MemberExpression chain rooted at one of `params` and return the
@@ -13,20 +14,18 @@ export function resolveMemberPath(
   node: AcornExpr,
   params: string[],
 ): { param: string; path: string[] } | null {
-  const n = node as AcornExpr & { type?: string; name?: string; computed?: boolean; object?: AcornExpr; property?: AcornExpr };
-  if (n.type === "Identifier" && params.includes(n.name ?? "")) {
-    return { param: n.name!, path: [] };
+  if (isIdentifier(node) && params.includes(node.name)) {
+    return { param: node.name, path: [] };
   }
-  if (n.type !== "MemberExpression" || n.computed) return null;
+  if (!isMemberExpression(node) || node.computed) return null;
+  if (!isIdentifier(node.property)) return null;
 
-  const prop = n.property;
-  if (!prop || prop.type !== "Identifier") return null;
-  const propName = (prop as AcornExpr & { name?: string }).name;
-  if (!propName) return null;
+  const object = memberObjectExpr(node);
+  if (!object) return null;
 
-  const parent = resolveMemberPath(n.object as AcornExpr, params);
+  const parent = resolveMemberPath(object, params);
   if (!parent) return null;
-  return { param: parent.param, path: [...parent.path, propName] };
+  return { param: parent.param, path: [...parent.path, node.property.name] };
 }
 
 /** Same as resolveMemberPath but constrained to a single parameter name. */

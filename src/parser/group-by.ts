@@ -3,9 +3,10 @@
  * positional column references.
  */
 
+import type * as ESTree from "estree";
 import type { AcornExpr } from "./acorn-types.js";
-import { parseExpressionSource } from "./arrow-source.js";
-import { isNumberLiteral } from "./acorn-helpers.js";
+import { extractArrowBody, inferParamNames, parseExpressionSource } from "./arrow-source.js";
+import { isArrayExpression, isMemberExpression, isNumberLiteral } from "./acorn-helpers.js";
 import { resolvePathFromParam } from "./acorn-member.js";
 
 /**
@@ -19,13 +20,13 @@ import { resolvePathFromParam } from "./acorn-member.js";
  *
  * Returns an empty array for unrecognized shapes.
  */
-export function parseArrowToGroupByPaths(fn: (...args: unknown[]) => unknown): Array<string[] | number> {
+export function parseArrowToGroupByPaths(
+  fn: (...args: unknown[]) => unknown,
+): Array<string[] | number> {
   const src = fn.toString();
-  const idx = src.indexOf("=>");
-  if (idx === -1) return [];
-
-  const body = src.slice(idx + 2).trim();
-  const paramName = src.slice(0, idx).replaceAll(/[()]/g, "").trim() || "u";
+  const body = extractArrowBody(src);
+  if (!body) return [];
+  const paramName = inferParamNames(src)[0] ?? "u";
 
   let expr: AcornExpr;
   try {
@@ -39,33 +40,29 @@ export function parseArrowToGroupByPaths(fn: (...args: unknown[]) => unknown): A
 
 /** Dispatch groupBy body expression to the right extractor for its shape. */
 function extractGroupByEntries(expr: AcornExpr, paramName: string): Array<string[] | number> {
-  if (isNumberLiteral(expr)) {
-    const n = expr as AcornExpr & { value?: number };
-    return [n.value as number];
-  }
+  if (isNumberLiteral(expr)) return [expr.value];
 
-  if (expr.type === "MemberExpression") {
+  if (isMemberExpression(expr)) {
     const path = resolvePathFromParam(expr, paramName);
     return path && path.length > 0 ? [path] : [];
   }
 
-  if (expr.type === "ArrayExpression") {
-    const arr = expr as AcornExpr & { elements?: Array<AcornExpr | null> };
-    return collectGroupByArrayElements(arr.elements ?? [], paramName);
+  if (isArrayExpression(expr)) {
+    return collectGroupByArrayElements(expr.elements, paramName);
   }
 
   return [];
 }
 
 function collectGroupByArrayElements(
-  elements: Array<AcornExpr | null>,
+  elements: Array<AcornExpr | ESTree.SpreadElement | null>,
   paramName: string,
 ): Array<string[] | number> {
   const entries: Array<string[] | number> = [];
   for (const el of elements) {
-    if (!el) continue;
+    if (!el || el.type === "SpreadElement") continue;
     if (isNumberLiteral(el)) {
-      entries.push((el as AcornExpr & { value?: number }).value as number);
+      entries.push(el.value);
       continue;
     }
     const path = resolvePathFromParam(el, paramName);

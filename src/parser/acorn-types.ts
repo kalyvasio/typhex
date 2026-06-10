@@ -1,8 +1,12 @@
 /**
- * Acorn AST node type used internally by the runtime parser. Acorn's typed
- * AST is opaque; we access node properties defensively via this alias.
+ * ESTree node aliases for the runtime parser. Acorn's AST conforms to ESTree;
+ * these types replace the previous opaque `acorn.Node & Record<string, unknown>`.
  */
 
-import type * as acorn from "acorn";
+import type * as ESTree from "estree";
 
-export type AcornExpr = acorn.Node & Record<string, unknown>;
+/** ESTree node with optional acorn source offsets. */
+export type AcornNode = ESTree.Node & { start?: number; end?: number };
+export type AcornExpr = ESTree.Expression;
+export type AcornPattern = ESTree.Pattern;
+export type AcornFunctionBody = ESTree.BlockStatement | ESTree.Expression;

@@ -73,6 +73,12 @@ describe("where transformer", () => {
     ).toMatchSnapshot();
   });
 
+  it("preserves negated exists for relation.every()", () => {
+    const output = transform("depts.where((d) => d.employees.every((e) => e.active === true));");
+    expect(output).toContain("negated: true");
+    expect(output).toMatchSnapshot();
+  });
+
   it("transforms inline subquery: (a) => a.postId in Post.query().where(...).select(p => p.id)", () => {
     const source = `
 class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }

@@ -72,6 +72,7 @@
     "@eslint/js": "^10.0.1",
     "@microsoft/api-extractor": "^7.58.7",
     "@types/acorn": "^4.0.6",
+    "@types/estree": "^1.0.8",
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^22.10.1",
     "@types/pg": "^8.18.0",
