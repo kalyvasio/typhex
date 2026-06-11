@@ -175,23 +175,6 @@ const projected = await User.query()
   .toArray();
 ```
 
-### Computed Expressions
-
-Ternaries, arithmetic, bitwise operators, and strict null checks work in predicates, projections, aggregates, and ordering:
-
-```ts
-const stats = await Order.query()
-  .select((o) => ({
-    revenue: o.price * o.qty,
-    bucket: o.qty < 5 ? "small" : "large",
-  }))
-  .where((o) => o.deletedAt === null)
-  .orderBy((o) => o.price * o.qty, "desc")
-  .toArray();
-```
-
-See the [Expressions guide](docs/guide/expressions.md) for details and `examples/case-arithmetic-extras/` for a runnable demo.
-
 ### String Predicates and IN
 
 ```ts
@@ -259,15 +242,14 @@ Runtime mode supports a practical safe subset:
 
 - Comparisons: `===`, `!==`, `==`, `!=`, `>`, `>=`, `<`, `<=`
 - Logical operators: `&&`, `||`, `!`
-- Arithmetic: `+`, `-`, `*`, `/`, `%`
-- Bitwise: `&`, `|`, `^`, `<<`, `>>`, `~` (XOR uses `#` on Postgres; SQLite emulates it)
-- Ternary conditionals (`a ? b : c`)
 - Member access, literals, array literals, and the `in` operator
 - String methods: `.startsWith()`, `.endsWith()`, `.includes()`
 - Aggregates in `.select()` and `.having()`: `count()`, `sum()`, `avg()`, `min()`, `max()`, `distinct(...)`
 - Relation predicates such as `department.employees.some((e) => e.name === "Alice")`
 - Universal relation predicates such as `department.employees.every((e) => e.active === true)`
 - Relation query chains in `.select()`
+
+Computed expressions (ternaries, arithmetic, bitwise operators, null checks) are also supported — see the [Expressions guide](docs/guide/expressions.md).
 
 Runtime mode does not support unsigned right shift (`>>>`), optional chaining, nullish coalescing, arbitrary function calls, loops, assignments, `await`, `new`, or `instanceof`.
 
