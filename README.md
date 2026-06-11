@@ -19,36 +19,6 @@ Typhex compiles those predicates to safe, parameterized SQL through either a Typ
 - **Runtime fallback**: Plain JavaScript and direct `tsx` scripts work with explicit closure variables.
 - **ORM features**: Relations, aggregations, transactions, bulk inserts, upserts, and graph inserts.
 
-### CASE expressions, arithmetic, and computed columns
-
-Native ternary, arithmetic (`+ - * / %`), and bitwise operators (`& | ^ << >> ~`) are supported in `WHERE`, `HAVING`, aggregate arguments, `SELECT` projections, and `ORDER BY`:
-
-```ts
-// SUM(CASE WHEN active THEN 1 ELSE 0 END) — ternary inside an aggregate
-orders.select((o) => ({ active: sum(o.active ? 1 : 0) })).toArray();
-
-// Computed projection (no aggregate) — arithmetic + ternary
-orders.select((o) => ({
-  revenue: o.price * o.qty,
-  bucket:  o.qty < 5 ? "small" : "large",
-})).toArray();
-
-// `=== null` rewrites to SQL `IS NULL`
-orders.where((o) => o.deletedAt === null).toArray();
-
-// ORDER BY a derived expression — pin "small" rows to the bottom
-orders.orderBy((o) => o.qty < 5 ? 1 : 0).toArray();
-
-// Closure capture in .select() — pass the values as the second argument
-const cutoff = 5;
-orders
-  .select((o) => ({ category: o.category, smalls: sum(o.qty < cutoff ? 1 : 0) }), { cutoff })
-  .groupBy("category")
-  .toArray();
-```
-
-See `examples/case-arithmetic-extras/` for a runnable end-to-end demo.
-
 ## Installation
 
 For SQLite:
@@ -248,7 +218,23 @@ const authors = await Author.query()
   .toArray();
 ```
 
-Scalar subqueries in `.select()`, `.where()` comparisons, and `.orderBy()` are transformer-only.
+Scalar subqueries in `.select()`, `.where()` comparisons, and `.orderBy()` are transformer-only. See the [Subqueries guide](docs/guide/subqueries.md) for the supported shapes.
+
+### CTEs and Unions
+
+Use common table expressions when an inner query should be named and reused by an outer query:
+
+```ts
+const adults = User.query().where((u) => u.age >= 18);
+
+const workingAge = await User.query()
+  .withCte("adults", adults)
+  .from("adults")
+  .where((u) => u.age < 65)
+  .toArray();
+```
+
+Typhex also supports `unionAll()`, recursive CTEs, entity-table joins for recursive branches, and CTE-correlated `update()` / `delete()`. See the [CTEs and Unions guide](docs/guide/cte-and-unions.md).
 
 ## Supported Predicate Syntax
 
@@ -256,14 +242,14 @@ Runtime mode supports a practical safe subset:
 
 - Comparisons: `===`, `!==`, `==`, `!=`, `>`, `>=`, `<`, `<=`
 - Logical operators: `&&`, `||`, `!`
-- Arithmetic: `+`, `-`, `*`, `/`, `%`
-- Bitwise: `&`, `|`, `^`, `<<`, `>>`, `~` (XOR uses `#` on Postgres; SQLite emulates it)
-- Ternary conditionals (`a ? b : c`)
 - Member access, literals, array literals, and the `in` operator
 - String methods: `.startsWith()`, `.endsWith()`, `.includes()`
 - Aggregates in `.select()` and `.having()`: `count()`, `sum()`, `avg()`, `min()`, `max()`, `distinct(...)`
 - Relation predicates such as `department.employees.some((e) => e.name === "Alice")`
+- Universal relation predicates such as `department.employees.every((e) => e.active === true)`
 - Relation query chains in `.select()`
+
+Computed expressions (ternaries, arithmetic, bitwise operators, null checks) are also supported — see the [Expressions guide](docs/guide/expressions.md).
 
 Runtime mode does not support unsigned right shift (`>>>`), optional chaining, nullish coalescing, arbitrary function calls, loops, assignments, `await`, `new`, or `instanceof`.
 
@@ -403,9 +389,15 @@ See the [Architecture reference](docs/reference/architecture.md).
 - [Entities & Relations](docs/guide/entities-relations.md)
 - [Querying Relations](docs/guide/querying-relations.md)
 - [Filtering by Relations](docs/guide/filtering-by-relations.md)
+- [Expressions](docs/guide/expressions.md)
 - [Aggregations](docs/guide/aggregations.md)
+- [Subqueries](docs/guide/subqueries.md)
+- [CTEs and Unions](docs/guide/cte-and-unions.md)
 - [Bulk Operations](docs/guide/bulk-operations.md)
 - [Transactions](docs/guide/transactions.md)
+- [Migrations](docs/migrations/overview.md)
+- [SQLite Driver](docs/drivers/sqlite.md)
+- [PostgreSQL Driver](docs/drivers/postgres.md)
 - [API Reference](docs/reference/api.md)
 
 ## Contributing

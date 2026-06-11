@@ -32,7 +32,7 @@ Inspects which migrations have been applied and which are pending.
 
 ```ts
 const status = await db.migrationStatus("./migrations");
-// Returns: { applied: string[], pending: string[] }
+// Returns: { applied: MigrationRecord[], pending: string[] }
 ```
 
 ## Workflow
@@ -121,3 +121,23 @@ npx typhex migrate:generate --entities ./dist/entities.js --db ./app.db --dir ./
 npx typhex migrate:run --db ./app.db --dir ./migrations
 npx typhex migrate:status --db ./app.db --dir ./migrations
 ```
+
+The same config can create a `Db` in application code:
+
+```js
+// typhex.config.js
+export default {
+  dialect: "sqlite",
+  database: "./app.db",
+  migrationsFolder: "./migrations",
+  entities: "./dist/entities.js",
+};
+```
+
+```ts
+import { Db } from "typhex";
+
+const db = await Db.fromConfig();
+```
+
+Use `url` instead of `database` for PostgreSQL connection strings.
