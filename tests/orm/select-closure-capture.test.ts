@@ -152,7 +152,7 @@ describe(".select() closure-variable capture", () => {
       },
       { date },
     );
-    await expect(qb.toArray()).rejects.toThrow(/Cannot inline SQL literal of type/);
+    await expect(qb.toArray()).rejects.toThrow(/Cannot inline SQL literal "date" of type/);
   });
 });
 

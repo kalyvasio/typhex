@@ -65,7 +65,6 @@ import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../e
 import { ExprBuilder, type SubqueryPlans } from "./expr-builder.js";
 import { SelectClassifier, EMPTY_CLASSIFIED, type ClassifiedSelect } from "./select-classifier.js";
 import { QueryIrAnalyzer, type ExprIrAnalysis, type QueryIrAnalysis } from "./query-ir-analyzer.js";
-import { inlineOrderByParams, inlineSelectParams } from "./ir-inline-params.js";
 
 /** Default name for the row-param when no explicit one is in scope. */
 export const DEFAULT_ROW_PARAM = "u";
@@ -334,21 +333,24 @@ export class QueryPlanBuilder {
       cteNames,
     );
 
-    const selectIr = inlineSelectParams(this.state.selectIr, this.state.inlineParams);
-    const orderByIr = inlineOrderByParams(this.state.orderBy, this.state.inlineParams);
-
     const whereExpr =
       hasFilter && this.state.whereIr ? exprBuilder.convert(this.state.whereIr.node) : null;
     const havingExpr =
       isSelect && this.state.havingIr ? exprBuilder.convert(this.state.havingIr.node) : null;
-    const orderBy = isSelect ? this.buildOrderBy(exprBuilder, orderByIr) : [];
+    const orderBy = isSelect ? this.buildOrderBy(exprBuilder) : [];
     const groupBy = isSelect ? this.buildGroupBy(exprBuilder) : [];
-    const selectItems = isSelect ? this.buildSelectItems(classified, exprBuilder, selectIr) : [];
+    const selectItems = isSelect
+      ? this.buildSelectItems(classified, exprBuilder, this.state.selectIr)
+      : [];
 
     const selectAll =
-      !selectIr ||
-      (selectIr.paths.length === 0 &&
-        !(selectIr.aggregates?.length || selectIr.expressions?.length || selectIr.subqueries?.length));
+      !this.state.selectIr ||
+      (this.state.selectIr.paths.length === 0 &&
+        !(
+          this.state.selectIr.aggregates?.length ||
+          this.state.selectIr.expressions?.length ||
+          this.state.selectIr.subqueries?.length
+        ));
     const relationJoinSpecs = joins.map(toJoinSpec);
     const entityJoinSpecs = this.buildEntityJoins(
       paramToAlias,
@@ -690,7 +692,10 @@ export class QueryPlanBuilder {
     }
 
     for (const agg of select.aggregates ?? []) {
-      items.push({ expr: exprBuilder.convertAggregate(agg), alias: agg.alias });
+      items.push({
+        expr: exprBuilder.convertAggregate(agg, undefined, this.state.inlineParams),
+        alias: agg.alias,
+      });
     }
 
     for (const entry of select.subqueries ?? []) {
@@ -698,18 +703,21 @@ export class QueryPlanBuilder {
     }
 
     for (const entry of select.expressions ?? []) {
-      items.push({ expr: exprBuilder.convert(entry.expr), alias: entry.alias });
+      items.push({
+        expr: exprBuilder.convert(entry.expr, undefined, this.state.inlineParams),
+        alias: entry.alias,
+      });
     }
 
     return items;
   }
 
-  private buildOrderBy(exprBuilder: ExprBuilder, orderBy: typeof this.state.orderBy): OrderItem[] {
-    return orderBy.map((o) => ({
+  private buildOrderBy(exprBuilder: ExprBuilder): OrderItem[] {
+    return this.state.orderBy.map((o) => ({
       expr:
         o.expr.kind === "member"
           ? exprBuilder.resolveColumn(o.expr.param, o.expr.path)
-          : exprBuilder.convert(o.expr),
+          : exprBuilder.convert(o.expr, undefined, this.state.inlineParams),
       direction: o.direction,
     }));
   }
