@@ -77,7 +77,7 @@ export function resolveOrderBy(
         );
       }
       if (ir.kind !== "member" || ir.path.length === 0) {
-        if (ir.kind === "case" || ir.kind === "binary") {
+        if (ir.kind === "case" || ir.kind === "binary" || ir.kind === "unary") {
           return { expr: ir, direction };
         }
         throw new Error(

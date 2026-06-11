@@ -178,4 +178,13 @@ authors.select((a: any) => ({ topScore: Post.query().where((p: any) => p.authorI
       "const c = 5; users.select((u) => ({ x: sum(u.age > c ? 1 : 0) }));"
     )).toMatchSnapshot();
   });
+
+  it("emits merged free vars and subquery params as one second arg", () => {
+    const source = `
+const c = 5;
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+authors.select((a: any) => ({ n: Post.query().where((p: any) => p.authorId === a.id && p.score > c).select(() => count()) }));
+`;
+    expect(transformWithChecker(source)).toMatchSnapshot();
+  });
 });

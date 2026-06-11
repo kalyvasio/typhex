@@ -30,4 +30,8 @@ describe("orderBy transformer", () => {
   it("transforms u => u.price * u.qty with 'desc' to expr-bearing IrOrderBy (arithmetic)", () => {
     expect(transform(`orders.orderBy(u => u.price * u.qty, "desc");`)).toMatchSnapshot();
   });
+
+  it("emits closure capture vars as second arg", () => {
+    expect(transform(`const c = 5; orders.orderBy((u) => (u.qty < c ? 0 : 1));`)).toMatchSnapshot();
+  });
 });

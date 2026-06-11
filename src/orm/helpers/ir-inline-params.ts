@@ -15,7 +15,7 @@ export function inlineParamsInIr(node: IrNode, paramValues: Record<string, unkno
       typeof value !== "number" &&
       typeof value !== "boolean"
     ) {
-      throw new Error(`[typhex] Cannot inline aggregate-arg literal of type ${typeof value}`);
+      throw new Error(`[typhex] Cannot inline SQL literal of type ${typeof value}`);
     }
     return { kind: "const", value };
   });

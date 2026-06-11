@@ -281,28 +281,24 @@ export function transformSelectCall(
   if (!irSelect) return null;
 
   const args: ts.Expression[] = [irSelectToTsLiteral(irSelect)];
-  if (capturedSubqueries.length > 0) {
-    args.push(buildSubqueryParamsLiteral(capturedSubqueries));
-  } else if (freeVars.size > 0) {
-    args.push(buildFreeVarsLiteral([...freeVars]));
+  if (capturedSubqueries.length > 0 || freeVars.size > 0) {
+    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
 
-function buildFreeVarsLiteral(freeVars: string[]): ts.ObjectLiteralExpression {
-  const f = ts.factory;
-  return f.createObjectLiteralExpression(
-    freeVars.map((v) => f.createShorthandPropertyAssignment(f.createIdentifier(v))),
-  );
-}
-
-function buildSubqueryParamsLiteral(
+function buildParamsLiteral(
+  freeVars: string[],
   capturedSubqueries: CapturedSubquery[],
 ): ts.ObjectLiteralExpression {
   const f = ts.factory;
-  return f.createObjectLiteralExpression(
-    capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),
+  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
+    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
   );
+  for (const sub of capturedSubqueries) {
+    props.push(f.createPropertyAssignment(sub.key, sub.expr));
+  }
+  return f.createObjectLiteralExpression(props);
 }
 
 export { irAggregateToTsLiteral };

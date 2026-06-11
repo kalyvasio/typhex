@@ -32,7 +32,8 @@ export function transformOrderByCall(
   if (!paramName) return null;
 
   const capturedSubqueries: CapturedSubquery[] = [];
-  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedSubqueries);
+  const freeVars = new Set<string>();
+  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedSubqueries, freeVars);
   if (!expr) return null;
 
   const direction = parseDirectionArg(call.arguments);
@@ -41,7 +42,9 @@ export function transformOrderByCall(
   const args: ts.Expression[] = [irOrderByToTsLiteral({ expr, direction })];
   if (capturedSubqueries.length > 0) {
     args.push(ts.factory.createStringLiteral(direction));
-    args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
+  } else if (freeVars.size > 0) {
+    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
@@ -53,6 +56,7 @@ function extractOrderByExpr(
   paramName: string,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
+  freeVars: Set<string>,
 ): IrNode | null {
   const path = extractColumnPath(body, paramName);
   if (path) return { kind: "member", param: paramName, path };
@@ -60,20 +64,24 @@ function extractOrderByExpr(
     if (isTyphexQueryChain(body, checker)) {
       return captureSubqueryRef(body, capturedSubqueries);
     }
-    const freeVars = new Set<string>();
     const ir = parseExprToIr(body, [paramName], freeVars);
     if (ir && ir.kind !== "member" && ir.kind !== "param") return ir;
   }
   return null;
 }
 
-function buildSubqueryParamsLiteral(
+function buildParamsLiteral(
+  freeVars: string[],
   capturedSubqueries: CapturedSubquery[],
 ): ts.ObjectLiteralExpression {
   const f = ts.factory;
-  return f.createObjectLiteralExpression(
-    capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),
+  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
+    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
   );
+  for (const sub of capturedSubqueries) {
+    props.push(f.createPropertyAssignment(sub.key, sub.expr));
+  }
+  return f.createObjectLiteralExpression(props);
 }
 
 /** Return the first parameter's name if it's a plain identifier; null otherwise. */

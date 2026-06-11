@@ -91,6 +91,25 @@ describe(".select() closure-variable capture", () => {
     expect(sql).toContain(`ORDER BY (CASE WHEN ("t0"."qty" < 10) THEN 0 ELSE 1 END) ASC`);
   });
 
+  it("substitutes inside arithmetic ORDER BY expression via selectParams", async () => {
+    const factor = 100;
+    await newBuilder(qe)
+      .select((o: { price: number }) => ({ price: o.price }), { factor })
+      .orderBy((o: { price: number }) => o.price * factor)
+      .toArray();
+    const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(sql).toContain(`ORDER BY ("t0"."price" * 100) ASC`);
+  });
+
+  it("accepts unary computed ORDER BY at runtime", async () => {
+    await newBuilder(qe)
+      .select((o: { active: number; flags: number }) => ({ active: o.active, flags: o.flags }))
+      .orderBy((o: { flags: number }) => ~o.flags)
+      .toArray();
+    const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(sql).toContain(`ORDER BY (~"t0"."flags") ASC`);
+  });
+
   it("throws a clear error when a referenced param is missing", async () => {
     const qb = newBuilder(qe);
     qb.select(
@@ -133,7 +152,7 @@ describe(".select() closure-variable capture", () => {
       },
       { date },
     );
-    await expect(qb.toArray()).rejects.toThrow(/Cannot inline aggregate-arg literal of type/);
+    await expect(qb.toArray()).rejects.toThrow(/Cannot inline SQL literal of type/);
   });
 });
 

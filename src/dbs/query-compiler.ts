@@ -102,7 +102,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (typeof value === "number") return String(value);
     if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
     if (typeof value === "string") return `'${value.replaceAll("'", "''")}'`;
-    throw new Error(`[typhex] Cannot inline aggregate-arg literal of type ${typeof value}`);
+    throw new Error(`[typhex] Cannot inline SQL literal of type ${typeof value}`);
   }
 
   protected compileInlineBinary(node: Expr & { kind: "binary" }, params: unknown[]): string {
@@ -423,7 +423,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const sql = orders
       .map((o) => {
         const dir = o.direction === "desc" ? "DESC" : "ASC";
-        return `${this.compileNode(o.expr, params)} ${dir}`;
+        return `${this.compileInlineExpr(o.expr, params)} ${dir}`;
       })
       .join(", ");
     return { sql, params };

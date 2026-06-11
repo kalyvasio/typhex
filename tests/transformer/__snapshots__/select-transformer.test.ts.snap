@@ -1,5 +1,15 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`select transformer > emits merged free vars and subquery params as one second arg 1`] = `
+"const c = 5;
+class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "n", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "&&", left: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, right: { kind: "binary", op: ">", left: { kind: "member", param: "p", path: ["score"] }, right: { kind: "param", key: "c" } } }, rootParam: "p", localParamNames: ["p"] }, { c }).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+"
+`;
+
 exports[`select transformer > transforms ({ category, total: sum(u.price), bucket: u.qty < 10 ? 'small' : 'large' }) — mixed 1`] = `
 "orders.select({ param: "u", paths: [["category"]], aliases: ["category"], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "u", path: ["price"] }, alias: "total" }], expressions: [{ expr: { kind: "case", branches: [{ when: { kind: "binary", op: "<", left: { kind: "member", param: "u", path: ["qty"] }, right: { kind: "const", value: 10 } }, then: { kind: "const", value: "small" } }], else: { kind: "const", value: "large" } }, alias: "bucket" }] });
 "

@@ -13,6 +13,7 @@ import {
   type OrderDirection,
   type JoinHint,
   type JoinType,
+  isIrOrderBy,
 } from "../ir/types.js";
 import type { AnyEntityClass, EntityInstance, SelectRow } from "../entity/entity.js";
 import {
@@ -146,7 +147,7 @@ export class QueryBuilder<
   /** @internal — used by the TypeScript transformer */
   orderBy(
     ir: IrOrderBy,
-    direction?: OrderDirection,
+    directionOrParams?: OrderDirection | Record<string, unknown>,
     subqueryParams?: Record<string, unknown>,
   ): this;
   /** Append an ORDER BY clause. Accepts a dot-separated column string or
@@ -154,12 +155,30 @@ export class QueryBuilder<
   orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
   orderBy(
     colOrIr: IrOrderBy | string | ((row: T) => unknown),
-    direction: OrderDirection = "asc",
+    directionOrParams: OrderDirection | Record<string, unknown> = "asc",
     subqueryParams?: Record<string, unknown>,
   ): this {
-    const { subqueryParams: captured } = QueryBuilder.splitParams(subqueryParams);
+    let direction: OrderDirection = "asc";
+    let paramsBag: Record<string, unknown> | undefined;
+
+    if (isIrOrderBy(colOrIr)) {
+      direction = colOrIr.direction;
+      if (typeof directionOrParams === "string") {
+        paramsBag = subqueryParams;
+      } else if (directionOrParams !== undefined) {
+        paramsBag = directionOrParams;
+      }
+    } else {
+      direction = typeof directionOrParams === "string" ? directionOrParams : "asc";
+      paramsBag = typeof directionOrParams === "object" ? directionOrParams : subqueryParams;
+    }
+
+    const { sqlParams, subqueryParams: captured } = QueryBuilder.splitParams(paramsBag);
     Object.assign(this.state.subqueryParams, captured);
-    const paramKeys = Object.keys(this.state.selectParams ?? {});
+    if (Object.keys(sqlParams).length > 0) {
+      this.state.selectParams = { ...this.state.selectParams, ...sqlParams };
+    }
+    const paramKeys = Object.keys({ ...this.state.selectParams, ...sqlParams });
     this.state.orderBy.push(
       resolveOrderBy(
         colOrIr as IrOrderBy | string | ((row: unknown) => unknown),
