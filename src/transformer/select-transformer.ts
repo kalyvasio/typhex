@@ -17,6 +17,7 @@ import {
 } from "./shared.js";
 import { parseExprToIr } from "./where-transformer.js";
 import {
+  buildParamsLiteral,
   captureSubqueryRef,
   isTyphexQueryChain,
   type CapturedSubquery,
@@ -285,20 +286,6 @@ export function transformSelectCall(
     args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
-}
-
-function buildParamsLiteral(
-  freeVars: string[],
-  capturedSubqueries: CapturedSubquery[],
-): ts.ObjectLiteralExpression {
-  const f = ts.factory;
-  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
-    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
-  );
-  for (const sub of capturedSubqueries) {
-    props.push(f.createPropertyAssignment(sub.key, sub.expr));
-  }
-  return f.createObjectLiteralExpression(props);
 }
 
 export { irAggregateToTsLiteral };

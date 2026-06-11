@@ -271,15 +271,7 @@ export function isIrSelect(node: unknown): node is IrSelect {
               ))) &&
           (x.whereIr === undefined || isIrWhere(x.whereIr)) &&
           (x.orderBy === undefined ||
-            (Array.isArray(x.orderBy) &&
-              x.orderBy.every(
-                (o: unknown) =>
-                  typeof o === "object" &&
-                  o !== null &&
-                  "param" in o &&
-                  "path" in o &&
-                  "direction" in o,
-              )))
+            (Array.isArray(x.orderBy) && x.orderBy.every(isIrOrderBy)))
         );
       })
     )

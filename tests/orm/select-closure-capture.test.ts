@@ -44,7 +44,7 @@ describe(".select() closure-variable capture", () => {
   let qe: QueryExecutor;
   beforeEach(() => { qe = createMockQe(); });
 
-  it("substitutes IrParam → IrConst from selectParams before SQL emission", async () => {
+  it("substitutes IrParam to IrConst from inlineParams before SQL emission", async () => {
     const selectIr: IrSelect = {
       param: "o",
       paths: [["category"]],
@@ -81,7 +81,7 @@ describe(".select() closure-variable capture", () => {
     expect(sql).toContain(`("t0"."price" * 100) AS "cents"`);
   });
 
-  it("substitutes inside ORDER BY expression via selectParams", async () => {
+  it("substitutes inside ORDER BY expression via inlineParams", async () => {
     const threshold = 10;
     await newBuilder(qe)
       .select((o: { qty: number }) => ({ qty: o.qty }), { threshold })
@@ -91,7 +91,7 @@ describe(".select() closure-variable capture", () => {
     expect(sql).toContain(`ORDER BY (CASE WHEN ("t0"."qty" < 10) THEN 0 ELSE 1 END) ASC`);
   });
 
-  it("substitutes inside arithmetic ORDER BY expression via selectParams", async () => {
+  it("substitutes inside arithmetic ORDER BY expression via inlineParams", async () => {
     const factor = 100;
     await newBuilder(qe)
       .select((o: { price: number }) => ({ price: o.price }), { factor })
@@ -135,7 +135,7 @@ describe(".select() closure-variable capture", () => {
       },
       {},
     );
-    await expect(qb.toArray()).rejects.toThrow(/select param "missing" not provided/);
+    await expect(qb.toArray()).rejects.toThrow(/inline param "missing" not provided/);
   });
 
   it("throws a clear error when a captured value is non-primitive", async () => {

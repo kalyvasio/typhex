@@ -65,7 +65,7 @@ import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../e
 import { ExprBuilder, type SubqueryPlans } from "./expr-builder.js";
 import { SelectClassifier, EMPTY_CLASSIFIED, type ClassifiedSelect } from "./select-classifier.js";
 import { QueryIrAnalyzer, type ExprIrAnalysis, type QueryIrAnalysis } from "./query-ir-analyzer.js";
-import { inlineOrderByParams, inlineSelectParams } from "../ir-inline-params.js";
+import { inlineOrderByParams, inlineSelectParams } from "./ir-inline-params.js";
 
 /** Default name for the row-param when no explicit one is in scope. */
 export const DEFAULT_ROW_PARAM = "u";
@@ -334,8 +334,8 @@ export class QueryPlanBuilder {
       cteNames,
     );
 
-    const selectIr = inlineSelectParams(this.state.selectIr, this.state.selectParams);
-    const orderByIr = inlineOrderByParams(this.state.orderBy, this.state.selectParams);
+    const selectIr = inlineSelectParams(this.state.selectIr, this.state.inlineParams);
+    const orderByIr = inlineOrderByParams(this.state.orderBy, this.state.inlineParams);
 
     const whereExpr =
       hasFilter && this.state.whereIr ? exprBuilder.convert(this.state.whereIr.node) : null;

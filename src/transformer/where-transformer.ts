@@ -15,6 +15,7 @@ import type {
   IrCase,
 } from "../ir/types.js";
 import {
+  buildParamsLiteral,
   captureSubqueryRef as captureSubqueryRefShared,
   isTyphexQueryChain,
   type CapturedSubquery,
@@ -448,21 +449,6 @@ function transformArrowCall(
     buildParamsLiteral(result.freeVars, result.capturedSubqueries),
   ];
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
-}
-
-/** Build the `{ foo, _sub0: Query.query()... }` params literal for the rewritten call. */
-function buildParamsLiteral(
-  freeVars: string[],
-  capturedSubqueries: CapturedSubquery[],
-): ts.ObjectLiteralExpression {
-  const f = ts.factory;
-  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
-    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
-  );
-  for (const sub of capturedSubqueries) {
-    props.push(f.createPropertyAssignment(sub.key, sub.expr));
-  }
-  return f.createObjectLiteralExpression(props);
 }
 
 // ---------------------------------------------------------------------------

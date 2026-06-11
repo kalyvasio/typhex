@@ -8,6 +8,7 @@ import type { IrNode } from "../ir/types.js";
 import { isTyphexType, matchTyphexMethodCall, memberPath, irOrderByToTsLiteral } from "./shared.js";
 import { parseExprToIr } from "./where-transformer.js";
 import {
+  buildParamsLiteral,
   captureSubqueryRef,
   isTyphexQueryChain,
   type CapturedSubquery,
@@ -40,10 +41,7 @@ export function transformOrderByCall(
   if (direction === null) return null;
 
   const args: ts.Expression[] = [irOrderByToTsLiteral({ expr, direction })];
-  if (capturedSubqueries.length > 0) {
-    args.push(ts.factory.createStringLiteral(direction));
-    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
-  } else if (freeVars.size > 0) {
+  if (capturedSubqueries.length > 0 || freeVars.size > 0) {
     args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
@@ -68,20 +66,6 @@ function extractOrderByExpr(
     if (ir && ir.kind !== "member" && ir.kind !== "param") return ir;
   }
   return null;
-}
-
-function buildParamsLiteral(
-  freeVars: string[],
-  capturedSubqueries: CapturedSubquery[],
-): ts.ObjectLiteralExpression {
-  const f = ts.factory;
-  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
-    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
-  );
-  for (const sub of capturedSubqueries) {
-    props.push(f.createPropertyAssignment(sub.key, sub.expr));
-  }
-  return f.createObjectLiteralExpression(props);
 }
 
 /** Return the first parameter's name if it's a plain identifier; null otherwise. */

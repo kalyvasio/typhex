@@ -1,12 +1,11 @@
-import type { IrNode, IrOrderBy, IrSelect } from "../../ir/types.js";
-import { rewriteIr } from "../../ir/types.js";
+import type { IrNode, IrOrderBy, IrSelect } from "../../../ir/types.js";
+import { rewriteIr } from "../../../ir/types.js";
 
-/** Substitute `IrParam{key}` nodes with `IrConst{value}` for select-list inline SQL. */
 export function inlineParamsInIr(node: IrNode, paramValues: Record<string, unknown>): IrNode {
   return rewriteIr(node, (n) => {
     if (n.kind !== "param") return n;
     if (!(n.key in paramValues)) {
-      throw new Error(`[typhex] select param "${n.key}" not provided`);
+      throw new Error(`[typhex] inline param "${n.key}" not provided`);
     }
     const value = paramValues[n.key];
     if (

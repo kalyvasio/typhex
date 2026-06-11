@@ -1,11 +1,14 @@
 import type { IrNode, IrOrderBy, IrSelect } from "../../src/ir/types.js";
 import type { SelectItem } from "../../src/orm/expr.js";
 import { ExprBuilder } from "../../src/orm/helpers/query-plan/expr-builder.js";
+import { selectPlan } from "../dbs/compiler-plan-fixtures.js";
 import {
   sqliteQueryCompiler,
   postgresQueryCompiler,
 } from "../../src/dbs/index.js";
 import type { BaseQueryCompiler } from "../../src/dbs/query-compiler.js";
+
+const TEST_TABLE = "__ir_test";
 
 function exprBuilderFor(param = "u", alias = "t0"): ExprBuilder {
   return new ExprBuilder({ [param]: alias }, {}, {}, new Map());
@@ -45,7 +48,8 @@ export function compileIrSelectList(
     items.push({ expr: exprBuilder.convert(entry.expr), alias: entry.alias });
   }
 
-  return compiler.compileSelectListExpr(items, false, alias, columnNames).sql;
+  const plan = selectPlan(TEST_TABLE, { columnNames, selectItems: items });
+  return selectListFrom(compiler.compilePlan(plan).sql);
 }
 
 export function compileIrOrderBy(
@@ -62,7 +66,22 @@ export function compileIrOrderBy(
         : exprBuilder.convert(o.expr),
     direction: o.direction,
   }));
-  return compiler.compileOrderByExpr(orderItems).sql;
+  const plan = selectPlan(TEST_TABLE, {
+    columnNames: ["id"],
+    selectAll: true,
+    orderBy: orderItems,
+  });
+  return orderByFrom(compiler.compilePlan(plan).sql);
 }
 
 export { sqliteQueryCompiler, postgresQueryCompiler };
+
+function selectListFrom(sql: string): string {
+  const prefix = "SELECT ";
+  const from = ` FROM "${TEST_TABLE}"`;
+  return sql.slice(prefix.length, sql.indexOf(from));
+}
+
+function orderByFrom(sql: string): string {
+  return sql.slice(sql.indexOf(" ORDER BY ") + " ORDER BY ".length);
+}

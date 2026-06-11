@@ -85,14 +85,14 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `(${left} ${sqlOp} ${right})`;
   }
 
-  protected compileAggregateArg(arg: Expr | null, params: unknown[]): string {
+  protected compileInlineExpr(arg: Expr | null, params: unknown[]): string {
     if (arg === null) return "*";
     if (arg.kind === "column") return this.renderColumn(arg);
     if (arg.kind === "const") return this.inlineConstLiteral(arg.value);
     if (arg.kind === "binary") return this.compileInlineBinary(arg, params);
     if (arg.kind === "case") return this.compileInlineCase(arg, params);
     if (arg.kind === "unary") {
-      return this.compileUnarySql(arg.op, this.compileAggregateArg(arg.operand, params));
+      return this.compileUnarySql(arg.op, this.compileInlineExpr(arg.operand, params));
     }
     return this.compileNode(arg, params);
   }
@@ -107,12 +107,12 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileInlineBinary(node: Expr & { kind: "binary" }, params: unknown[]): string {
     if (this.isNullEquality(node)) {
-      const left = this.compileAggregateArg(node.left, params);
+      const left = this.compileInlineExpr(node.left, params);
       const negated = node.op === "!==" || node.op === "!=";
       return `(${left} ${negated ? "IS NOT NULL" : "IS NULL"})`;
     }
-    const left = this.compileAggregateArg(node.left, params);
-    const right = this.compileAggregateArg(node.right, params);
+    const left = this.compileInlineExpr(node.left, params);
+    const right = this.compileInlineExpr(node.right, params);
     return this.compileBinarySql(node.op, left, right);
   }
 
@@ -120,10 +120,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const whens = node.branches
       .map(
         (b) =>
-          `WHEN ${this.compileAggregateArg(b.when, params)} THEN ${this.compileAggregateArg(b.then, params)}`,
+          `WHEN ${this.compileInlineExpr(b.when, params)} THEN ${this.compileInlineExpr(b.then, params)}`,
       )
       .join(" ");
-    const elseSql = node.else ? ` ELSE ${this.compileAggregateArg(node.else, params)}` : "";
+    const elseSql = node.else ? ` ELSE ${this.compileInlineExpr(node.else, params)}` : "";
     return `(CASE ${whens}${elseSql} END)`;
   }
 
@@ -137,7 +137,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     agg: ExprAggregate,
     params: unknown[],
   ): string {
-    const argSql = this.compileAggregateArg(agg.arg, params);
+    const argSql = this.compileInlineExpr(agg.arg, params);
     const distinctPrefix = agg.distinct ? "DISTINCT " : "";
     const expr = `${funcName}(${distinctPrefix}${argSql})`;
     return agg.alias ? `${expr} AS ${this.escapeIdentifier(agg.alias)}` : expr;
@@ -149,7 +149,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     defaultSep: string | undefined,
     params: unknown[],
   ): string {
-    const argSql = this.compileAggregateArg(agg.arg, params);
+    const argSql = this.compileInlineExpr(agg.arg, params);
     const distinctPrefix = agg.distinct ? "DISTINCT " : "";
     const sepLiteral =
       agg.separator !== undefined ? `'${agg.separator.replaceAll("'", "''")}'` : defaultSep;
@@ -770,23 +770,6 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     }
     if (options?.returning) sql += " RETURNING *";
     return { sql, params: whereParams, returningRow: !!options?.returning };
-  }
-
-  protected compileInlineExpr(node: Expr, params: unknown[]): string {
-    switch (node.kind) {
-      case "const":
-        return this.inlineConstLiteral(node.value);
-      case "binary":
-        return this.compileInlineBinary(node, params);
-      case "case":
-        return this.compileInlineCase(node, params);
-      case "column":
-        return this.renderColumn(node);
-      case "unary":
-        return this.compileUnarySql(node.op, this.compileInlineExpr(node.operand, params));
-      default:
-        return this.compileNode(node, params);
-    }
   }
 
   protected compileNode(node: Expr, params: unknown[]): string {
