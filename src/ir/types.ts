@@ -13,7 +13,8 @@ export type IrNode =
   | IrIn
   | IrExists
   | IrAggregate
-  | IrSubqueryRef;
+  | IrSubqueryRef
+  | IrCase;
 
 export interface IrPredicate {
   node: IrNode;
@@ -26,14 +27,25 @@ export type IrHaving = IrPredicate;
 
 export interface IrBinary {
   kind: "binary";
-  op: "&&" | "||" | "===" | "!==" | ">" | ">=" | "<" | "<=" | "==" | "!=";
+  op:
+    | "&&" | "||"
+    | "===" | "!==" | "==" | "!="
+    | ">" | ">=" | "<" | "<="
+    | "+" | "-" | "*" | "/" | "%"
+    | "&" | "|" | "^" | "<<" | ">>";
   left: IrNode;
   right: IrNode;
 }
 
+export interface IrCase {
+  kind: "case";
+  branches: Array<{ when: IrNode; then: IrNode }>;
+  else?: IrNode;
+}
+
 export interface IrUnary {
   kind: "unary";
-  op: "!";
+  op: "!" | "~";
   operand: IrNode;
 }
 
@@ -142,6 +154,8 @@ export interface IrSelect {
   aggregates?: IrAggregate[];
   /** Scalar subquery columns in SELECT (e.g. `(SELECT COUNT(*) FROM …) AS "x"`). */
   subqueries?: Array<{ alias: string; subquery: IrSubqueryRef }>;
+  /** Computed expression columns (arithmetic, ternary, etc.). Emitted as inline-literal SQL. */
+  expressions?: Array<{ expr: IrNode; alias: string }>;
   /** GROUP BY entries: string[] = member path, number = positional column reference (GROUP BY 1). */
   groupBy?: Array<string[] | number>;
 }
@@ -185,7 +199,8 @@ export function isIrNode(node: unknown): node is IrNode {
     k === "call" ||
     k === "exists" ||
     k === "aggregate" ||
-    k === "subqueryRef"
+    k === "subqueryRef" ||
+    k === "case"
   );
 }
 
@@ -218,15 +233,7 @@ export function isIrSelect(node: unknown): node is IrSelect {
               ))) &&
           (x.whereIr === undefined || isIrWhere(x.whereIr)) &&
           (x.orderBy === undefined ||
-            (Array.isArray(x.orderBy) &&
-              x.orderBy.every(
-                (o: unknown) =>
-                  typeof o === "object" &&
-                  o !== null &&
-                  "param" in o &&
-                  "path" in o &&
-                  "direction" in o,
-              )))
+            (Array.isArray(x.orderBy) && x.orderBy.every(isIrOrderBy)))
         );
       })
     )
@@ -258,6 +265,16 @@ export function isIrSelect(node: unknown): node is IrSelect {
           sub.kind === "subqueryRef" &&
           typeof sub.key === "string"
         );
+      })
+    )
+      return false;
+  }
+  if (o.expressions !== undefined) {
+    if (!Array.isArray(o.expressions)) return false;
+    if (
+      !o.expressions.every((e: unknown) => {
+        const x = e as Record<string, unknown>;
+        return x && typeof x.alias === "string" && isIrNode(x.expr);
       })
     )
       return false;

@@ -7,7 +7,6 @@ import type * as ESTree from "estree";
 import type {
   IrNode,
   IrBinary,
-  IrUnary,
   IrMember,
   IrConst,
   IrParam,
@@ -16,6 +15,7 @@ import type {
   IrExists,
   IrAggregate,
   IrWhere,
+  IrCase,
 } from "../ir/types.js";
 import { DEFAULT_ROW_PARAM, ALLOWED_METHODS, ACORN_BINARY_OPS } from "../arrow/constants.js";
 import { AGGREGATE_FUNCS, toIrFuncName } from "../arrow/aggregates.js";
@@ -40,6 +40,15 @@ export interface ParseOptions {
   paramNames?: string[];
   paramKeys?: string[];
   subqueryKeys?: string[];
+}
+
+export function parseExpressionToIr(
+  expr: AcornExpr,
+  params: string[],
+  paramKeys: string[],
+  subqueryKeys: string[] = [],
+): IrNode {
+  return walk(expr, params, paramKeys, subqueryKeys);
 }
 
 export function parseArrowToIr(
@@ -101,9 +110,32 @@ function walk(
     case "ArrayExpression":
       return walkArrayLiteral(node, params, paramKeys, subqueryKeys);
 
+    case "ConditionalExpression":
+      return walkConditional(node, params, paramKeys, subqueryKeys);
+
     default:
       throw new Error("Unsupported node type: " + node.type);
   }
+}
+
+function walkConditional(
+  node: ESTree.ConditionalExpression,
+  params: string[],
+  paramKeys: string[],
+  subqueryKeys: string[],
+): IrCase {
+  const when = walk(node.test, params, paramKeys, subqueryKeys);
+  const then = walk(node.consequent, params, paramKeys, subqueryKeys);
+  const alternate = walk(node.alternate, params, paramKeys, subqueryKeys);
+
+  if (alternate.kind === "case") {
+    return {
+      kind: "case",
+      branches: [{ when, then }, ...alternate.branches],
+      ...(alternate.else !== undefined ? { else: alternate.else } : {}),
+    };
+  }
+  return { kind: "case", branches: [{ when, then }], else: alternate };
 }
 
 function walkBinaryLike(
@@ -144,13 +176,14 @@ function walkUnary(
   paramKeys: string[],
   subqueryKeys: string[],
 ): IrNode {
-  if (node.operator !== "!") throw new Error("Unsupported unary: " + node.operator);
+  const op = node.operator;
+  if (op !== "!" && op !== "~") throw new Error("Unsupported unary: " + op);
 
   const inner = walk(node.argument, params, paramKeys, subqueryKeys);
 
-  if (inner.kind === "in") return { ...inner, negated: !inner.negated };
+  if (op === "!" && inner.kind === "in") return { ...inner, negated: !inner.negated };
 
-  return { kind: "unary", op: "!", operand: inner } as IrUnary;
+  return { kind: "unary", op, operand: inner };
 }
 
 function walkMember(node: ESTree.MemberExpression, params: string[]): IrMember {

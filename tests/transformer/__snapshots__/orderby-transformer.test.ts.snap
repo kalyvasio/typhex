@@ -1,0 +1,22 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`orderBy transformer > emits closure capture vars as second arg 1`] = `
+"const c = 5;
+orders.orderBy({ expr: { kind: "case", branches: [{ when: { kind: "binary", op: "<", left: { kind: "member", param: "u", path: ["qty"] }, right: { kind: "param", key: "c" } }, then: { kind: "const", value: 0 } }], else: { kind: "const", value: 1 } }, direction: "asc" }, { c });
+"
+`;
+
+exports[`orderBy transformer > transforms u => u.featured ? 0 : 1 to expr-bearing IrOrderBy (ternary) 1`] = `
+"users.orderBy({ expr: { kind: "case", branches: [{ when: { kind: "member", param: "u", path: ["featured"] }, then: { kind: "const", value: 0 } }], else: { kind: "const", value: 1 } }, direction: "asc" });
+"
+`;
+
+exports[`orderBy transformer > transforms u => u.name to bare member IrOrderBy (regression) 1`] = `
+"users.orderBy({ expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" });
+"
+`;
+
+exports[`orderBy transformer > transforms u => u.price * u.qty with 'desc' to expr-bearing IrOrderBy (arithmetic) 1`] = `
+"orders.orderBy({ expr: { kind: "binary", op: "*", left: { kind: "member", param: "u", path: ["price"] }, right: { kind: "member", param: "u", path: ["qty"] } }, direction: "desc" });
+"
+`;

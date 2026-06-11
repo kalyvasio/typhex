@@ -26,6 +26,20 @@ export function captureSubqueryRef(
   return { kind: "subqueryRef", key };
 }
 
+export function buildParamsLiteral(
+  freeVars: string[],
+  capturedSubqueries: CapturedSubquery[],
+): ts.ObjectLiteralExpression {
+  const f = ts.factory;
+  const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
+    f.createShorthandPropertyAssignment(f.createIdentifier(v)),
+  );
+  for (const sub of capturedSubqueries) {
+    props.push(f.createPropertyAssignment(sub.key, sub.expr));
+  }
+  return f.createObjectLiteralExpression(props);
+}
+
 function findQueryCall(expr: ts.Expression, checker: ts.TypeChecker): ts.CallExpression | null {
   let cursor: ts.Expression | null = expr;
   while (

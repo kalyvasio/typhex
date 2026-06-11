@@ -6,7 +6,9 @@
 import * as ts from "typescript";
 import type { IrNode } from "../ir/types.js";
 import { isTyphexType, matchTyphexMethodCall, memberPath, irOrderByToTsLiteral } from "./shared.js";
+import { parseExpressionToIr } from "./where-transformer.js";
 import {
+  buildParamsLiteral,
   captureSubqueryRef,
   isTyphexQueryChain,
   type CapturedSubquery,
@@ -31,16 +33,16 @@ export function transformOrderByCall(
   if (!paramName) return null;
 
   const capturedSubqueries: CapturedSubquery[] = [];
-  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedSubqueries);
+  const freeVars = new Set<string>();
+  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedSubqueries, freeVars);
   if (!expr) return null;
 
   const direction = parseDirectionArg(call.arguments);
   if (direction === null) return null;
 
   const args: ts.Expression[] = [irOrderByToTsLiteral({ expr, direction })];
-  if (capturedSubqueries.length > 0) {
-    args.push(ts.factory.createStringLiteral(direction));
-    args.push(buildSubqueryParamsLiteral(capturedSubqueries));
+  if (capturedSubqueries.length > 0 || freeVars.size > 0) {
+    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
@@ -52,6 +54,7 @@ function extractOrderByExpr(
   paramName: string,
   checker: ts.TypeChecker,
   capturedSubqueries: CapturedSubquery[],
+  freeVars: Set<string>,
 ): IrNode | null {
   const path = extractColumnPath(body, paramName);
   if (path) return { kind: "member", param: paramName, path };
@@ -59,17 +62,10 @@ function extractOrderByExpr(
     if (isTyphexQueryChain(body, checker)) {
       return captureSubqueryRef(body, capturedSubqueries);
     }
+    const ir = parseExpressionToIr(body, [paramName], freeVars);
+    if (ir && ir.kind !== "member" && ir.kind !== "param") return ir;
   }
   return null;
-}
-
-function buildSubqueryParamsLiteral(
-  capturedSubqueries: CapturedSubquery[],
-): ts.ObjectLiteralExpression {
-  const f = ts.factory;
-  return f.createObjectLiteralExpression(
-    capturedSubqueries.map((sub) => f.createPropertyAssignment(sub.key, sub.expr)),
-  );
 }
 
 /** Return the first parameter's name if it's a plain identifier; null otherwise. */

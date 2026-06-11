@@ -17,6 +17,7 @@ export interface TsAggregateParseResult {
 export function parseTsAggregateCall(
   call: ts.CallExpression,
   paramNames: string[],
+  resolveArg?: (expr: ts.Expression) => IrNode | null,
 ): TsAggregateParseResult | null {
   const callee = call.expression;
   if (!ts.isIdentifier(callee)) return null;
@@ -25,10 +26,13 @@ export function parseTsAggregateCall(
   const funcName = toIrFuncName(rawName);
   if (!AGGREGATE_FUNCS.has(funcName)) return null;
 
-  const { arg, distinct } = parseTsAggregateArg(
+  const parsedArg = parseTsAggregateArg(
     call.arguments[0] as ts.Expression | undefined,
     paramNames,
+    resolveArg,
   );
+  if (!parsedArg) return null;
+  const { arg, distinct } = parsedArg;
   const separator = parseTsAggregateSeparator(funcName, call);
 
   const ir: IrAggregate = {
@@ -44,11 +48,12 @@ export function parseTsAggregateCall(
 function parseTsAggregateArg(
   argExpr: ts.Expression | undefined,
   paramNames: string[],
-): { arg: IrNode | null; distinct: boolean } {
+  resolveArg: ((expr: ts.Expression) => IrNode | null) | undefined,
+): { arg: IrNode | null; distinct: boolean } | null {
   if (!argExpr) return { arg: null, distinct: false };
 
   if (ts.isCallExpression(argExpr) && isIdentifierNamed(argExpr.expression, "distinct")) {
-    return parseDistinctWrapperArg(argExpr, paramNames);
+    return parseDistinctWrapperArg(argExpr, paramNames, resolveArg);
   }
 
   if (ts.isPropertyAccessExpression(argExpr)) {
@@ -60,23 +65,36 @@ function parseTsAggregateArg(
     };
   }
 
+  if (resolveArg) {
+    const arg = resolveArg(argExpr);
+    if (!arg) return null;
+    return { arg, distinct: false };
+  }
+
   return { arg: null, distinct: false };
 }
 
 function parseDistinctWrapperArg(
   distinctCall: ts.CallExpression,
   paramNames: string[],
-): { arg: IrNode | null; distinct: boolean } {
+  resolveArg: ((expr: ts.Expression) => IrNode | null) | undefined,
+): { arg: IrNode | null; distinct: boolean } | null {
   const inner = distinctCall.arguments[0] as ts.Expression | undefined;
-  if (!inner || !ts.isPropertyAccessExpression(inner)) {
-    return { arg: null, distinct: false };
+  if (!inner) return { arg: null, distinct: false };
+  if (ts.isPropertyAccessExpression(inner)) {
+    const resolved = resolveMemberPath(inner, paramNames);
+    if (!resolved || resolved.path.length === 0) return { arg: null, distinct: false };
+    return {
+      arg: { kind: "member", param: resolved.param, path: resolved.path },
+      distinct: true,
+    };
   }
-  const resolved = resolveMemberPath(inner, paramNames);
-  if (!resolved || resolved.path.length === 0) return { arg: null, distinct: false };
-  return {
-    arg: { kind: "member", param: resolved.param, path: resolved.path },
-    distinct: true,
-  };
+  if (resolveArg) {
+    const arg = resolveArg(inner);
+    if (!arg) return null;
+    return { arg, distinct: true };
+  }
+  return { arg: null, distinct: false };
 }
 
 function parseTsAggregateSeparator(funcName: string, call: ts.CallExpression): string | undefined {

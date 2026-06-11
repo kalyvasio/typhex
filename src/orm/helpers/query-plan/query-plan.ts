@@ -339,9 +339,18 @@ export class QueryPlanBuilder {
       isSelect && this.state.havingIr ? exprBuilder.convert(this.state.havingIr.node) : null;
     const orderBy = isSelect ? this.buildOrderBy(exprBuilder) : [];
     const groupBy = isSelect ? this.buildGroupBy(exprBuilder) : [];
-    const selectItems = isSelect ? this.buildSelectItems(classified, exprBuilder) : [];
+    const selectItems = isSelect
+      ? this.buildSelectItems(classified, exprBuilder, this.state.selectIr)
+      : [];
 
-    const selectAll = !this.state.selectIr || this.state.selectIr.paths.length === 0;
+    const selectAll =
+      !this.state.selectIr ||
+      (this.state.selectIr.paths.length === 0 &&
+        !(
+          this.state.selectIr.aggregates?.length ||
+          this.state.selectIr.expressions?.length ||
+          this.state.selectIr.subqueries?.length
+        ));
     const relationJoinSpecs = joins.map(toJoinSpec);
     const entityJoinSpecs = this.buildEntityJoins(
       paramToAlias,
@@ -654,8 +663,12 @@ export class QueryPlanBuilder {
    *      `Entity.query()...` chains; each becomes an inline subquery via
    *      the pre-built subquery plan map.
    */
-  private buildSelectItems(classified: ClassifiedSelect, exprBuilder: ExprBuilder): SelectItem[] {
-    const select = this.state.selectIr;
+  private buildSelectItems(
+    classified: ClassifiedSelect,
+    exprBuilder: ExprBuilder,
+    selectIr: typeof this.state.selectIr,
+  ): SelectItem[] {
+    const select = selectIr;
     if (!select) return [];
 
     const items: SelectItem[] = [];
@@ -679,23 +692,32 @@ export class QueryPlanBuilder {
     }
 
     for (const agg of select.aggregates ?? []) {
-      items.push({ expr: exprBuilder.convertAggregate(agg), alias: agg.alias });
+      items.push({
+        expr: exprBuilder.convertAggregate(agg, undefined, this.state.inlineParams),
+        alias: agg.alias,
+      });
     }
 
     for (const entry of select.subqueries ?? []) {
       items.push({ expr: exprBuilder.convertSubqueryRef(entry.subquery), alias: entry.alias });
     }
 
+    for (const entry of select.expressions ?? []) {
+      items.push({
+        expr: exprBuilder.convert(entry.expr, undefined, this.state.inlineParams),
+        alias: entry.alias,
+      });
+    }
+
     return items;
   }
 
-  /** Build the `OrderItem[]` for the ORDER BY clause. */
   private buildOrderBy(exprBuilder: ExprBuilder): OrderItem[] {
     return this.state.orderBy.map((o) => ({
       expr:
         o.expr.kind === "member"
           ? exprBuilder.resolveColumn(o.expr.param, o.expr.path)
-          : exprBuilder.convert(o.expr),
+          : exprBuilder.convert(o.expr, undefined, this.state.inlineParams),
       direction: o.direction,
     }));
   }

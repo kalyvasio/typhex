@@ -19,6 +19,36 @@ Typhex compiles those predicates to safe, parameterized SQL through either a Typ
 - **Runtime fallback**: Plain JavaScript and direct `tsx` scripts work with explicit closure variables.
 - **ORM features**: Relations, aggregations, transactions, bulk inserts, upserts, and graph inserts.
 
+### CASE expressions, arithmetic, and computed columns
+
+Native ternary, arithmetic (`+ - * / %`), and bitwise operators (`& | ^ << >> ~`) are supported in `WHERE`, `HAVING`, aggregate arguments, `SELECT` projections, and `ORDER BY`:
+
+```ts
+// SUM(CASE WHEN active THEN 1 ELSE 0 END) — ternary inside an aggregate
+orders.select((o) => ({ active: sum(o.active ? 1 : 0) })).toArray();
+
+// Computed projection (no aggregate) — arithmetic + ternary
+orders.select((o) => ({
+  revenue: o.price * o.qty,
+  bucket:  o.qty < 5 ? "small" : "large",
+})).toArray();
+
+// `=== null` rewrites to SQL `IS NULL`
+orders.where((o) => o.deletedAt === null).toArray();
+
+// ORDER BY a derived expression — pin "small" rows to the bottom
+orders.orderBy((o) => o.qty < 5 ? 1 : 0).toArray();
+
+// Closure capture in .select() — pass the values as the second argument
+const cutoff = 5;
+orders
+  .select((o) => ({ category: o.category, smalls: sum(o.qty < cutoff ? 1 : 0) }), { cutoff })
+  .groupBy("category")
+  .toArray();
+```
+
+See `examples/case-arithmetic-extras/` for a runnable end-to-end demo.
+
 ## Installation
 
 For SQLite:
@@ -226,13 +256,16 @@ Runtime mode supports a practical safe subset:
 
 - Comparisons: `===`, `!==`, `==`, `!=`, `>`, `>=`, `<`, `<=`
 - Logical operators: `&&`, `||`, `!`
+- Arithmetic: `+`, `-`, `*`, `/`, `%`
+- Bitwise: `&`, `|`, `^`, `<<`, `>>`, `~` (XOR uses `#` on Postgres; SQLite emulates it)
+- Ternary conditionals (`a ? b : c`)
 - Member access, literals, array literals, and the `in` operator
 - String methods: `.startsWith()`, `.endsWith()`, `.includes()`
 - Aggregates in `.select()` and `.having()`: `count()`, `sum()`, `avg()`, `min()`, `max()`, `distinct(...)`
 - Relation predicates such as `department.employees.some((e) => e.name === "Alice")`
 - Relation query chains in `.select()`
 
-Runtime mode does not support arithmetic, bitwise operators, ternaries, optional chaining, nullish coalescing, arbitrary function calls, loops, assignments, `await`, `new`, or `instanceof`.
+Runtime mode does not support unsigned right shift (`>>>`), optional chaining, nullish coalescing, arbitrary function calls, loops, assignments, `await`, `new`, or `instanceof`.
 
 ## Relations
 

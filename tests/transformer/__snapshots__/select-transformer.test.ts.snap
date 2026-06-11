@@ -1,5 +1,25 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`select transformer > emits merged free vars and subquery params as one second arg 1`] = `
+"const c = 5;
+class Post {
+    static tableName: "posts" = "posts";
+    static query(): any { return null as any; }
+}
+authors.select({ param: "a", paths: [], subqueries: [{ alias: "n", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "&&", left: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, right: { kind: "binary", op: ">", left: { kind: "member", param: "p", path: ["score"] }, right: { kind: "param", key: "c" } } }, rootParam: "p", localParamNames: ["p"] }, { c }).select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: null, alias: "count" }] }) });
+"
+`;
+
+exports[`select transformer > transforms ({ category, total: sum(u.price), bucket: u.qty < 10 ? 'small' : 'large' }) — mixed 1`] = `
+"orders.select({ param: "u", paths: [["category"]], aliases: ["category"], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "member", param: "u", path: ["price"] }, alias: "total" }], expressions: [{ expr: { kind: "case", branches: [{ when: { kind: "binary", op: "<", left: { kind: "member", param: "u", path: ["qty"] }, right: { kind: "const", value: 10 } }, then: { kind: "const", value: "small" } }], else: { kind: "const", value: "large" } }, alias: "bucket" }] });
+"
+`;
+
+exports[`select transformer > transforms ({ flagged: sum(p.active ? 1 : 2) }) with ternary inside aggregate 1`] = `
+"orders.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "case", branches: [{ when: { kind: "member", param: "p", path: ["active"] }, then: { kind: "const", value: 1 } }], else: { kind: "const", value: 2 } }, alias: "flagged" }] });
+"
+`;
+
 exports[`select transformer > transforms ({ id }) destructured outer with correlated inner subquery 1`] = `
 "class Post {
     static tableName: "posts" = "posts";
@@ -30,6 +50,26 @@ authors.select({ param: "u", paths: [], subqueries: [{ alias: "c", subquery: { k
 
 exports[`select transformer > transforms ({ names: groupConcat(p.name, ', ') }) object with groupConcat 1`] = `
 "users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "GROUP_CONCAT", arg: { kind: "member", param: "p", path: ["name"] }, alias: "names", separator: ", " }] });
+"
+`;
+
+exports[`select transformer > transforms ({ revenue: sum(p.price * p.qty) }) with arithmetic inside aggregate 1`] = `
+"orders.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "binary", op: "*", left: { kind: "member", param: "p", path: ["price"] }, right: { kind: "member", param: "p", path: ["qty"] } }, alias: "revenue" }] });
+"
+`;
+
+exports[`select transformer > transforms ({ revenue: u.price * u.qty }) — pure arithmetic projection 1`] = `
+"users.select({ param: "u", paths: [], expressions: [{ expr: { kind: "binary", op: "*", left: { kind: "member", param: "u", path: ["price"] }, right: { kind: "member", param: "u", path: ["qty"] } }, alias: "revenue" }] });
+"
+`;
+
+exports[`select transformer > transforms ({ status: u.active ? 'on' : 'off' }) — pure ternary projection 1`] = `
+"users.select({ param: "u", paths: [], expressions: [{ expr: { kind: "case", branches: [{ when: { kind: "member", param: "u", path: ["active"] }, then: { kind: "const", value: "on" } }], else: { kind: "const", value: "off" } }, alias: "status" }] });
+"
+`;
+
+exports[`select transformer > transforms ({ tier: sum(p.age < 18 && p.active ? 1 : 0) }) with compound test inside aggregate ternary 1`] = `
+"orders.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "case", branches: [{ when: { kind: "binary", op: "&&", left: { kind: "binary", op: "<", left: { kind: "member", param: "p", path: ["age"] }, right: { kind: "const", value: 18 } }, right: { kind: "member", param: "p", path: ["active"] } }, then: { kind: "const", value: 1 } }], else: { kind: "const", value: 0 } }, alias: "tier" }] });
 "
 `;
 
@@ -88,6 +128,11 @@ exports[`select transformer > transforms (u) => ({ userId: u.id, fullName: u.nam
 "
 `;
 
+exports[`select transformer > transforms (u) => u.price * 100 — single-expression shorthand aliased to 'expr' 1`] = `
+"orders.select({ param: "u", paths: [], expressions: [{ expr: { kind: "binary", op: "*", left: { kind: "member", param: "u", path: ["price"] }, right: { kind: "const", value: 100 } }, alias: "expr" }] });
+"
+`;
+
 exports[`select transformer > transforms count(distinct(p.category)) single aggregate shorthand 1`] = `
 "users.select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "COUNT", arg: { kind: "member", param: "p", path: ["category"] }, alias: "count", distinct: true }] });
 "
@@ -113,5 +158,11 @@ exports[`select transformer > transforms inline subquery with .orderBy().limit()
     static query(): any { return null as any; }
 }
 authors.select({ param: "a", paths: [], subqueries: [{ alias: "topScore", subquery: { kind: "subqueryRef", key: "_sub0" } }] }, { _sub0: Post.query().where({ node: { kind: "binary", op: "===", left: { kind: "member", param: "p", path: ["authorId"] }, right: { kind: "member", param: "a", path: ["id"] } }, rootParam: "p", localParamNames: ["p"] }, {}).orderBy({ expr: { kind: "member", param: "p", path: ["score"] }, direction: "desc" }).limit(1).select({ param: "p", paths: [], aggregates: [{ kind: "aggregate", func: "MAX", arg: { kind: "member", param: "p", path: ["score"] }, alias: "max" }] }) });
+"
+`;
+
+exports[`select transformer > transforms select with closure capture — emits { c } as second arg 1`] = `
+"const c = 5;
+users.select({ param: "u", paths: [], aggregates: [{ kind: "aggregate", func: "SUM", arg: { kind: "case", branches: [{ when: { kind: "binary", op: ">", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "param", key: "c" } }, then: { kind: "const", value: 1 } }], else: { kind: "const", value: 0 } }, alias: "x" }] }, { c });
 "
 `;

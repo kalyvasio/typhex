@@ -92,6 +92,24 @@ export function irNodeToTsLiteral(ir: IrNode): ts.ObjectLiteralExpression {
     case "subqueryRef":
       props.push(f.createPropertyAssignment("key", f.createStringLiteral(ir.key)));
       break;
+    case "case":
+      props.push(
+        f.createPropertyAssignment(
+          "branches",
+          f.createArrayLiteralExpression(
+            ir.branches.map((b) =>
+              f.createObjectLiteralExpression([
+                f.createPropertyAssignment("when", irNodeToTsLiteral(b.when)),
+                f.createPropertyAssignment("then", irNodeToTsLiteral(b.then)),
+              ]),
+            ),
+          ),
+        ),
+      );
+      if (ir.else !== undefined) {
+        props.push(f.createPropertyAssignment("else", irNodeToTsLiteral(ir.else)));
+      }
+      break;
   }
   return f.createObjectLiteralExpression(props);
 }
@@ -168,6 +186,21 @@ export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
             f.createObjectLiteralExpression([
               f.createPropertyAssignment("alias", f.createStringLiteral(entry.alias)),
               f.createPropertyAssignment("subquery", irNodeToTsLiteral(entry.subquery)),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+  if (sel.expressions && sel.expressions.length > 0) {
+    props.push(
+      f.createPropertyAssignment(
+        "expressions",
+        f.createArrayLiteralExpression(
+          sel.expressions.map((e) =>
+            f.createObjectLiteralExpression([
+              f.createPropertyAssignment("expr", irNodeToTsLiteral(e.expr)),
+              f.createPropertyAssignment("alias", f.createStringLiteral(e.alias)),
             ]),
           ),
         ),

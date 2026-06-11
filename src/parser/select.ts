@@ -4,7 +4,7 @@
  */
 
 import type * as ESTree from "estree";
-import type { IrSelect, IrSelectRelation, IrAggregate } from "../ir/types.js";
+import type { IrNode, IrSelect, IrSelectRelation, IrAggregate } from "../ir/types.js";
 import { RELATION_QUERY_METHODS } from "../arrow/constants.js";
 import type { AcornExpr } from "./acorn-types.js";
 import {
@@ -30,9 +30,12 @@ import {
   propertyKeyName,
 } from "./acorn-helpers.js";
 import { resolveMemberPath } from "./acorn-member.js";
-import { parseArrowToIrPredicate, tryParseAggregate } from "./predicate-walk.js";
+import { parseArrowToIrPredicate, parseExpressionToIr, tryParseAggregate } from "./predicate-walk.js";
 
-export function parseArrowToIrSelect(fn: (...args: unknown[]) => unknown): IrSelect | null {
+export function parseArrowToIrSelect(
+  fn: (...args: unknown[]) => unknown,
+  paramKeys: string[] = [],
+): IrSelect | null {
   const src = fn.toString();
   const body = extractArrowBody(src);
   if (!body) return null;
@@ -47,13 +50,14 @@ export function parseArrowToIrSelect(fn: (...args: unknown[]) => unknown): IrSel
     return null;
   }
 
-  return parseTopLevelSelectExpression(expr, paramName, fullSrc);
+  return parseTopLevelSelectExpression(expr, paramName, fullSrc, paramKeys);
 }
 
 function parseTopLevelSelectExpression(
   expr: AcornExpr,
   paramName: string,
   fullSrc: string,
+  paramKeys: string[],
 ): IrSelect | null {
   if (isIdent(expr, paramName)) {
     return { param: paramName, paths: [], aliases: [], rest: true };
@@ -64,14 +68,33 @@ function parseTopLevelSelectExpression(
   }
 
   if (isCallExpression(expr)) {
-    return parseSingleAggregateSelect(expr, paramName);
+    return parseSingleAggregateSelect(expr, paramName, paramKeys);
   }
 
   if (isObjectExpression(expr)) {
-    return parseSelectObjectLiteral(expr, paramName, fullSrc);
+    return parseSelectObjectLiteral(expr, paramName, fullSrc, paramKeys);
   }
 
-  return null;
+  return parseSingleExpressionSelect(expr, paramName, paramKeys);
+}
+
+function parseSingleExpressionSelect(
+  expr: AcornExpr,
+  paramName: string,
+  paramKeys: string[],
+): IrSelect | null {
+  try {
+    const ir = parseExpressionToIr(expr, [paramName], paramKeys);
+    if (ir.kind === "member" || ir.kind === "param") return null;
+    return {
+      param: paramName,
+      paths: [],
+      aliases: [],
+      expressions: [{ expr: ir, alias: "expr" }],
+    };
+  } catch {
+    return null;
+  }
 }
 
 function parseSingleColumnSelect(
@@ -87,8 +110,9 @@ function parseSingleColumnSelect(
 function parseSingleAggregateSelect(
   callNode: ESTree.CallExpression,
   paramName: string,
+  paramKeys: string[] = [],
 ): IrSelect | null {
-  const parsed = safeParseAggregate(callNode, paramName);
+  const parsed = safeParseAggregate(callNode, paramName, paramKeys);
   if (!parsed) return null;
 
   const alias = parsed.rawName.toLowerCase();
@@ -103,9 +127,10 @@ function parseSingleAggregateSelect(
 function safeParseAggregate(
   callNode: ESTree.CallExpression,
   paramName: string,
+  paramKeys: string[] = [],
 ): { ir: IrAggregate; rawName: string } | null {
   try {
-    return tryParseAggregate(callNode, [paramName], [], { strictDistinct: false }, []);
+    return tryParseAggregate(callNode, [paramName], paramKeys, { strictDistinct: false }, []);
   } catch {
     return null;
   }
@@ -115,11 +140,13 @@ function parseSelectObjectLiteral(
   obj: ESTree.ObjectExpression,
   paramName: string,
   fullSrc: string,
+  paramKeys: string[] = [],
 ): IrSelect | null {
   const paths: string[][] = [];
   const aliases: string[] = [];
   const relations: IrSelectRelation[] = [];
   const aggregates: IrAggregate[] = [];
+  const expressions: Array<{ expr: IrNode; alias: string }> = [];
   let rest = false;
 
   for (const raw of obj.properties) {
@@ -137,13 +164,13 @@ function parseSelectObjectLiteral(
     const value = objectPropertyValue(raw.value);
     if (!value) return null;
 
-    const handled = parseSelectProperty(value, keyName, paramName, fullSrc);
+    const handled = parseSelectProperty(value, keyName, paramName, fullSrc, paramKeys);
     if (!handled) return null;
 
-    applySelectPropertyResult(handled, keyName, paths, aliases, relations, aggregates);
+    applySelectPropertyResult(handled, keyName, paths, aliases, relations, aggregates, expressions);
   }
 
-  if (paths.length === 0 && relations.length === 0 && aggregates.length === 0 && !rest) {
+  if (paths.length === 0 && relations.length === 0 && aggregates.length === 0 && expressions.length === 0 && !rest) {
     return null;
   }
 
@@ -151,31 +178,43 @@ function parseSelectObjectLiteral(
   if (relations.length > 0) result.relations = relations;
   if (rest) result.rest = true;
   if (aggregates.length > 0) result.aggregates = aggregates;
+  if (expressions.length > 0) result.expressions = expressions;
   return result;
 }
 
 type SelectPropertyResult =
   | { kind: "path"; path: string[] }
   | { kind: "relation"; relation: IrSelectRelation }
-  | { kind: "aggregate"; aggregate: IrAggregate };
+  | { kind: "aggregate"; aggregate: IrAggregate }
+  | { kind: "expression"; expr: IrNode };
 
 function parseSelectProperty(
   value: AcornExpr,
   keyName: string,
   paramName: string,
   fullSrc: string,
+  paramKeys: string[] = [],
 ): SelectPropertyResult | null {
   if (isObjectExpression(value)) {
     return parseNestedRelationProperty(value, keyName, paramName);
   }
 
   if (isCallExpression(value)) {
-    return parseCallSelectProperty(value, keyName, paramName, fullSrc);
+    return parseCallSelectProperty(value, keyName, paramName, fullSrc, paramKeys);
   }
 
   const resolved = resolveMemberPath(value, [paramName]);
-  if (!resolved || resolved.path.length === 0) return null;
-  return { kind: "path", path: resolved.path };
+  if (resolved && resolved.path.length > 0) {
+    return { kind: "path", path: resolved.path };
+  }
+
+  try {
+    const expr = parseExpressionToIr(value, [paramName], paramKeys);
+    if (expr.kind === "member" || expr.kind === "param") return null;
+    return { kind: "expression", expr };
+  } catch {
+    return null;
+  }
 }
 
 function parseNestedRelationProperty(
@@ -196,8 +235,9 @@ function parseCallSelectProperty(
   keyName: string,
   paramName: string,
   fullSrc: string,
+  paramKeys: string[] = [],
 ): SelectPropertyResult | null {
-  const parsed = safeParseAggregate(value, paramName);
+  const parsed = safeParseAggregate(value, paramName, paramKeys);
   if (parsed) {
     return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
   }
@@ -214,6 +254,7 @@ function applySelectPropertyResult(
   aliases: string[],
   relations: IrSelectRelation[],
   aggregates: IrAggregate[],
+  expressions: Array<{ expr: IrNode; alias: string }>,
 ): void {
   switch (result.kind) {
     case "path":
@@ -225,6 +266,9 @@ function applySelectPropertyResult(
       return;
     case "aggregate":
       aggregates.push(result.aggregate);
+      return;
+    case "expression":
+      expressions.push({ expr: result.expr, alias: keyName });
       return;
   }
 }

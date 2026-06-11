@@ -17,15 +17,7 @@ import type {
   CompiledCteBody,
 } from "./types.js";
 import { getColumnDef, resolveParamSentinels, SQL_DEFAULT } from "./types.js";
-import type {
-  Expr,
-  ExprAggregate,
-  ExprColumn,
-  GroupByItem,
-  JoinSpec,
-  OrderItem,
-  SelectItem,
-} from "../orm/expr.js";
+import type { Expr, ExprAggregate, ExprCase, ExprColumn, BinaryOp, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 import { QueryPlanBuilder } from "../orm/helpers/query-plan/query-plan.js";
 import type { FromSource, QueryState } from "../orm/query-state.js";
@@ -70,13 +62,74 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `${this.escapeIdentifier(col.alias)}.${col.column.map((c) => this.escapeIdentifier(c)).join(".")}`;
   }
 
-  protected compileAggregateArg(arg: Expr | null, params: unknown[]): string {
+  protected compileUnarySql(op: "!" | "~", operandSql: string): string {
+    if (op === "~") return `(~${operandSql})`;
+    return `(NOT ${operandSql})`;
+  }
+
+  protected compileXorSql(left: string, right: string): string {
+    if (this.dialect === "postgres") return `(${left} # ${right})`;
+    return `((${left} & ~${right}) | (~${left} & ${right}))`;
+  }
+
+  protected compileBinarySql(op: BinaryOp, left: string, right: string): string {
+    if (op === "&&") return `(${left} AND ${right})`;
+    if (op === "||") return `(${left} OR ${right})`;
+    if (op === "^") return this.compileXorSql(left, right);
+    const sqlOp =
+      op === "==" || op === "==="
+        ? "="
+        : op === "!=" || op === "!=="
+          ? "<>"
+          : op;
+    return `(${left} ${sqlOp} ${right})`;
+  }
+
+  protected compileInlineExpr(arg: Expr | null, params: unknown[]): string {
     if (arg === null) return "*";
     if (arg.kind === "column") return this.renderColumn(arg);
-    if (arg.kind === "const" && typeof arg.value === "number") {
-      return String(arg.value);
+    if (arg.kind === "const") return this.inlineConstLiteral(arg.value);
+    if (arg.kind === "binary") return this.compileInlineBinary(arg, params);
+    if (arg.kind === "case") return this.compileInlineCase(arg, params);
+    if (arg.kind === "unary") {
+      return this.compileUnarySql(arg.op, this.compileInlineExpr(arg.operand, params));
     }
     return this.compileNode(arg, params);
+  }
+
+  protected inlineConstLiteral(value: unknown): string {
+    if (value === null) return "NULL";
+    if (typeof value === "number") return String(value);
+    if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+    if (typeof value === "string") return `'${value.replaceAll("'", "''")}'`;
+    throw new Error(`[typhex] Cannot inline SQL literal of type ${typeof value}`);
+  }
+
+  protected compileInlineBinary(node: Expr & { kind: "binary" }, params: unknown[]): string {
+    if (this.isNullEquality(node)) {
+      const left = this.compileInlineExpr(node.left, params);
+      const negated = node.op === "!==" || node.op === "!=";
+      return `(${left} ${negated ? "IS NOT NULL" : "IS NULL"})`;
+    }
+    const left = this.compileInlineExpr(node.left, params);
+    const right = this.compileInlineExpr(node.right, params);
+    return this.compileBinarySql(node.op, left, right);
+  }
+
+  protected compileInlineCase(node: ExprCase, params: unknown[]): string {
+    const whens = node.branches
+      .map(
+        (b) =>
+          `WHEN ${this.compileInlineExpr(b.when, params)} THEN ${this.compileInlineExpr(b.then, params)}`,
+      )
+      .join(" ");
+    const elseSql = node.else ? ` ELSE ${this.compileInlineExpr(node.else, params)}` : "";
+    return `(CASE ${whens}${elseSql} END)`;
+  }
+
+  protected isNullEquality(node: Expr & { kind: "binary" }): boolean {
+    const isEq = node.op === "===" || node.op === "==" || node.op === "!==" || node.op === "!=";
+    return isEq && node.right.kind === "const" && node.right.value === null;
   }
 
   protected compileStandardAggregate(
@@ -84,7 +137,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     agg: ExprAggregate,
     params: unknown[],
   ): string {
-    const argSql = this.compileAggregateArg(agg.arg, params);
+    const argSql = this.compileInlineExpr(agg.arg, params);
     const distinctPrefix = agg.distinct ? "DISTINCT " : "";
     const expr = `${funcName}(${distinctPrefix}${argSql})`;
     return agg.alias ? `${expr} AS ${this.escapeIdentifier(agg.alias)}` : expr;
@@ -96,7 +149,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     defaultSep: string | undefined,
     params: unknown[],
   ): string {
-    const argSql = this.compileAggregateArg(agg.arg, params);
+    const argSql = this.compileInlineExpr(agg.arg, params);
     const distinctPrefix = agg.distinct ? "DISTINCT " : "";
     const sepLiteral =
       agg.separator !== undefined ? `'${agg.separator.replaceAll("'", "''")}'` : defaultSep;
@@ -370,7 +423,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     const sql = orders
       .map((o) => {
         const dir = o.direction === "desc" ? "DESC" : "ASC";
-        return `${this.compileNode(o.expr, params)} ${dir}`;
+        return `${this.compileInlineExpr(o.expr, params)} ${dir}`;
       })
       .join(", ");
     return { sql, params };
@@ -398,7 +451,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       const col =
         item.expr.kind === "aggregate"
           ? this.compileAggregate(item.expr, params)
-          : this.compileNode(item.expr, params);
+          : this.compileInlineExpr(item.expr, params);
       if (item.expr.kind === "aggregate") {
         if (item.alias && !item.expr.alias) {
           parts.push(`${col} AS ${this.escapeIdentifier(item.alias)}`);
@@ -722,20 +775,17 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   protected compileNode(node: Expr, params: unknown[]): string {
     switch (node.kind) {
       case "binary": {
+        if (this.isNullEquality(node)) {
+          const left = this.compileNode(node.left, params);
+          const negated = node.op === "!==" || node.op === "!=";
+          return `(${left} ${negated ? "IS NOT NULL" : "IS NULL"})`;
+        }
         const left = this.compileNode(node.left, params);
         const right = this.compileNode(node.right, params);
-        const op =
-          node.op === "==" || node.op === "==="
-            ? "="
-            : node.op === "!=" || node.op === "!=="
-              ? "<>"
-              : node.op;
-        if (node.op === "&&") return `(${left} AND ${right})`;
-        if (node.op === "||") return `(${left} OR ${right})`;
-        return `(${left} ${op} ${right})`;
+        return this.compileBinarySql(node.op, left, right);
       }
       case "unary":
-        return `(NOT ${this.compileNode(node.operand, params)})`;
+        return this.compileUnarySql(node.op, this.compileNode(node.operand, params));
       case "column":
         return this.renderColumn(node);
       case "const":
@@ -764,6 +814,8 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       }
       case "aggregate":
         return this.compileAggregate(node, params);
+      case "case":
+        return this.compileInlineCase(node, params);
     }
   }
 

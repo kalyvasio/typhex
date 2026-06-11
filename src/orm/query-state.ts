@@ -39,6 +39,7 @@ export interface QueryStateInit<T = unknown> {
   limitNum: number | null;
   offsetNum: number | null;
   selectIr: IrSelect | null;
+  inlineParams?: Record<string, unknown>;
   relations?: RelationsMap;
   hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
   resolveRelationTarget?: (
@@ -75,6 +76,7 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
   limitNum: number | null;
   offsetNum: number | null;
   selectIr: IrSelect | null;
+  inlineParams?: Record<string, unknown>;
   relations?: RelationsMap;
   hydrate?: (row: Record<string, unknown>) => T | Promise<T>;
   resolveRelationTarget?: (
@@ -104,6 +106,7 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     this.limitNum = init.limitNum;
     this.offsetNum = init.offsetNum;
     this.selectIr = init.selectIr;
+    this.inlineParams = init.inlineParams;
     this.relations = init.relations;
     this.hydrate = init.hydrate;
     this.resolveRelationTarget = init.resolveRelationTarget;
@@ -139,6 +142,7 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
       limitNum: this.limitNum,
       offsetNum: this.offsetNum,
       selectIr: this.selectIr,
+      inlineParams: this.inlineParams ? { ...this.inlineParams } : undefined,
       relations: this.relations,
       hydrate: this.hydrate,
       resolveRelationTarget: this.resolveRelationTarget,

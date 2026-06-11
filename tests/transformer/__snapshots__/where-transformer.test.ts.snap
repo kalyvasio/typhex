@@ -37,7 +37,7 @@ exports[`where transformer > transforms (d) => d.employees.some((e) => e.name ==
 `;
 
 exports[`where transformer > transforms (u) => !(u.id in [2]) 1`] = `
-"users.where({ node: { kind: "unary", op: "!", operand: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [2] } } }, rootParam: "u", localParamNames: ["u"] }, {});
+"users.where({ node: { kind: "in", left: { kind: "member", param: "u", path: ["id"] }, right: { kind: "const", value: [2] }, negated: true }, rootParam: "u", localParamNames: ["u"] }, {});
 "
 `;
 

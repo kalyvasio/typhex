@@ -68,38 +68,51 @@ export class ExprBuilder {
    * Throws on unknown node kinds — the IR types are a closed union, so
    * hitting the default branch means a future-added kind wasn't handled.
    */
-  convert(node: IrNode, scope: Record<string, string> = this.paramToAlias): Expr {
+  convert(
+    node: IrNode,
+    scope: Record<string, string> = this.paramToAlias,
+    inlineParams?: Record<string, unknown>,
+  ): Expr {
     switch (node.kind) {
       case "binary":
         return {
           kind: "binary",
           op: node.op,
-          left: this.convert(node.left, scope),
-          right: this.convert(node.right, scope),
+          left: this.convert(node.left, scope, inlineParams),
+          right: this.convert(node.right, scope, inlineParams),
         };
       case "unary":
-        return { kind: "unary", op: node.op, operand: this.convert(node.operand, scope) };
+        return { kind: "unary", op: node.op, operand: this.convert(node.operand, scope, inlineParams) };
       case "member":
         return this.resolveColumn(node.param, node.path, scope);
       case "const":
         return { kind: "const", value: node.value };
       case "param":
-        return this.resolveParamRef(node.key);
+        return this.resolveParamRef(node.key, inlineParams);
       case "in":
-        return this.convertIn(node, scope);
+        return this.convertIn(node, scope, inlineParams);
       case "call":
         return {
           kind: "call",
           method: node.method,
-          receiver: this.convert(node.receiver, scope),
-          args: node.args.map((a) => this.convert(a, scope)),
+          receiver: this.convert(node.receiver, scope, inlineParams),
+          args: node.args.map((a) => this.convert(a, scope, inlineParams)),
         };
       case "exists":
-        return this.convertExists(node, scope);
+        return this.convertExists(node, scope, inlineParams);
       case "subqueryRef":
         return this.convertSubqueryRef(node);
       case "aggregate":
-        return this.convertAggregate(node, scope);
+        return this.convertAggregate(node, scope, inlineParams);
+      case "case":
+        return {
+          kind: "case",
+          branches: node.branches.map((b) => ({
+            when: this.convert(b.when, scope, inlineParams),
+            then: this.convert(b.then, scope, inlineParams),
+          })),
+          ...(node.else !== undefined ? { else: this.convert(node.else, scope, inlineParams) } : {}),
+        };
       default:
         throw new Error(`[typhex] Unknown IR node kind: ${(node as { kind: string }).kind}`);
     }
@@ -175,11 +188,12 @@ export class ExprBuilder {
   convertAggregate(
     agg: IrAggregate,
     scope: Record<string, string> = this.paramToAlias,
+    inlineParams?: Record<string, unknown>,
   ): ExprAggregate {
     return {
       kind: "aggregate",
       func: agg.func,
-      arg: agg.arg ? this.convert(agg.arg, scope) : null,
+      arg: agg.arg ? this.convert(agg.arg, scope, inlineParams) : null,
       alias: agg.alias,
       distinct: agg.distinct,
       separator: agg.separator,
@@ -202,8 +216,23 @@ export class ExprBuilder {
    * parsed predicate). Captured subqueries are represented as
    * `IrSubqueryRef`, so params always stay late-bound.
    */
-  private resolveParamRef(key: string): Expr {
-    return { kind: "param", name: key };
+  private resolveParamRef(key: string, inlineParams: Record<string, unknown> | undefined): Expr {
+    if (inlineParams === undefined) {
+      return { kind: "param", name: key };
+    }
+    if (key in inlineParams) {
+      const value = inlineParams[key];
+      if (
+        value !== null &&
+        typeof value !== "string" &&
+        typeof value !== "number" &&
+        typeof value !== "boolean"
+      ) {
+        throw new Error(`[typhex] Cannot inline SQL literal "${key}" of type ${typeof value}`);
+      }
+      return { kind: "const", value };
+    }
+    throw new Error(`[typhex] inline param "${key}" not provided`);
   }
 
   /**
@@ -218,8 +247,12 @@ export class ExprBuilder {
    *
    * Anything else throws — IN's right side is a closed union by spec.
    */
-  private convertIn(node: IrNode & { kind: "in" }, scope: Record<string, string>): Expr {
-    const left = this.convert(node.left, scope);
+  private convertIn(
+    node: IrNode & { kind: "in" },
+    scope: Record<string, string>,
+    inlineParams: Record<string, unknown> | undefined,
+  ): Expr {
+    const left = this.convert(node.left, scope, inlineParams);
     const { negated } = node;
     const right = node.right;
 
@@ -263,7 +296,11 @@ export class ExprBuilder {
    *    `.some(e => e.name === ...)`) resolve to the inner relation's
    *    table alias rather than the outer row's.
    */
-  private convertExists(node: IrNode & { kind: "exists" }, scope: Record<string, string>): Expr {
+  private convertExists(
+    node: IrNode & { kind: "exists" },
+    scope: Record<string, string>,
+    inlineParams: Record<string, unknown> | undefined,
+  ): Expr {
     const key = `${node.rootParam}.${node.relationKey}`;
     const meta = this.oneToManyExists[key];
     if (!meta) {
@@ -280,7 +317,7 @@ export class ExprBuilder {
       targetTable: meta.targetTable,
       fkColumns: meta.fkColumns,
       mainPk: meta.mainPk,
-      predicate: this.convert(node.innerWhere, innerScope),
+      predicate: this.convert(node.innerWhere, innerScope, inlineParams),
     };
   }
 
