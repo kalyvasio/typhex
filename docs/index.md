@@ -20,8 +20,12 @@ features:
     details: Types flow from your schema definition — no decorators, no code generation. The compiler plugin auto-captures closure variables so there's no boilerplate at the call site.
   - title: Relations & Joins
     details: Declare `manyToOne`, `oneToMany`, and `manyToMany` relations. Reference them in `where()` for automatic JOINs and `select()` for eager loading — never N+1.
+  - title: Expression Queries
+    details: Use ternaries, arithmetic, bitwise operators, null checks, and computed projections inside `where()`, `select()`, aggregate arguments, `having()`, and `orderBy()`.
   - title: Aggregations
     details: Full GROUP BY / HAVING support with `sum()`, `avg()`, `min()`, `max()`, `count()`, `distinct()`, and `groupConcat()`. Filter groups with arrow-function `having()` predicates.
+  - title: CTEs and Subqueries
+    details: Build `WITH` clauses, recursive CTEs, `UNION ALL` branches, `IN` subqueries, and transformer-backed correlated scalar subqueries.
   - title: Transactions
     details: Callback API with implicit AsyncLocalStorage propagation. Explicit API for service-layer patterns. Nested savepoints. Configurable isolation levels.
   - title: SQLite + PostgreSQL

@@ -116,3 +116,53 @@ npm run cte
 Debug emitted SQL: `npm run cte:debug` (`TYPHEX_DEBUG=1`).
 
 Compiled output goes to `examples/out/cte/cte.js` (gitignored); `npm run cte` rebuilds it automatically.
+
+---
+
+## 10. Aggregations
+
+`GROUP BY`, `HAVING`, standard aggregate helpers, positional grouping, and database-specific aggregate examples.
+
+```bash
+npm run aggregations
+```
+
+Or: `npx tsx examples/aggregations/aggregations.ts`
+
+---
+
+## 11. Bulk insert
+
+`insertMany()` and upsert flows with `onConflict()`.
+
+```bash
+npm run insert-many
+```
+
+Or: `npx tsx examples/insert-many/insert-many.ts`
+
+---
+
+## 12. Subqueries
+
+Transformer-backed `IN` subqueries, nested `IN`, correlated scalar subqueries in `select()`, aggregate comparisons in `where()`, and subqueries in `orderBy()`.
+
+**Prerequisites**: same transformer setup as the CTE example.
+
+```bash
+npm run subqueries
+```
+
+Compiled output goes to `examples/out/subqueries/subqueries.js` (gitignored).
+
+---
+
+## 13. CASE, arithmetic, and computed columns
+
+Runtime parsing demo for `IS NULL`, computed `select()` expressions, ternaries, expression `orderBy()`, and closure variables in `.select()`.
+
+```bash
+npm run case-arithmetic-extras
+```
+
+Or: `npx tsx examples/case-arithmetic-extras/case-arithmetic-extras.ts`

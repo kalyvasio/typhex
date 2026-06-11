@@ -79,9 +79,22 @@ See [Composite Primary Keys](/guide/entities-relations#composite-primary-keys) f
 ```ts
 new Db(driver: Driver)
 new Db({ driver: Driver, migrationsFolder?: string })
+new Db({ dialect: "sqlite", database: string, migrationsFolder?: string })
+new Db({ dialect: "postgres", url: string, migrationsFolder?: string })
 ```
 
 Sets the driver as the default for all entities registered in the current process.
+
+### `Db.fromConfig(options?)`
+
+Load `typhex.config.js` and create a database from it. This is the same config shape used by the CLI.
+
+```ts
+const db = await Db.fromConfig();
+const db = await Db.fromConfig({ configPath: "./typhex.config.js" });
+```
+
+Config fields: `dialect`, `database` for SQLite, `url` for PostgreSQL, `migrationsFolder`, and `entities`.
 
 ### `db.migrate()`
 
@@ -93,16 +106,16 @@ await db.migrate();
 
 ### `db.generateMigrations(dir)`
 
-Diffs current entity definitions against existing migration files and writes new `.sql` files.
+Diffs current entity definitions against existing migration files and writes new `.js` migration modules.
 
 ```ts
 const files = await db.generateMigrations(dir: string)
-// Returns: { name: string }[]
+// Returns: { name: string, upSql: string, downSql: string, content: string }[]
 ```
 
 ### `db.runMigrations(dir)`
 
-Applies all pending `.sql` files in `dir`.
+Applies all pending migration modules in `dir`.
 
 ```ts
 const result = await db.runMigrations(dir: string)
@@ -111,12 +124,14 @@ const result = await db.runMigrations(dir: string)
 
 ### `db.migrationStatus(dir)`
 
-Returns counts of applied and pending migration files.
+Returns applied migration records and pending migration names.
 
 ```ts
 const status = await db.migrationStatus(dir: string)
-// Returns: { applied: string[], pending: string[] }
+// Returns: { applied: MigrationRecord[], pending: string[] }
 ```
+
+See the [Migrations guide](/migrations/overview) for the generated module format.
 
 ### `db.transaction(fn, options?)`
 
@@ -180,6 +195,7 @@ Filter rows. `predicate` is an arrow function. With the transformer, closure var
 .where((u) => u.country === country, { country })          // runtime fallback
 .where((u) => u.company.name === "Acme")                   // generates JOIN
 .where((d) => d.employees.some((e) => e.name === "Alice")) // generates EXISTS
+.where((d) => d.employees.every((e) => e.active === true)) // generates NOT EXISTS
 ```
 
 ```sql
@@ -187,15 +203,18 @@ WHERE age > ?
 WHERE country = ?
 LEFT JOIN companies ON companies.id = users.companyId WHERE companies.name = ?
 WHERE EXISTS (SELECT 1 FROM employees WHERE employees.departmentId = departments.id AND employees.name = ?)
+WHERE NOT EXISTS (SELECT 1 FROM employees WHERE employees.departmentId = departments.id AND NOT (employees.active = ?))
 ```
 
-### `.select(columnsOrLambda)`
+### `.select(columnsOrLambda, closureVars?)`
 
 Limit or reshape the result columns.
 
 ```ts
 .select(["name", "country"])                         // column list
 .select((u) => ({ userId: u.id, name: u.name }))     // projection with aliases
+.select((o) => ({ revenue: o.price * o.qty }))       // computed projection
+.select((o) => ({ smalls: sum(o.qty < cutoff ? 1 : 0) }), { cutoff }) // runtime closure
 .select((p) => ({ ...p, author: p.author }))         // spread + relation
 .select((u) => ({ posts: u.posts.query().select(…) })) // oneToMany sub-query
 ```
@@ -203,6 +222,7 @@ Limit or reshape the result columns.
 ```sql
 SELECT name AS name, country AS country FROM users
 SELECT id AS userId, name AS name FROM users
+SELECT (price * qty) AS revenue FROM orders
 -- spread + relation: main query selects all own cols, relation fetched separately
 -- oneToMany sub-query: main + child fetch via WHERE foreignKey IN (...)
 ```
@@ -212,6 +232,7 @@ SELECT id AS userId, name AS name FROM users
 ```ts
 .orderBy((u) => u.name, "asc")          // arrow form (preferred)
 .orderBy((u) => u.age, "desc")
+.orderBy((o) => o.price * o.qty, "desc") // expression
 .orderBy((u) => u.company.name, "asc")  // relation column — generates JOIN
 .orderBy("name", "asc")                 // string form also accepted
 ```
@@ -551,20 +572,20 @@ import { groupConcat } from "typhex/sqlite"; // SQLite only
 import { stringAgg, arrayAgg, jsonAgg } from "typhex/postgres"; // PostgreSQL only
 ```
 
-| Function                 | SQL            | Notes                         |
-| ------------------------ | -------------- | ----------------------------- |
-| `count(col?)`            | `COUNT(col)`   | Omit arg for `COUNT(*)`       |
-| `sum(col)`               | `SUM(col)`     |                               |
-| `avg(col)`               | `AVG(col)`     |                               |
-| `min(col)`               | `MIN(col)`     |                               |
-| `max(col)`               | `MAX(col)`     |                               |
-| `distinct(col)`          | `DISTINCT col` | Wrap inside another aggregate |
-| `groupConcat(col, sep?)` | `GROUP_CONCAT` | SQLite only                   |
-| `stringAgg(col, sep)`    | `STRING_AGG`   | PostgreSQL only               |
-| `arrayAgg(col)`          | `ARRAY_AGG`    | PostgreSQL only               |
-| `jsonAgg(col)`           | `JSON_AGG`     | PostgreSQL only               |
+| Function                 | SQL            | Notes                          |
+| ------------------------ | -------------- | ------------------------------ |
+| `count(col?)`            | `COUNT(col)`   | Omit arg for `COUNT(*)`        |
+| `sum(expr)`              | `SUM(expr)`    | Accepts columns or expressions |
+| `avg(expr)`              | `AVG(expr)`    | Accepts columns or expressions |
+| `min(expr)`              | `MIN(expr)`    | Accepts columns or expressions |
+| `max(expr)`              | `MAX(expr)`    | Accepts columns or expressions |
+| `distinct(col)`          | `DISTINCT col` | Wrap inside another aggregate  |
+| `groupConcat(col, sep?)` | `GROUP_CONCAT` | SQLite only                    |
+| `stringAgg(col, sep)`    | `STRING_AGG`   | PostgreSQL only                |
+| `arrayAgg(col)`          | `ARRAY_AGG`    | PostgreSQL only                |
+| `jsonAgg(col)`           | `JSON_AGG`     | PostgreSQL only                |
 
-Used inside `.select()` and `.having()` lambdas.
+Used inside `.select()` and `.having()` lambdas. Aggregate arguments can include arithmetic and ternaries, for example `sum(o.price * o.qty)` or `sum(o.active ? 1 : 0)`.
 
 ## `createSqliteDriver(options)`
 
@@ -586,26 +607,59 @@ import { createPostgresDriver } from "typhex";
 createPostgresDriver({ connectionString: string });
 ```
 
-| Option             | Description               |
-| ------------------ | ------------------------- |
-| `connectionString` | PostgreSQL connection URI |
+| Option                | Description                                                   |
+| --------------------- | ------------------------------------------------------------- |
+| `connectionString`    | PostgreSQL connection URI                                     |
+| `url`                 | Alias for `connectionString`, useful in config files          |
+| `host`                | Hostname when not using a connection string                   |
+| `port`                | Port, default `5432`                                          |
+| `database`            | Database name, default `"postgres"`                           |
+| `user`                | Database user                                                 |
+| `password`            | Database password                                             |
+| `ssl`                 | SSL config forwarded to `pg`                                  |
+| `poolMin`             | Minimum pool connections, default `2`                         |
+| `poolMax`             | Maximum pool connections, default `10`                        |
+| `idleTimeoutMs`       | Idle connection timeout in milliseconds, default `30000`      |
+| `connectionTimeoutMs` | Pool connection timeout in milliseconds, default `5000`       |
+| `statementTimeoutMs`  | PostgreSQL `statement_timeout` in milliseconds                |
+| `logger`              | Custom pool error logger with an `error(message, err)` method |
+
+## `createDriver(options)`
+
+Create a driver from a discriminated options object:
+
+```ts
+import { createDriver } from "typhex";
+
+const sqlite = createDriver({ dialect: "sqlite", path: "./app.db" });
+const postgres = createDriver({ dialect: "postgres", url: process.env.DATABASE_URL });
+```
 
 ## Supported Predicate Syntax
 
-| Expression                  | SQL equivalent        | Notes                                          |
-| --------------------------- | --------------------- | ---------------------------------------------- |
-| `u.age > 18`                | `age > ?`             | `>`, `>=`, `<`, `<=`, `===`, `!==`, `==`, `!=` |
-| `u.active`                  | `active = 1`          | boolean truthy                                 |
-| `!u.active`                 | `NOT active = 1`      | unary negation                                 |
-| `u.a && u.b`                | `a AND b`             |                                                |
-| `u.a \|\| u.b`              | `a OR b`              |                                                |
-| `u.name.startsWith("A")`    | `name LIKE 'A%'`      |                                                |
-| `u.name.endsWith("z")`      | `name LIKE '%z'`      |                                                |
-| `u.name.includes("al")`     | `name LIKE '%al%'`    |                                                |
-| `u.id in [1, 2, 3]`         | `id IN (?, ?, ?)`     | literal array                                  |
-| `u.id in ids`               | `id IN (?, …)`        | variable array (pass as closure)               |
-| `!(u.id in [2])`            | `id NOT IN (?)`       | negated `in`                                   |
-| `u.company.name === "Acme"` | `JOIN … WHERE …`      | manyToOne: generates JOIN                      |
-| `d.employees.some(e => …)`  | `EXISTS (SELECT 1 …)` | oneToMany: generates EXISTS                    |
+| Expression                  | SQL equivalent            | Notes                                          |
+| --------------------------- | ------------------------- | ---------------------------------------------- |
+| `u.age > 18`                | `age > ?`                 | `>`, `>=`, `<`, `<=`, `===`, `!==`, `==`, `!=` |
+| `u.deletedAt === null`      | `deletedAt IS NULL`       | `!== null` emits `IS NOT NULL`                 |
+| `u.active`                  | `active = 1`              | boolean truthy                                 |
+| `!u.active`                 | `NOT active = 1`          | unary negation                                 |
+| `u.a && u.b`                | `a AND b`                 |                                                |
+| `u.a \|\| u.b`              | `a OR b`                  |                                                |
+| `u.price * u.qty`           | `price * qty`             | arithmetic: `+`, `-`, `*`, `/`, `%`            |
+| `u.flags & 4`               | `flags & ?`               | bitwise: `&`, `\|`, `^`, `<<`, `>>`, `~`       |
+| `u.qty < 5 ? "s" : "l"`     | `CASE WHEN … THEN … END`  | works in predicates, projections, aggregates   |
+| `u.name.startsWith("A")`    | `name LIKE 'A%'`          |                                                |
+| `u.name.endsWith("z")`      | `name LIKE '%z'`          |                                                |
+| `u.name.includes("al")`     | `name LIKE '%al%'`        |                                                |
+| `u.id in [1, 2, 3]`         | `id IN (?, ?, ?)`         | literal array                                  |
+| `u.id in ids`               | `id IN (?, …)`            | variable array (pass as closure)               |
+| `!(u.id in [2])`            | `id NOT IN (?)`           | negated `in`                                   |
+| `u.company.name === "Acme"` | `JOIN … WHERE …`          | manyToOne: generates JOIN                      |
+| `d.employees.some(e => …)`  | `EXISTS (SELECT 1 …)`     | oneToMany: generates EXISTS                    |
+| `d.employees.every(e => …)` | `NOT EXISTS (SELECT 1 …)` | oneToMany: no child may fail the predicate     |
 
-**Not supported in runtime mode:** ternary expressions, function calls (except string methods), `await`, `new`, `instanceof`, loops.
+**Supported in runtime mode:** ternaries, arithmetic, bitwise operators, strict null checks, computed projections, aggregate expressions, expression `orderBy()`, and `IN` subqueries passed through the params object.
+
+**Transformer-only:** scalar correlated subqueries in `.select()`, comparison `.where()` predicates, and `.orderBy()`; inline nested subqueries that rely on closure capture.
+
+**Not supported:** unsigned right shift (`>>>`), optional chaining, nullish coalescing, arbitrary function calls, `await`, `new`, `instanceof`, assignments, and loops.

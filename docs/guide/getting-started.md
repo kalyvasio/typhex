@@ -154,6 +154,20 @@ const ages = await User.query()
   .toArray();
 ```
 
+Projection fields can also be computed expressions:
+
+```ts
+const labels = await User.query()
+  .select((u) => ({
+    name: u.name,
+    decade: (u.age / 10) * 10,
+    label: u.age >= 18 ? "adult" : "minor",
+  }))
+  .toArray();
+```
+
+In runtime mode, pass closure variables used inside `.select()` as the second argument. With the transformer enabled, they are captured automatically.
+
 ## String Predicates
 
 `.startsWith()`, `.endsWith()`, and `.includes()` compile to SQL `LIKE`:

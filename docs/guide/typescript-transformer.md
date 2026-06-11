@@ -52,6 +52,13 @@ const country = "US";
 users.where((u) => u.country === country); // [!code ++]
 ```
 
+The same applies to projections and aggregate expressions:
+
+```ts
+const cutoff = 5;
+orders.select((o) => ({ smalls: sum(o.qty < cutoff ? 1 : 0) }));
+```
+
 Multiple variables are all captured at once:
 
 ```ts
@@ -77,6 +84,31 @@ const highRevenue = await Order.query()
   .having((o) => sum(o.price) >= minRevenue)
   .toArray();
 ```
+
+## Transformer-Only Query Shapes
+
+Some query shapes depend on compile-time closure capture and are transformer-only:
+
+```ts
+// Correlated scalar subquery in SELECT
+Author.query().select((a) => ({
+  name: a.name,
+  postCount: Post.query()
+    .where((p) => p.authorId === a.id)
+    .select(() => count()),
+}));
+
+// Correlated scalar subquery in ORDER BY
+Author.query().orderBy(
+  (a) =>
+    Post.query()
+      .where((p) => p.authorId === a.id)
+      .select(() => count()),
+  "desc",
+);
+```
+
+Runtime mode still supports `IN` subqueries by passing the inner query through the params object. See [Subqueries](/guide/subqueries).
 
 ## How It Works
 

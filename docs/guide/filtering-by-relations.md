@@ -122,6 +122,30 @@ WHERE EXISTS (
 )
 ```
 
+## oneToMany NOT EXISTS: `.every()`
+
+Use `.every()` when every related row must satisfy a predicate. Typhex compiles this to `NOT EXISTS` over rows that fail the predicate:
+
+```ts
+// departments where every employee is active
+const activeDepartments = await Department.query()
+  .where((d) => d.employees.every((e) => e.active === true)) // [!code highlight]
+  .select((d) => ({ id: d.id, name: d.name }))
+  .toArray();
+```
+
+Typhex emits:
+
+```sql
+SELECT departments.id, departments.name
+FROM departments
+WHERE NOT EXISTS (
+  SELECT 1 FROM employees
+  WHERE employees.departmentId = departments.id
+    AND NOT (employees.active = ?)
+)
+```
+
 ## Count with Relation WHERE
 
 `.count()` works with any `where()` predicate, including those that reference relations:

@@ -135,6 +135,36 @@ HAVING SUM(price) >= ?
 In runtime mode, pass closure variables explicitly: `.having((o) => sum(o.price) >= minRevenue, { minRevenue })`.
 :::
 
+## Expression Arguments
+
+Aggregate arguments can be computed expressions. This is useful for totals derived from multiple columns and conditional counts:
+
+```ts
+const cutoff = 5;
+const stats = await Order.query()
+  .select(
+    (o) => ({
+      category: o.category,
+      revenue: sum(o.price * o.qty),
+      smallOrders: sum(o.qty < cutoff ? 1 : 0),
+    }),
+    { cutoff },
+  )
+  .groupBy((o) => o.category)
+  .toArray();
+```
+
+```sql
+SELECT category AS category,
+       SUM(price * qty) AS revenue,
+       SUM(CASE WHEN qty < ? THEN ? ELSE ? END) AS smallOrders
+FROM orders
+GROUP BY category
+-- params: [5, 1, 0]
+```
+
+In runtime mode, pass closure variables used inside `.select()` as the second argument. With the transformer enabled, no second argument is needed.
+
 ## Combining WHERE + GROUP BY + HAVING
 
 All three compose naturally:
