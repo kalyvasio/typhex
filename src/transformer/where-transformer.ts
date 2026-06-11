@@ -471,7 +471,7 @@ export function parseWhereArrowToIr(
 }
 
 /** Convert a single TS expression to IR for select/orderBy transformers. */
-export function parseExprToIr(
+export function parseExpressionToIr(
   expr: ts.Expression,
   paramNames: string[],
   freeVars: Set<string>,

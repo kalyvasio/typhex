@@ -6,7 +6,7 @@
 import * as ts from "typescript";
 import type { IrNode } from "../ir/types.js";
 import { isTyphexType, matchTyphexMethodCall, memberPath, irOrderByToTsLiteral } from "./shared.js";
-import { parseExprToIr } from "./where-transformer.js";
+import { parseExpressionToIr } from "./where-transformer.js";
 import {
   buildParamsLiteral,
   captureSubqueryRef,
@@ -62,7 +62,7 @@ function extractOrderByExpr(
     if (isTyphexQueryChain(body, checker)) {
       return captureSubqueryRef(body, capturedSubqueries);
     }
-    const ir = parseExprToIr(body, [paramName], freeVars);
+    const ir = parseExpressionToIr(body, [paramName], freeVars);
     if (ir && ir.kind !== "member" && ir.kind !== "param") return ir;
   }
   return null;

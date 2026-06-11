@@ -103,7 +103,7 @@ export class QueryBuilder<
     return this.state.pkColumns;
   }
 
-  private static splitParams(params?: Record<string, unknown>) {
+  private static splitParams(params?: Record<string, unknown> | null) {
     const sqlParams: Record<string, unknown> = {};
     const subqueryParams: Record<string, CapturedSubquery> = {};
 
@@ -145,36 +145,48 @@ export class QueryBuilder<
   }
 
   /** @internal — used by the TypeScript transformer */
-  orderBy(ir: IrOrderBy, params?: Record<string, unknown>): this;
+  orderBy(ir: IrOrderBy, params?: Record<string, unknown> | null): this;
   /** Append an ORDER BY clause. Accepts a dot-separated column string or
    *  an arrow function parsed to a member path at runtime. */
   orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
   orderBy(
     colOrIr: IrOrderBy | string | ((row: T) => unknown),
-    directionOrParams: OrderDirection | Record<string, unknown> = "asc",
+    second: OrderDirection | Record<string, unknown> | null = "asc",
   ): this {
-    const isIr = isIrOrderBy(colOrIr);
-    const direction = isIr
-      ? colOrIr.direction
-      : typeof directionOrParams === "string"
-        ? directionOrParams
-        : "asc";
-    const params = typeof directionOrParams === "object" ? directionOrParams : undefined;
-
-    const { sqlParams, subqueryParams: captured } = QueryBuilder.splitParams(params);
-    Object.assign(this.state.subqueryParams, captured);
-    if (Object.keys(sqlParams).length > 0) {
-      this.state.inlineParams = { ...this.state.inlineParams, ...sqlParams };
+    if (isIrOrderBy(colOrIr)) {
+      return this.addOrderByIr(colOrIr, typeof second === "object" ? second : null);
     }
+    const direction = typeof second === "string" ? second : "asc";
+    return this.addOrderByInput(colOrIr, direction);
+  }
+
+  private addOrderByIr(
+    ir: IrOrderBy,
+    params: Record<string, unknown> | null,
+  ): this {
+    this.addInlineParams(params);
+    this.state.orderBy.push(ir);
+    return this;
+  }
+
+  private addOrderByInput(
+    input: string | ((row: T) => unknown),
+    direction: OrderDirection,
+  ): this {
     const paramKeys = Object.keys(this.state.inlineParams ?? {});
     this.state.orderBy.push(
-      resolveOrderBy(
-        colOrIr as IrOrderBy | string | ((row: unknown) => unknown),
-        direction,
-        paramKeys,
-      ),
+      resolveOrderBy(input as string | ((row: unknown) => unknown), direction, paramKeys),
     );
     return this;
+  }
+
+  private addInlineParams(params: Record<string, unknown> | null): string[] {
+    const { sqlParams, subqueryParams: captured } = QueryBuilder.splitParams(params);
+    Object.assign(this.state.subqueryParams, captured);
+    if (params !== null) {
+      this.state.inlineParams = { ...this.state.inlineParams, ...sqlParams };
+    }
+    return Object.keys(sqlParams);
   }
 
   /** Adds an INNER JOIN for relation keys, or to an entity table with a custom ON. */
@@ -363,16 +375,12 @@ export class QueryBuilder<
   select(ir: IrSelect, params?: Record<string, unknown>): QueryBuilder<C, T, Ctes>;
   select(
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>),
-    params?: Record<string, unknown>,
+    params: Record<string, unknown> | null = null,
   ): QueryBuilder<C, unknown, Ctes> {
-    const { sqlParams, subqueryParams: captured } = QueryBuilder.splitParams(params);
-    Object.assign(this.state.subqueryParams, captured);
-    if (params !== undefined) {
-      this.state.inlineParams = { ...this.state.inlineParams, ...sqlParams };
-    }
+    const paramKeys = this.addInlineParams(params);
     this.state.selectIr = resolveSelectIr(
       columnsOrIr as string[] | IrSelect | ((row: unknown) => Record<string, unknown>),
-      params !== undefined ? Object.keys(sqlParams) : [],
+      paramKeys,
     );
     return this as QueryBuilder<C, unknown, Ctes>;
   }

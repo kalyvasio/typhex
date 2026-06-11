@@ -7,7 +7,6 @@ import type * as ESTree from "estree";
 import type {
   IrNode,
   IrBinary,
-  IrUnary,
   IrMember,
   IrConst,
   IrParam,
@@ -43,7 +42,7 @@ export interface ParseOptions {
   subqueryKeys?: string[];
 }
 
-export function parseExprToIr(
+export function parseExpressionToIr(
   expr: AcornExpr,
   params: string[],
   paramKeys: string[],
@@ -184,7 +183,7 @@ function walkUnary(
 
   if (op === "!" && inner.kind === "in") return { ...inner, negated: !inner.negated };
 
-  return { kind: "unary", op: op as IrUnary["op"], operand: inner };
+  return { kind: "unary", op, operand: inner };
 }
 
 function walkMember(node: ESTree.MemberExpression, params: string[]): IrMember {

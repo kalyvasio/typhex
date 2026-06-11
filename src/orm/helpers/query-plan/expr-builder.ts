@@ -221,21 +221,18 @@ export class ExprBuilder {
       return { kind: "param", name: key };
     }
     if (key in inlineParams) {
-      return { kind: "const", value: this.requireInlineLiteral(key, inlineParams[key]) };
+      const value = inlineParams[key];
+      if (
+        value !== null &&
+        typeof value !== "string" &&
+        typeof value !== "number" &&
+        typeof value !== "boolean"
+      ) {
+        throw new Error(`[typhex] Cannot inline SQL literal "${key}" of type ${typeof value}`);
+      }
+      return { kind: "const", value };
     }
     throw new Error(`[typhex] inline param "${key}" not provided`);
-  }
-
-  private requireInlineLiteral(key: string, value: unknown): unknown {
-    if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "boolean"
-    ) {
-      return value;
-    }
-    throw new Error(`[typhex] Cannot inline SQL literal "${key}" of type ${typeof value}`);
   }
 
   /**

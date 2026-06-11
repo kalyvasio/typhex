@@ -15,7 +15,7 @@ import {
   getParamBindings,
   type ParamBindings,
 } from "./shared.js";
-import { parseExprToIr } from "./where-transformer.js";
+import { parseExpressionToIr } from "./where-transformer.js";
 import {
   buildParamsLiteral,
   captureSubqueryRef,
@@ -105,7 +105,7 @@ function parseShorthandAggregateBody(
   paramName: string,
   freeVars: Set<string>,
 ): IrSelect | null {
-  const resolveArg = (expr: ts.Expression) => parseExprToIr(expr, [paramName], freeVars);
+  const resolveArg = (expr: ts.Expression) => parseExpressionToIr(expr, [paramName], freeVars);
   const parsed = parseTsAggregateCall(body, [paramName], resolveArg);
   if (!parsed) return null;
   const alias = parsed.rawName.toLowerCase();
@@ -122,7 +122,7 @@ function parseShorthandExpressionBody(
   paramName: string,
   freeVars: Set<string>,
 ): IrSelect | null {
-  const ir = parseExprToIr(body, [paramName], freeVars);
+  const ir = parseExpressionToIr(body, [paramName], freeVars);
   if (!ir || ir.kind === "member" || ir.kind === "param") return null;
   return {
     param: paramName,
@@ -233,7 +233,7 @@ function parseSelectObjectProperty(
 
   if (!ts.isPropertyAssignment(prop)) return null;
   const value = prop.initializer;
-  const resolveArg = (expr: ts.Expression) => parseExprToIr(expr, [pb.paramName], freeVars);
+  const resolveArg = (expr: ts.Expression) => parseExpressionToIr(expr, [pb.paramName], freeVars);
 
   if (ts.isPropertyAccessExpression(value)) {
     const path = memberPath(value, pb.paramName);
@@ -258,7 +258,7 @@ function parseSelectObjectProperty(
     }
   }
 
-  const expr = parseExprToIr(value, [pb.paramName], freeVars);
+  const expr = parseExpressionToIr(value, [pb.paramName], freeVars);
   if (!expr || expr.kind === "member" || expr.kind === "param") return null;
   return { kind: "expression", expr };
 }

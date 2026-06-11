@@ -30,7 +30,7 @@ import {
   propertyKeyName,
 } from "./acorn-helpers.js";
 import { resolveMemberPath } from "./acorn-member.js";
-import { parseArrowToIrPredicate, parseExprToIr, tryParseAggregate } from "./predicate-walk.js";
+import { parseArrowToIrPredicate, parseExpressionToIr, tryParseAggregate } from "./predicate-walk.js";
 
 export function parseArrowToIrSelect(
   fn: (...args: unknown[]) => unknown,
@@ -84,7 +84,7 @@ function parseSingleExpressionSelect(
   paramKeys: string[],
 ): IrSelect | null {
   try {
-    const ir = parseExprToIr(expr, [paramName], paramKeys);
+    const ir = parseExpressionToIr(expr, [paramName], paramKeys);
     if (ir.kind === "member" || ir.kind === "param") return null;
     return {
       param: paramName,
@@ -209,7 +209,7 @@ function parseSelectProperty(
   }
 
   try {
-    const expr = parseExprToIr(value, [paramName], paramKeys);
+    const expr = parseExpressionToIr(value, [paramName], paramKeys);
     if (expr.kind === "member" || expr.kind === "param") return null;
     return { kind: "expression", expr };
   } catch {
