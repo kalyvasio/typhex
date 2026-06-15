@@ -1,6 +1,6 @@
 {
   "name": "typhex",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "description": "TypeScript ORM with arrow-function query predicates",
   "homepage": "https://kalyvasio.github.io/typhex/",
   "repository": {
