@@ -7,6 +7,10 @@ Typhex follows semantic versioning for the documented public API. During the
 
 ## Unreleased
 
+## 0.1.0-alpha.1 - 2026-06-15
+
+- Switch release workflow to npm Trusted Publishing (OIDC) instead of `NPM_TOKEN`.
+
 ## 0.1.0-alpha.0 - 2026-06-15
 
 - Initial public alpha preview.
