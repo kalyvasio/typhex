@@ -33,10 +33,16 @@ export { loadConfig } from "./config/load-config.js";
 export type { DbOptions, QueryExecutor, OrderDirection } from "./orm/index.js";
 
 // Driver types
-export type { Driver, Connection, ExecuteResult, TransactionOptions } from "./driver/types.js";
+export type {
+  DialectInfo,
+  Driver,
+  Connection,
+  ExecuteResult,
+  TransactionOptions,
+} from "./driver/types.js";
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export type { PostgresDriverOptions } from "./dbs/index.js";
-export type { ColumnDef } from "./dbs/types.js";
+export type { ColumnDef, ColumnChange, DbColumnInfo } from "./dbs/types.js";
 export type { WithClause, CompiledCteBody } from "./dbs/types.js";
 
 // Entity machinery

@@ -20,6 +20,25 @@ export function appliedMigrations(driver: Driver): Promise<MigrationRecord[]>;
 export function avg(_field: number): number;
 
 // @public
+export type ColumnChange = {
+    kind: "type";
+    from: string;
+    to: string;
+} | {
+    kind: "not_null" | "nullable";
+    from: boolean;
+    to: boolean;
+} | {
+    kind: "default";
+    from: string | null;
+    to: string | null;
+} | {
+    kind: "primary_key";
+    from: boolean;
+    to: boolean;
+};
+
+// @public
 export type ColumnDef = string | {
     [K in DialectName]?: string;
 };
@@ -36,8 +55,6 @@ export interface CompiledCteBody {
     recursive?: boolean;
 }
 
-// Warning: (ae-forgotten-export) The symbol "DialectInfo" needs to be exported by the entry point index.d.ts
-//
 // @public
 export interface Connection<TDialect extends DialectInfo = DialectInfo> {
     readonly dialect: TDialect;
@@ -100,6 +117,20 @@ export class Db implements QueryExecutor {
     validate(): Promise<void>;
 }
 
+// @public (undocumented)
+export interface DbColumnInfo {
+    // (undocumented)
+    dflt_value: string | null;
+    // (undocumented)
+    name: string;
+    // (undocumented)
+    notnull: number;
+    // (undocumented)
+    pk: number;
+    // (undocumented)
+    type: string;
+}
+
 // @public
 export type DbOptions = {
     driver: Driver;
@@ -110,6 +141,12 @@ export type DbOptions = {
     url?: string;
     migrationsFolder?: string;
 };
+
+// @public
+export interface DialectInfo {
+    // (undocumented)
+    readonly name: DialectName;
+}
 
 // @public
 export type DialectName = "sqlite" | "postgres";
@@ -731,11 +768,6 @@ export interface WithClause {
     // (undocumented)
     name: string;
 }
-
-// Warnings were encountered during analysis:
-//
-// src/dbs/types.ts:54:42 - (ae-forgotten-export) The symbol "DbColumnInfo" needs to be exported by the entry point index.d.ts
-// src/dbs/types.ts:64:7 - (ae-forgotten-export) The symbol "ColumnChange" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 
