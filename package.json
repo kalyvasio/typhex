@@ -97,7 +97,7 @@
     "node": ">=18"
   },
   "dependencies": {
-    "acorn": "^8.14.0",
+    "acorn": "^8.17.0",
     "better-sqlite3": "^12.10.0",
     "pg": "^8.19.0"
   },
