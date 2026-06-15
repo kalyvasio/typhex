@@ -6,7 +6,7 @@
 
 import { writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Driver } from "../driver/types.js";
+import type { Driver, ResolvedDriver } from "../driver/types.js";
 import type { DiffAction, MigrationFile } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import { parseFkDependencies, topoSort } from "./topo-sort.js";
@@ -75,8 +75,9 @@ export async function generateMigrationFiles(
   driver: Driver,
   entities: readonly RegisteredEntity[],
 ): Promise<MigrationFile[]> {
-  const compiler = driver.dialect.queryCompiler;
-  const actions = await driver.dialect.migrator.diffSchema(driver, entities);
+  const resolvedDriver = driver as ResolvedDriver;
+  const compiler = resolvedDriver.dialect.queryCompiler;
+  const actions = await resolvedDriver.dialect.migrator.diffSchema(resolvedDriver, entities);
   if (actions.length === 0) return [];
 
   const groups = groupByTable(actions);

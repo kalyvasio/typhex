@@ -1,4 +1,4 @@
-import type { QueryCompiler } from "../../../dbs/types.js";
+import type { Dialect, QueryCompiler } from "../../../dbs/types.js";
 import type { QueryExecutor } from "../../db.js";
 import { InsertGraphExecutor } from "./insert-graph-executor.js";
 import type { PlannedNode } from "./insert-graph-planner.js";
@@ -13,7 +13,7 @@ type InsertGroup = {
 
 export class InsertGraphBatchExecutor extends InsertGraphExecutor {
   protected async insertReadyNodes(qe: QueryExecutor, nodes: PlannedNode[]): Promise<void> {
-    const compiler = qe.dialect.queryCompiler;
+    const compiler = (qe.dialect as Dialect).queryCompiler;
     for (const group of groupByTable(nodes)) {
       await this.insertNodeGroup(compiler, qe, group);
     }

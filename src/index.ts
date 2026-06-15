@@ -15,7 +15,7 @@ export {
   manyToMany,
 } from "./entity/index.js";
 export { createSqliteDriver, createDriver } from "./driver/index.js";
-export { createPostgresDriver } from "./dbs/index.js";
+export { createPostgresDriver } from "./dbs/postgres/driver.js";
 export {
   appliedMigrations,
   diffSchema,
@@ -108,7 +108,6 @@ export type { RegisteredEntity } from "./entity/index.js";
 // Migration
 export type {
   DiffAction,
-  Dialect,
   DialectName,
   MigrationFile,
   MigrationRecord,

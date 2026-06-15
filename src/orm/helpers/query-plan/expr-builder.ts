@@ -82,7 +82,11 @@ export class ExprBuilder {
           right: this.convert(node.right, scope, inlineParams),
         };
       case "unary":
-        return { kind: "unary", op: node.op, operand: this.convert(node.operand, scope, inlineParams) };
+        return {
+          kind: "unary",
+          op: node.op,
+          operand: this.convert(node.operand, scope, inlineParams),
+        };
       case "member":
         return this.resolveColumn(node.param, node.path, scope);
       case "const":
@@ -111,7 +115,9 @@ export class ExprBuilder {
             when: this.convert(b.when, scope, inlineParams),
             then: this.convert(b.then, scope, inlineParams),
           })),
-          ...(node.else !== undefined ? { else: this.convert(node.else, scope, inlineParams) } : {}),
+          ...(node.else !== undefined
+            ? { else: this.convert(node.else, scope, inlineParams) }
+            : {}),
         };
       default:
         throw new Error(`[typhex] Unknown IR node kind: ${(node as { kind: string }).kind}`);

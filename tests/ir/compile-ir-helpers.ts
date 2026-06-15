@@ -2,10 +2,7 @@ import type { IrNode, IrOrderBy, IrSelect } from "../../src/ir/types.js";
 import type { SelectItem } from "../../src/orm/expr.js";
 import { ExprBuilder } from "../../src/orm/helpers/query-plan/expr-builder.js";
 import { selectPlan } from "../dbs/compiler-plan-fixtures.js";
-import {
-  sqliteQueryCompiler,
-  postgresQueryCompiler,
-} from "../../src/dbs/index.js";
+import { sqliteQueryCompiler, postgresQueryCompiler } from "../../src/dbs/index.js";
 import type { BaseQueryCompiler } from "../../src/dbs/query-compiler.js";
 
 const TEST_TABLE = "__ir_test";

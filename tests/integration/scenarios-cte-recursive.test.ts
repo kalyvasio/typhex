@@ -53,7 +53,9 @@ describe("CTE Phase 2 (SQLite)", () => {
 
   it("withRecursiveCte executes anchor rows when the recursive step adds nothing", async () => {
     const anchor = User.query().where((u) => u.age >= 65);
-    const recursive = User.query().from("seniors").where((u) => u.age >= 100);
+    const recursive = User.query()
+      .from("seniors")
+      .where((u) => u.age >= 100);
     const body = anchor.unionAll(recursive);
     const rows = await User.query().withRecursiveCte("seniors", body).from("seniors").toArray();
     expect(rows).toHaveLength(1);
@@ -62,7 +64,9 @@ describe("CTE Phase 2 (SQLite)", () => {
 
   it("withRecursiveCte self-references the CTE name in the recursive branch", async () => {
     const anchor = User.query().where((u) => u.age >= 21 && u.age < 65);
-    const recursive = User.query().from("adults").where((u) => u.age >= 99);
+    const recursive = User.query()
+      .from("adults")
+      .where((u) => u.age >= 99);
     const body = anchor.unionAll(recursive);
     const rows = await User.query().withRecursiveCte("adults", body).from("adults").toArray();
     expect(rows.map((r) => r.name).sort()).toEqual(["Alice", "Bob"]);

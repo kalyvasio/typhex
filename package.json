@@ -2,6 +2,14 @@
   "name": "typhex",
   "version": "0.1.0",
   "description": "TypeScript ORM with arrow-function query predicates",
+  "homepage": "https://kalyvasio.github.io/typhex/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kalyvasio/typhex.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kalyvasio/typhex/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -30,17 +38,31 @@
   "bin": {
     "typhex": "./dist/migration/cli.js"
   },
+  "files": [
+    "dist",
+    "docs/**/*.md",
+    "etc/typhex.api.md",
+    "CHANGELOG.md",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
-    "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "npm run clean && tsc",
     "dev": "tsc --watch",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm run lint && pnpm run format:check && pnpm run build",
+    "check": "npm run lint && npm run format:check && npm run build",
     "bench": "tsx benchmarks/performance.ts",
-    "api:check": "pnpm run build && api-extractor run",
-    "api:update": "pnpm run build && api-extractor run --local",
+    "api:check": "npm run build && api-extractor run",
+    "api:update": "npm run build && api-extractor run --local",
     "test": "vitest run",
     "test:sqlite": "vitest run --exclude 'tests/integration/scenarios-postgres.test.ts' --exclude 'tests/integration/scenarios-subquery-postgres.test.ts'",
     "sqlite:version": "node -e \"const Database = require('better-sqlite3'); const db = new Database(':memory:'); console.log('SQLite ' + db.prepare('select sqlite_version() as version').get().version); db.close();\"",
@@ -48,16 +70,26 @@
     "test:postgres": "TYPHEX_POSTGRES_URL=${TYPHEX_POSTGRES_URL:-postgresql://postgres:postgres@localhost:5433/typhex_test} vitest run tests/dbs/postgres.test.ts tests/integration/scenarios-postgres.test.ts tests/integration/scenarios-subquery-postgres.test.ts",
     "test:transformer": "vitest run tests/transformer tests/parser",
     "coverage": "vitest run --coverage",
+    "coverage:sqlite": "vitest run --coverage --exclude 'tests/integration/scenarios-postgres.test.ts' --exclude 'tests/integration/scenarios-subquery-postgres.test.ts'",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
+    "release:check": "npm run check && npm run coverage:sqlite && npm run test:transformer && npm run api:check",
+    "pack:check": "npm pack --dry-run",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run release:check && npm run pack:check",
     "prepare": "husky"
   },
   "keywords": [
     "orm",
     "typescript",
     "sql",
-    "query-builder"
+    "query-builder",
+    "sqlite",
+    "postgresql",
+    "database",
+    "type-safe",
+    "typescript-transformer"
   ],
   "license": "MIT",
   "engines": {

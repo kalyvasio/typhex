@@ -28,11 +28,26 @@ export type IrHaving = IrPredicate;
 export interface IrBinary {
   kind: "binary";
   op:
-    | "&&" | "||"
-    | "===" | "!==" | "==" | "!="
-    | ">" | ">=" | "<" | "<="
-    | "+" | "-" | "*" | "/" | "%"
-    | "&" | "|" | "^" | "<<" | ">>";
+    | "&&"
+    | "||"
+    | "==="
+    | "!=="
+    | "=="
+    | "!="
+    | ">"
+    | ">="
+    | "<"
+    | "<="
+    | "+"
+    | "-"
+    | "*"
+    | "/"
+    | "%"
+    | "&"
+    | "|"
+    | "^"
+    | "<<"
+    | ">>";
   left: IrNode;
   right: IrNode;
 }
@@ -232,8 +247,7 @@ export function isIrSelect(node: unknown): node is IrSelect {
                   Array.isArray(p) && (p as unknown[]).every((s: unknown) => typeof s === "string"),
               ))) &&
           (x.whereIr === undefined || isIrWhere(x.whereIr)) &&
-          (x.orderBy === undefined ||
-            (Array.isArray(x.orderBy) && x.orderBy.every(isIrOrderBy)))
+          (x.orderBy === undefined || (Array.isArray(x.orderBy) && x.orderBy.every(isIrOrderBy)))
         );
       })
     )

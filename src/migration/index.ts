@@ -13,7 +13,6 @@ export type { MigrationResult } from "./runner.js";
 export { parseFkDependencies, topoSort } from "./topo-sort.js";
 export type {
   DiffAction,
-  Dialect,
   DialectName,
   MigrationFile,
   MigrationRecord,

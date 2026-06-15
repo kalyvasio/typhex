@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { parseArrowToIr } from "../../src/parser/parse-arrow.js";
 import { createSqliteDriver } from "../../src/dbs/index.js";
 import { Db } from "../../src/orm/db.js";
-import { Entity } from "../../src/index.js";
 import type { IrCase, IrNode } from "../../src/ir/types.js";
 import {
   compileIrWhere,
@@ -31,8 +30,7 @@ describe("runtime parser — ternary (ConditionalExpression)", () => {
   });
 
   it("accepts complex boolean tests (&& / ||) in the ternary condition", () => {
-    const fn = (u: { age: number; active: boolean }) =>
-      (u.age < 18 && u.active ? 1 : 0);
+    const fn = (u: { age: number; active: boolean }) => (u.age < 18 && u.active ? 1 : 0);
     const ir = parseArrowToIr(fn) as IrCase;
     expect(ir.kind).toBe("case");
     expect(ir.branches[0].when.kind).toBe("binary");
@@ -41,17 +39,23 @@ describe("runtime parser — ternary (ConditionalExpression)", () => {
 
   it("accepts nested member paths in the ternary condition", () => {
     const fn = (u: { active: boolean; manager: { pay: number } }) =>
-      (u.active && u.manager.pay > 1999 ? 1 : 0);
+      u.active && u.manager.pay > 1999 ? 1 : 0;
     const ir = parseArrowToIr(fn) as IrCase;
     expect(ir.kind).toBe("case");
   });
 });
 
 describe("runtime parser — arithmetic operators", () => {
-  for (const [op, jsOp] of [["+", "+"], ["-", "-"], ["*", "*"], ["/", "/"], ["%", "%"]] as const) {
+  for (const [op, jsOp] of [
+    ["+", "+"],
+    ["-", "-"],
+    ["*", "*"],
+    ["/", "/"],
+    ["%", "%"],
+  ] as const) {
     it(`parses u.a ${jsOp} u.b > 0 into IrBinary with op "${op}"`, () => {
       const src = `(u) => (u.a ${jsOp} u.b) > 0`;
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+       
       const fn = new Function("return " + src)() as (u: { a: number; b: number }) => boolean;
       const ir = parseArrowToIr(fn) as { op: string; left: { op: string } };
       expect(ir.op).toBe(">");
@@ -86,18 +90,30 @@ describe("SQL emission — IrCase", () => {
       kind: "case",
       branches: [
         {
-          when: { kind: "binary", op: "<", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "const", value: 18 } },
+          when: {
+            kind: "binary",
+            op: "<",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 18 },
+          },
           then: { kind: "const", value: "minor" },
         },
         {
-          when: { kind: "binary", op: "<", left: { kind: "member", param: "u", path: ["age"] }, right: { kind: "const", value: 65 } },
+          when: {
+            kind: "binary",
+            op: "<",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "const", value: 65 },
+          },
           then: { kind: "const", value: "adult" },
         },
       ],
       else: { kind: "const", value: "senior" },
     };
     const { sql } = compileIrWhere(ir);
-    expect(sql).toBe(`(CASE WHEN ("t0"."age" < 18) THEN 'minor' WHEN ("t0"."age" < 65) THEN 'adult' ELSE 'senior' END)`);
+    expect(sql).toBe(
+      `(CASE WHEN ("t0"."age" < 18) THEN 'minor' WHEN ("t0"."age" < 65) THEN 'adult' ELSE 'senior' END)`,
+    );
   });
 
   it("emits CASE without ELSE when else is absent", () => {
@@ -133,17 +149,19 @@ describe("SQL emission — arithmetic", () => {
     const irSelect = {
       param: "o",
       paths: [],
-      aggregates: [{
-        kind: "aggregate" as const,
-        func: "SUM" as const,
-        arg: {
-          kind: "binary" as const,
-          op: "*" as const,
-          left: { kind: "member" as const, param: "o", path: ["price"] },
-          right: { kind: "member" as const, param: "o", path: ["qty"] },
+      aggregates: [
+        {
+          kind: "aggregate" as const,
+          func: "SUM" as const,
+          arg: {
+            kind: "binary" as const,
+            op: "*" as const,
+            left: { kind: "member" as const, param: "o", path: ["price"] },
+            right: { kind: "member" as const, param: "o", path: ["qty"] },
+          },
+          alias: "revenue",
         },
-        alias: "revenue",
-      }],
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "price", "qty"]);
     expect(sql).toContain("SUM(");
@@ -155,19 +173,23 @@ describe("SQL emission — arithmetic", () => {
     const irSelect = {
       param: "o",
       paths: [],
-      aggregates: [{
-        kind: "aggregate" as const,
-        func: "SUM" as const,
-        arg: {
-          kind: "case" as const,
-          branches: [{
-            when: { kind: "member" as const, param: "o", path: ["active"] },
-            then: { kind: "const" as const, value: 1 },
-          }],
-          else: { kind: "const" as const, value: 2 },
+      aggregates: [
+        {
+          kind: "aggregate" as const,
+          func: "SUM" as const,
+          arg: {
+            kind: "case" as const,
+            branches: [
+              {
+                when: { kind: "member" as const, param: "o", path: ["active"] },
+                then: { kind: "const" as const, value: 1 },
+              },
+            ],
+            else: { kind: "const" as const, value: 2 },
+          },
+          alias: "flagged",
         },
-        alias: "flagged",
-      }],
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "active"], sqliteQueryCompiler);
     expect(sql).toBe(`SUM((CASE WHEN "t0"."active" THEN 1 ELSE 2 END)) AS "flagged"`);
@@ -177,37 +199,35 @@ describe("SQL emission — arithmetic", () => {
     const irSelect = {
       param: "o",
       paths: [],
-      aggregates: [{
-        kind: "aggregate" as const,
-        func: "COUNT" as const,
-        arg: {
-          kind: "case" as const,
-          branches: [{
-            when: {
-              kind: "binary" as const, op: "===" as const,
-              left: { kind: "member" as const, param: "o", path: ["status"] },
-              right: { kind: "const" as const, value: "it's ok" },
-            },
-            then: { kind: "const" as const, value: 1 },
-          }],
-          else: { kind: "const" as const, value: null },
+      aggregates: [
+        {
+          kind: "aggregate" as const,
+          func: "COUNT" as const,
+          arg: {
+            kind: "case" as const,
+            branches: [
+              {
+                when: {
+                  kind: "binary" as const,
+                  op: "===" as const,
+                  left: { kind: "member" as const, param: "o", path: ["status"] },
+                  right: { kind: "const" as const, value: "it's ok" },
+                },
+                then: { kind: "const" as const, value: 1 },
+              },
+            ],
+            else: { kind: "const" as const, value: null },
+          },
+          alias: "hits",
         },
-        alias: "hits",
-      }],
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "status"], sqliteQueryCompiler);
-    expect(sql).toBe(`COUNT((CASE WHEN ("t0"."status" = 'it''s ok') THEN 1 ELSE NULL END)) AS "hits"`);
+    expect(sql).toBe(
+      `COUNT((CASE WHEN ("t0"."status" = 'it''s ok') THEN 1 ELSE NULL END)) AS "hits"`,
+    );
   });
 });
-
-const orderSchema = {
-  id: "integer primary key autoincrement",
-  price: "integer",
-  qty: "integer",
-  active: "integer",
-} as const;
-
-class OrderEntity extends Entity("orders", orderSchema) {}
 
 describe("end-to-end sqlite — CASE + arithmetic", () => {
   it("computes SUM(price * qty) and SUM(CASE WHEN active THEN 1 ELSE 2 END)", async () => {
@@ -215,19 +235,19 @@ describe("end-to-end sqlite — CASE + arithmetic", () => {
     const db = new Db(driver);
     try {
       await driver.execute(
-        'CREATE TABLE "orders" ("id" integer primary key autoincrement, "price" integer, "qty" integer, "active" integer)'
+        'CREATE TABLE "orders" ("id" integer primary key autoincrement, "price" integer, "qty" integer, "active" integer)',
       );
       await driver.execute('INSERT INTO "orders" ("price", "qty", "active") VALUES (10, 2, 1)');
       await driver.execute('INSERT INTO "orders" ("price", "qty", "active") VALUES (20, 3, 0)');
       await driver.execute('INSERT INTO "orders" ("price", "qty", "active") VALUES (5, 4, 1)');
 
       const revenue = await driver.execute(
-        'SELECT SUM(("t0"."price" * "t0"."qty")) AS "revenue" FROM "orders" "t0"'
+        'SELECT SUM(("t0"."price" * "t0"."qty")) AS "revenue" FROM "orders" "t0"',
       );
       expect(revenue.rows[0]).toEqual({ revenue: 10 * 2 + 20 * 3 + 5 * 4 });
 
       const flagged = await driver.execute(
-        'SELECT SUM((CASE WHEN "t0"."active" THEN 1 ELSE 2 END)) AS "flagged" FROM "orders" "t0"'
+        'SELECT SUM((CASE WHEN "t0"."active" THEN 1 ELSE 2 END)) AS "flagged" FROM "orders" "t0"',
       );
       expect(flagged.rows[0]).toEqual({ flagged: 1 + 2 + 1 });
     } finally {

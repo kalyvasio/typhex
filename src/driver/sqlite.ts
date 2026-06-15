@@ -4,7 +4,13 @@
  */
 
 import { createRequire } from "node:module";
-import type { Driver, Connection, ExecuteResult, TransactionOptions } from "./types.js";
+import type {
+  Driver,
+  Connection,
+  ExecuteResult,
+  ResolvedConnection,
+  TransactionOptions,
+} from "./types.js";
 import { SqliteTrx } from "../dbs/sqlite/trx.js";
 import { sqliteDialect } from "../dbs/sqlite/dialect.js";
 import { isRecord } from "../utils.js";
@@ -86,7 +92,7 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
     },
 
     createTrx(conn: Connection, options?: TransactionOptions) {
-      return new SqliteTrx(conn, options);
+      return new SqliteTrx(conn as ResolvedConnection, options);
     },
 
     async close(): Promise<void> {

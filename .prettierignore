@@ -4,4 +4,8 @@ coverage
 examples/out
 .worktrees
 .claude
+.cursor
+CLAUDE.md
+CURSOR.md
+etc/typhex.api.md
 package-lock.json

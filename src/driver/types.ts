@@ -1,5 +1,11 @@
 import type { Dialect } from "../dbs/types.js";
+import type { DialectName } from "../dialect.js";
 import type { Trx } from "../orm/trx.js";
+
+/** Public dialect metadata exposed by drivers. */
+export interface DialectInfo {
+  readonly name: DialectName;
+}
 
 /** Options forwarded to the underlying driver when beginning a transaction. */
 export interface TransactionOptions {
@@ -39,9 +45,9 @@ export interface ExecuteResult {
 }
 
 /** A dedicated connection acquired from the pool — used inside transactions. */
-export interface Connection {
+export interface Connection<TDialect extends DialectInfo = DialectInfo> {
   /** The SQL dialect this connection speaks. */
-  readonly dialect: Dialect;
+  readonly dialect: TDialect;
   /**
    * Execute any SQL statement on this dedicated connection.
    * See Driver.execute() for the implementer mapping guide.
@@ -52,9 +58,9 @@ export interface Connection {
 }
 
 /** Thin adapter — raw DB operations only. Transaction logic lives in Db. */
-export interface Driver {
+export interface Driver<TDialect extends DialectInfo = DialectInfo> {
   /** The SQL dialect this driver targets. */
-  readonly dialect: Dialect;
+  readonly dialect: TDialect;
   /**
    * Execute any SQL statement. Returns rows (for SELECT) and mutation
    * metadata (for INSERT/UPDATE/DELETE).
@@ -66,9 +72,15 @@ export interface Driver {
    */
   execute(sql: string, params?: unknown[]): Promise<ExecuteResult>;
   /** Acquire a dedicated connection (e.g. pg.PoolClient, or SQLite db wrapper). */
-  connect(): Promise<Connection>;
+  connect(): Promise<Connection<TDialect>>;
   /** Create a dialect-specific transaction scope for the given connection. */
-  createTrx(conn: Connection, options?: TransactionOptions): Trx;
+  createTrx(conn: Connection<TDialect>, options?: TransactionOptions): Trx;
   /** Closes all pooled connections and tears down the driver. */
   close(): Promise<void>;
 }
+
+/** @internal */
+export type ResolvedConnection = Connection<Dialect>;
+
+/** @internal */
+export type ResolvedDriver = Driver<Dialect>;

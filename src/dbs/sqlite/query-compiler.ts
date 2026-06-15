@@ -1,5 +1,10 @@
 import { BaseQueryCompiler } from "../query-compiler.js";
-import type { CompileResult, DiffAction, ExpandPlaceholdersResult, CompiledCteBody } from "../types.js";
+import type {
+  CompileResult,
+  DiffAction,
+  ExpandPlaceholdersResult,
+  CompiledCteBody,
+} from "../types.js";
 import { SQL_DEFAULT } from "../types.js";
 import type { ExprAggregate } from "../../orm/expr.js";
 

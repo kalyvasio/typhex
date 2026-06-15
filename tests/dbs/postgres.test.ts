@@ -169,13 +169,10 @@ describe("dbs/postgres", () => {
 
     it("compilePlan insertMany doNothing emits ON CONFLICT ... DO NOTHING with RETURNING", () => {
       const { sql, returningRow } = postgresQueryCompiler.compilePlan(
-        insertManyPlan(
-          "tags",
-          ["slug", "label"],
-          [["ts", "TypeScript"]],
-          ["id"],
-          { conflictColumns: ["slug"], action: "nothing" },
-        ),
+        insertManyPlan("tags", ["slug", "label"], [["ts", "TypeScript"]], ["id"], {
+          conflictColumns: ["slug"],
+          action: "nothing",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
       expect(sql).toContain("RETURNING *");
@@ -184,13 +181,10 @@ describe("dbs/postgres", () => {
 
     it("compilePlan insertMany doUpdate uses EXCLUDED (uppercase)", () => {
       const { sql } = postgresQueryCompiler.compilePlan(
-        insertManyPlan(
-          "tags",
-          ["slug", "label"],
-          [["ts", "TypeScript"]],
-          ["id"],
-          { conflictColumns: ["slug"], action: "update" },
-        ),
+        insertManyPlan("tags", ["slug", "label"], [["ts", "TypeScript"]], ["id"], {
+          conflictColumns: ["slug"],
+          action: "update",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
     });
@@ -205,7 +199,7 @@ describe("dbs/postgres", () => {
         }),
       );
       expect(sql).toContain("SELECT COUNT(*) AS c");
-      expect(sql).toContain('FROM (');
+      expect(sql).toContain("FROM (");
       expect(sql).toContain('FROM "users"');
       expect(params).toEqual([18]);
     });
@@ -384,12 +378,17 @@ describe("dbs/postgres", () => {
 
     it("compilePlan update with CTE in WHERE but empty SET omits WITH", () => {
       const { sql } = postgresQueryCompiler.compilePlan({
-        ...updatePlan("users", ["id", "name"], {}, {
-          kind: "binary",
-          op: "===",
-          left: { kind: "column", alias: "adults", column: ["id"] },
-          right: { kind: "column", alias: "t0", column: ["id"] },
-        }),
+        ...updatePlan(
+          "users",
+          ["id", "name"],
+          {},
+          {
+            kind: "binary",
+            op: "===",
+            left: { kind: "column", alias: "adults", column: ["id"] },
+            right: { kind: "column", alias: "t0", column: ["id"] },
+          },
+        ),
         ctes: [
           {
             name: "adults",
@@ -483,9 +482,7 @@ describe("dbs/postgres", () => {
       const { sql, params } = postgresQueryCompiler.compilePlan(
         selectPlan("orders", {
           columnNames: ["category", "active"],
-          selectItems: [
-            { expr: { kind: "aggregate", func: "COUNT", arg: null, alias: "total" } },
-          ],
+          selectItems: [{ expr: { kind: "aggregate", func: "COUNT", arg: null, alias: "total" } }],
           where: {
             kind: "binary",
             op: "===",

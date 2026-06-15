@@ -1,6 +1,11 @@
 import { BaseQueryCompiler } from "../query-compiler.js";
-import type { CompileResult, DiffAction, ExpandPlaceholdersResult, CompiledCteBody } from "../types.js";
-import type { Expr, ExprAggregate, JoinSpec } from "../../orm/expr.js";
+import type {
+  CompileResult,
+  DiffAction,
+  ExpandPlaceholdersResult,
+  CompiledCteBody,
+} from "../types.js";
+import type { ExprAggregate, JoinSpec } from "../../orm/expr.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 

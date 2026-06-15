@@ -17,7 +17,17 @@ import type {
   CompiledCteBody,
 } from "./types.js";
 import { getColumnDef, resolveParamSentinels, SQL_DEFAULT } from "./types.js";
-import type { Expr, ExprAggregate, ExprCase, ExprColumn, BinaryOp, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../orm/expr.js";
+import type {
+  Expr,
+  ExprAggregate,
+  ExprCase,
+  ExprColumn,
+  BinaryOp,
+  GroupByItem,
+  JoinSpec,
+  OrderItem,
+  SelectItem,
+} from "../orm/expr.js";
 import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 import { QueryPlanBuilder } from "../orm/helpers/query-plan/query-plan.js";
 import type { FromSource, QueryState } from "../orm/query-state.js";
@@ -76,12 +86,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     if (op === "&&") return `(${left} AND ${right})`;
     if (op === "||") return `(${left} OR ${right})`;
     if (op === "^") return this.compileXorSql(left, right);
-    const sqlOp =
-      op === "==" || op === "==="
-        ? "="
-        : op === "!=" || op === "!=="
-          ? "<>"
-          : op;
+    const sqlOp = op === "==" || op === "===" ? "=" : op === "!=" || op === "!==" ? "<>" : op;
     return `(${left} ${sqlOp} ${right})`;
   }
 

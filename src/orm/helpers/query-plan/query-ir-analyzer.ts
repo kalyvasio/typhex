@@ -1,6 +1,6 @@
 import type { IrExists, IrNode, IrOrderBy, IrSelect, IrSubqueryRef } from "../../../ir/types.js";
 import type { RelationsMap } from "../../../entity/relations.js";
-import type { QueryState } from "../../query-builder.js";
+import type { QueryState } from "../../query-state.js";
 
 export interface ExprIrAnalysis {
   paramNames: Set<string>;

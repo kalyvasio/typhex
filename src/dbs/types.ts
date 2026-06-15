@@ -2,7 +2,13 @@
  * Multi-database types: Driver and Dialect.
  */
 
-import type { Connection, Driver, ExecuteResult, TransactionOptions } from "../driver/types.js";
+import type {
+  Connection,
+  Driver,
+  ExecuteResult,
+  ResolvedDriver,
+  TransactionOptions,
+} from "../driver/types.js";
 import type { DialectName } from "../dialect.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import type { IrNode } from "../ir/types.js";
@@ -76,7 +82,7 @@ export interface CompiledCteBody {
   recursive?: boolean;
 }
 
-/** Options for compileSelect. */
+/** @internal */
 export interface CompileSelectOpts {
   table: string;
   tableAlias: string;
@@ -103,6 +109,7 @@ export interface CompileSelectOpts {
   paramStartIndex?: number;
 }
 
+/** @internal */
 export type QueryOperation =
   | { kind: "select" }
   | {
@@ -127,6 +134,7 @@ export type QueryOperation =
     }
   | { kind: "delete"; returning?: boolean };
 
+/** @internal */
 export interface CompileQueryOpts {
   /** Wrap the assembled SELECT in `( … )` and return flat positional params,
    *  for use as a subquery. */
@@ -138,11 +146,12 @@ export interface CompileQueryOpts {
   skipCteRender?: boolean;
 }
 
-/** Sentinel that tells a dialect to emit the column's DB default rather than a value. */
+/** @internal */
 export const SQL_DEFAULT: unique symbol = Symbol("SQL_DEFAULT");
+/** @internal */
 export type SqlDefault = typeof SQL_DEFAULT;
 
-/** Resolve __param sentinels to actual values. Shared by all dialects. */
+/** @internal */
 export function resolveParamSentinels(
   params: unknown[],
   paramValues: Record<string, unknown>,
@@ -157,25 +166,26 @@ export function resolveParamSentinels(
   return out;
 }
 
-/** Expand placeholders: replace each placeholder with value, flatten IN arrays. */
+/** @internal */
 export interface ExpandPlaceholdersResult {
   sql: string;
   params: unknown[];
 }
 
+/** @internal */
 export interface DialectInsertCapabilities {
   supportsReturning: boolean;
   supportsSequences: boolean;
 }
 
-/** Schema diff and introspection for a dialect. */
+/** @internal */
 export interface DbMigrator {
-  diffSchema(driver: Driver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]>;
-  getDbTables(driver: Driver): Promise<string[]>;
-  getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
+  diffSchema(driver: ResolvedDriver, entities: readonly RegisteredEntity[]): Promise<DiffAction[]>;
+  getDbTables(driver: ResolvedDriver): Promise<string[]>;
+  getDbColumns(driver: ResolvedDriver, table: string): Promise<DbColumnInfo[]>;
 }
 
-/** Dialect: SQL capabilities, compiler, and migrator. */
+/** @internal */
 export interface Dialect {
   readonly name: DialectName;
   readonly insertCapabilities: DialectInsertCapabilities;
@@ -183,7 +193,7 @@ export interface Dialect {
   readonly migrator: DbMigrator;
 }
 
-/** Public SQL-building surface for a dialect. */
+/** @internal */
 export interface QueryCompiler {
   compilePlan(plan: QueryPlan, opts?: CompileQueryOpts): CompileResult;
   compileResultSize(plan: QueryPlan): CompileResult;

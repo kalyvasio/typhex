@@ -4,11 +4,12 @@ Use this checklist before tagging a production release.
 
 ## API
 
-- Run `pnpm run api:check` and confirm `etc/typhex.api.md` is unchanged. If the public surface changed intentionally, run `pnpm run api:update`, review the diff, and commit it alongside the change.
+- Run `npm run api:check` and confirm `etc/typhex.api.md` is unchanged. If the public surface changed intentionally, run `npm run api:update`, review the diff, and commit it alongside the change.
 - Confirm `docs/public-api.md` matches `package.json` exports and `src/index.ts`.
 - Confirm new exports are documented with examples.
 - Confirm internal helpers are not required for common application usage.
 - Add a migration guide for any breaking public API change.
+- Update `CHANGELOG.md` with user-visible changes and any compatibility notes.
 
 ## Compatibility
 
@@ -19,10 +20,13 @@ Use this checklist before tagging a production release.
 
 ## Package
 
-- Run `npm pack` and inspect the tarball contents.
+- Run `npm run release:check`.
+- Run `npm run pack:check` and inspect the tarball contents.
 - Verify `dist/index.d.ts`, `dist/transformer/index.d.ts`, `dist/sqlite.d.ts`, and `dist/postgres.d.ts` are present.
 - Verify the CLI entry `dist/migration/cli.js` exists and is executable.
+- Verify `LICENSE`, `README.md`, `CHANGELOG.md`, and `SECURITY.md` are included.
 - Verify source maps are generated or intentionally omitted.
+- Publish with npm provenance enabled.
 
 ## Migrations
 

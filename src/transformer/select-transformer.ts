@@ -163,7 +163,14 @@ function parseSelectObjectLiteral(
     const keyName = getPropertyKeyName(prop);
     if (!keyName) return null;
 
-    const handled = parseSelectObjectProperty(prop, keyName, pb, checker, capturedSubqueries, freeVars);
+    const handled = parseSelectObjectProperty(
+      prop,
+      keyName,
+      pb,
+      checker,
+      capturedSubqueries,
+      freeVars,
+    );
     if (!handled) return null;
 
     switch (handled.kind) {
@@ -183,7 +190,13 @@ function parseSelectObjectLiteral(
     }
   }
 
-  if (paths.length === 0 && aggregates.length === 0 && subqueries.length === 0 && expressions.length === 0 && !rest) {
+  if (
+    paths.length === 0 &&
+    aggregates.length === 0 &&
+    subqueries.length === 0 &&
+    expressions.length === 0 &&
+    !rest
+  ) {
     return null;
   }
   return {

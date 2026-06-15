@@ -10,11 +10,11 @@ import type {
   DbColumnInfo,
   DbMigrator,
   DialectName,
-  Driver,
   QueryCompiler,
 } from "./types.js";
 import { getColumnDef } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
+import type { ResolvedDriver } from "../driver/types.js";
 import { extractBaseType } from "../utils.js";
 
 export abstract class BaseMigrator implements DbMigrator {
@@ -23,11 +23,11 @@ export abstract class BaseMigrator implements DbMigrator {
     protected readonly queryCompiler: QueryCompiler,
   ) {}
 
-  abstract getDbTables(driver: Driver): Promise<string[]>;
-  abstract getDbColumns(driver: Driver, table: string): Promise<DbColumnInfo[]>;
+  abstract getDbTables(driver: ResolvedDriver): Promise<string[]>;
+  abstract getDbColumns(driver: ResolvedDriver, table: string): Promise<DbColumnInfo[]>;
 
   async diffSchema(
-    driver: Driver,
+    driver: ResolvedDriver,
     entities: readonly RegisteredEntity[],
   ): Promise<DiffAction[]> {
     const actions: DiffAction[] = [];
@@ -53,7 +53,7 @@ export abstract class BaseMigrator implements DbMigrator {
   }
 
   private async diffColumns(
-    driver: Driver,
+    driver: ResolvedDriver,
     table: string,
     schema: Record<string, ColumnDef>,
   ): Promise<DiffAction[]> {
@@ -68,10 +68,7 @@ export abstract class BaseMigrator implements DbMigrator {
         actions.push({ kind: "add_column", table, column: col, definition: def });
         continue;
       }
-      const changes = BaseMigrator.computeColumnChanges(
-        dbCol,
-        getColumnDef(def, this.dialectName),
-      );
+      const changes = BaseMigrator.computeColumnChanges(dbCol, getColumnDef(def, this.dialectName));
       if (changes.length > 0) {
         actions.push({
           kind: "alter_column",
@@ -96,7 +93,10 @@ export abstract class BaseMigrator implements DbMigrator {
 
   protected static normalizeDefault(value: string | null): string | null {
     if (value == null) return null;
-    let normalized = value.trim().replace(/^\((.*)\)$/, "$1").trim();
+    let normalized = value
+      .trim()
+      .replace(/^\((.*)\)$/, "$1")
+      .trim();
     // Strip Postgres type casts (e.g. `'Anon'::text`, `0::integer`, `'x'::"my_enum"`).
     normalized = normalized.replace(/::\s*(?:"[^"]+"|[A-Za-z_][\w ]*)\s*$/, "").trim();
     // Postgres serial/identity columns surface as `nextval('seq'::regclass)`; treat
@@ -106,7 +106,8 @@ export abstract class BaseMigrator implements DbMigrator {
   }
 
   protected static extractDefault(def: string): string | null {
-    const match = /\bdefault\s+(.+?)(?:\s+not\s+null|\s+primary\s+key|\s+unique|\s+references\b|$)/i.exec(def);
+    const match =
+      /\bdefault\s+(.+?)(?:\s+not\s+null|\s+primary\s+key|\s+unique|\s+references\b|$)/i.exec(def);
     return BaseMigrator.normalizeDefault(match?.[1] ?? null);
   }
 

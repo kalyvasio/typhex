@@ -4,7 +4,6 @@ import type { IrNode } from "../../src/ir/types.js";
 import {
   compileIrWhere,
   compileIrSelectList,
-  sqliteQueryCompiler,
   postgresQueryCompiler,
 } from "./compile-ir-helpers.js";
 
@@ -18,7 +17,7 @@ describe("runtime parser — bitwise operators", () => {
   ] as const) {
     it(`parses u.a ${jsOp} u.b > 0 into IrBinary with op "${op}"`, () => {
       const src = `(u) => (u.a ${jsOp} u.b) > 0`;
-      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+       
       const fn = new Function("return " + src)() as (u: { a: number; b: number }) => boolean;
       const ir = parseArrowToIr(fn) as { op: string; left: { op: string } };
       expect(ir.op).toBe(">");
@@ -34,7 +33,7 @@ describe("runtime parser — bitwise operators", () => {
   });
 
   it("throws for unsigned right shift >>>", () => {
-    const fn = (u: { a: number; b: number }) => (u.a >>> u.b) > 0;
+    const fn = (u: { a: number; b: number }) => u.a >>> u.b > 0;
     expect(() => parseArrowToIr(fn)).toThrow("Unsupported binary");
   });
 });

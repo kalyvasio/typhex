@@ -30,7 +30,11 @@ import {
   propertyKeyName,
 } from "./acorn-helpers.js";
 import { resolveMemberPath } from "./acorn-member.js";
-import { parseArrowToIrPredicate, parseExpressionToIr, tryParseAggregate } from "./predicate-walk.js";
+import {
+  parseArrowToIrPredicate,
+  parseExpressionToIr,
+  tryParseAggregate,
+} from "./predicate-walk.js";
 
 export function parseArrowToIrSelect(
   fn: (...args: unknown[]) => unknown,
@@ -170,7 +174,13 @@ function parseSelectObjectLiteral(
     applySelectPropertyResult(handled, keyName, paths, aliases, relations, aggregates, expressions);
   }
 
-  if (paths.length === 0 && relations.length === 0 && aggregates.length === 0 && expressions.length === 0 && !rest) {
+  if (
+    paths.length === 0 &&
+    relations.length === 0 &&
+    aggregates.length === 0 &&
+    expressions.length === 0 &&
+    !rest
+  ) {
     return null;
   }
 

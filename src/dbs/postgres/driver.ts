@@ -4,7 +4,13 @@
  */
 
 import pg from "pg";
-import type { Driver, Connection, ExecuteResult, TransactionOptions } from "../../driver/types.js";
+import type {
+  Driver,
+  Connection,
+  ExecuteResult,
+  ResolvedConnection,
+  TransactionOptions,
+} from "../../driver/types.js";
 import { PostgresTrx } from "./trx.js";
 import { postgresDialect } from "./dialect.js";
 import { isRecord } from "../../utils.js";
@@ -151,7 +157,7 @@ export function createPostgresDriver(options: PostgresDriverOptions): Driver {
     },
 
     createTrx(conn: Connection, options?: TransactionOptions) {
-      return new PostgresTrx(conn, options);
+      return new PostgresTrx(conn as ResolvedConnection, options);
     },
 
     async close(): Promise<void> {

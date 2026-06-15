@@ -7,7 +7,8 @@ import type { Trx } from "../orm/trx.js";
 import type { QueryExecutor } from "../orm/db.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
-import { QueryBuilder, QueryState } from "../orm/query-builder.js";
+import { QueryBuilder } from "../orm/query-builder.js";
+import { QueryState } from "../orm/query-state.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
 import type {
   InferTable,
@@ -120,7 +121,6 @@ export type EntityRow<E> = E extends AnyEntityClass ? EntityInstance<E> : never;
 /** Extracts the entity class from an entity instance type. */
 export type EntityClassOf<T> =
   T extends EntityInstance<infer E> ? E : T extends AnyEntityClass ? T : never;
-
 
 function createTableDef<
   TTable extends string,

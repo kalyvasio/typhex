@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { Db, Entity } from "../../src/index.js";
 import { clearRegistry, registerEntity } from "../../src/entity/global-driver.js";
 import { sqliteQueryCompiler } from "../../src/dbs/index.js";
-import type { Expr, ExprAggregate, OrderItem, SelectItem } from "../../src/orm/expr.js";
+import type { Expr, OrderItem, SelectItem } from "../../src/orm/expr.js";
 import type { IrNode, IrWhere } from "../../src/ir/types.js";
 import { freshDb } from "../helpers.js";
 import { bin, col, countPostsSelect, eq, konst, selectPlan } from "../dbs/subquery-ref-helpers.js";

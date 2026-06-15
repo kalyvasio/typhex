@@ -3,7 +3,7 @@
  * Delegates to the dialect migrator for dialect-specific diff logic.
  */
 
-import type { Driver } from "../driver/types.js";
+import type { Driver, ResolvedDriver } from "../driver/types.js";
 import type { DiffAction } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 
@@ -12,5 +12,6 @@ export async function diffSchema(
   driver: Driver,
   entities: readonly RegisteredEntity[],
 ): Promise<DiffAction[]> {
-  return driver.dialect.migrator.diffSchema(driver, entities);
+  const resolvedDriver = driver as ResolvedDriver;
+  return resolvedDriver.dialect.migrator.diffSchema(resolvedDriver, entities);
 }
