@@ -7,7 +7,13 @@ describe("compileWithClause", () => {
     const { sql, params } = postgresQueryCompiler["compileWithClause"](
       `SELECT $1 FROM "users" AS t0 WHERE "t0"."id" = $2`,
       [1, 2],
-      [{ name: "a", bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`, bodyParams: [21, 22] }],
+      [
+        {
+          name: "a",
+          bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`,
+          bodyParams: [21, 22],
+        },
+      ],
       1,
     );
     expect(sql.startsWith(`WITH "a" AS (`)).toBe(true);
@@ -20,7 +26,13 @@ describe("compileWithClause", () => {
     const { sql, params } = sqliteQueryCompiler["compileWithClause"](
       `SELECT ? FROM "users" AS t0 WHERE "t0"."id" = ?`,
       [1, 2],
-      [{ name: "a", bodySql: `SELECT ? FROM "users" AS t0 WHERE "t0"."age" >= ?`, bodyParams: [21, 22] }],
+      [
+        {
+          name: "a",
+          bodySql: `SELECT ? FROM "users" AS t0 WHERE "t0"."age" >= ?`,
+          bodyParams: [21, 22],
+        },
+      ],
       1,
     );
     expect(sql.startsWith(`WITH "a" AS (`)).toBe(true);
@@ -31,7 +43,13 @@ describe("compileWithClause", () => {
     const { sql, params } = postgresQueryCompiler["compileWithClause"](
       `SELECT $1 FROM "users" AS t0 WHERE "t0"."id" = $2`,
       [1, 2],
-      [{ name: "a", bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`, bodyParams: [21, 22] }],
+      [
+        {
+          name: "a",
+          bodySql: `SELECT $1 AS x FROM "users" AS t0 WHERE "t0"."age" >= $2`,
+          bodyParams: [21, 22],
+        },
+      ],
       5,
     );
     expect(params).toEqual([21, 22, 1, 2]);

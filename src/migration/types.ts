@@ -1,7 +1,7 @@
 import type { Driver } from "../driver/types.js";
-import type { Dialect, DialectName, DiffAction, DbColumnInfo } from "../dbs/types.js";
+import type { DialectName, DiffAction, DbColumnInfo } from "../dbs/types.js";
 
-export type { Dialect, DialectName, DiffAction, DbColumnInfo };
+export type { DialectName, DiffAction, DbColumnInfo };
 
 /** Minimal DB handle passed into up(db) and down(db) migration functions. */
 export interface MigrationDb {

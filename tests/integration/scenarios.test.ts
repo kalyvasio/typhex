@@ -1028,10 +1028,14 @@ describe("WHERE IN subquery", () => {
     await Author.query().insert({ name: "Carol", postId: null });
   });
 
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => {
+    await db.close();
+  });
 
   it("WHERE IN subquery (params-based): filters authors whose postId is in active posts", async () => {
-    const activePosts = Post.query().where((p: any) => p.active === 1).select((p: any) => ({ id: p.id }));
+    const activePosts = Post.query()
+      .where((p: any) => p.active === 1)
+      .select((p: any) => ({ id: p.id }));
     const authors = await Author.query()
       .where((a: any) => a.postId in activePosts, { activePosts })
       .toArray();
@@ -1058,7 +1062,9 @@ describe("WHERE IN subquery", () => {
   });
 
   it("NOT IN subquery (params-based): filters authors whose postId is NOT in active posts", async () => {
-    const activePosts = Post.query().where((p: any) => p.active === 1).select((p: any) => ({ id: p.id }));
+    const activePosts = Post.query()
+      .where((p: any) => p.active === 1)
+      .select((p: any) => ({ id: p.id }));
     const authors = await Author.query()
       .where((a: any) => !(a.postId in activePosts), { activePosts })
       .orderBy("name", "asc")
@@ -1100,7 +1106,9 @@ describe("JOIN + WHERE IN subquery", () => {
     await Article.query().insert({ title: "Alice article", authorId: (alice as any).id });
     await Article.query().insert({ title: "Bob article", authorId: (bob as any).id });
   });
-  afterEach(async () => { await db.close(); });
+  afterEach(async () => {
+    await db.close();
+  });
 
   it("innerJoin (claims t1) + IN subquery (must claim t2) returns correct rows", async () => {
     // The JOIN aliases the related Author table as t1; the subquery's posts

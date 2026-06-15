@@ -4,8 +4,8 @@
  * lifecycle and delegates to Driver.createTrx() for the dialect-specific scope.
  */
 
-import type { Driver, TransactionOptions } from "../driver/types.js";
-import type { Dialect, DialectName } from "../dbs/types.js";
+import type { DialectInfo, Driver, ResolvedDriver, TransactionOptions } from "../driver/types.js";
+import type { DialectName } from "../dbs/types.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
@@ -27,7 +27,7 @@ export { Trx, getActiveTrx };
 /** Minimal interface satisfied by both `Db` and `Trx` — pass either as the executor for query builders. */
 export interface QueryExecutor {
   /** The SQL dialect in use. */
-  readonly dialect: Dialect;
+  readonly dialect: DialectInfo;
   /** Runs a SQL query and returns all result rows. */
   query(sql: string, params?: unknown[]): Promise<unknown[]>;
   /** Executes a SQL statement and returns affected-row metadata. */
@@ -54,18 +54,20 @@ const INTERNAL = Symbol("db-internal");
 /** Root database class. Create via `new Db(options)` or `Db.fromConfig()`. */
 export class Db implements QueryExecutor {
   /** @internal */
-  protected _driver: Driver;
+  protected _driver: ResolvedDriver;
   private _migrationsFolder: string;
 
   constructor(options: DbOptions | Driver);
   /** @internal — Trx subclass only */
   constructor(driver: Driver, _internal: typeof INTERNAL);
   constructor(arg: Driver | DbOptions, internal?: typeof INTERNAL) {
-    this._driver = isDriver(arg)
-      ? arg
-      : isDriver((arg as { driver?: unknown }).driver)
-        ? (arg as { driver: Driver }).driver
-        : createDriver(arg as CreateDriverOptions);
+    this._driver = (
+      isDriver(arg)
+        ? arg
+        : isDriver((arg as { driver?: unknown }).driver)
+          ? (arg as { driver: Driver }).driver
+          : createDriver(arg as CreateDriverOptions)
+    ) as ResolvedDriver;
     this._migrationsFolder =
       (arg as { migrationsFolder?: string }).migrationsFolder ?? "./migrations";
     if (internal !== INTERNAL) setDefaultDb(this);
@@ -81,7 +83,7 @@ export class Db implements QueryExecutor {
   }
 
   /** The SQL dialect used by this `Db` instance. */
-  get dialect(): Dialect {
+  get dialect(): DialectInfo {
     return this._driver.dialect;
   }
 

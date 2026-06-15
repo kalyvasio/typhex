@@ -15,6 +15,7 @@ const orderSchema = {
 } as const;
 
 class OrderRow extends Entity("orders", orderSchema) {}
+void OrderRow;
 
 function createMockQe(): QueryExecutor {
   return {
@@ -42,30 +43,37 @@ function newBuilder(qe: QueryExecutor): QueryBuilder<typeof OrderRow> {
 
 describe(".select() closure-variable capture", () => {
   let qe: QueryExecutor;
-  beforeEach(() => { qe = createMockQe(); });
+  beforeEach(() => {
+    qe = createMockQe();
+  });
 
   it("substitutes IrParam to IrConst from inlineParams before SQL emission", async () => {
     const selectIr: IrSelect = {
       param: "o",
       paths: [["category"]],
       aliases: ["category"],
-      aggregates: [{
-        kind: "aggregate",
-        func: "SUM",
-        arg: {
-          kind: "case",
-          branches: [{
-            when: {
-              kind: "binary", op: "<",
-              left: { kind: "member", param: "o", path: ["qty"] },
-              right: { kind: "param", key: "cutoff" },
-            },
-            then: { kind: "const", value: 1 },
-          }],
-          else: { kind: "const", value: 0 },
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "SUM",
+          arg: {
+            kind: "case",
+            branches: [
+              {
+                when: {
+                  kind: "binary",
+                  op: "<",
+                  left: { kind: "member", param: "o", path: ["qty"] },
+                  right: { kind: "param", key: "cutoff" },
+                },
+                then: { kind: "const", value: 1 },
+              },
+            ],
+            else: { kind: "const", value: 0 },
+          },
+          alias: "smalls",
         },
-        alias: "smalls",
-      }],
+      ],
     };
     await newBuilder(qe).select(selectIr, { cutoff: 5 }).toArray();
     const [sql] = (qe.query as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -116,22 +124,28 @@ describe(".select() closure-variable capture", () => {
       {
         param: "o",
         paths: [],
-        aggregates: [{
-          kind: "aggregate", func: "SUM",
-          arg: {
-            kind: "case",
-            branches: [{
-              when: {
-                kind: "binary", op: "<",
-                left: { kind: "member", param: "o", path: ["qty"] },
-                right: { kind: "param", key: "missing" },
-              },
-              then: { kind: "const", value: 1 },
-            }],
-            else: { kind: "const", value: 0 },
+        aggregates: [
+          {
+            kind: "aggregate",
+            func: "SUM",
+            arg: {
+              kind: "case",
+              branches: [
+                {
+                  when: {
+                    kind: "binary",
+                    op: "<",
+                    left: { kind: "member", param: "o", path: ["qty"] },
+                    right: { kind: "param", key: "missing" },
+                  },
+                  then: { kind: "const", value: 1 },
+                },
+              ],
+              else: { kind: "const", value: 0 },
+            },
+            alias: "flag",
           },
-          alias: "flag",
-        }],
+        ],
       },
       {},
     );
@@ -145,10 +159,12 @@ describe(".select() closure-variable capture", () => {
       {
         param: "o",
         paths: [],
-        expressions: [{
-          expr: { kind: "param", key: "date" },
-          alias: "snap",
-        }],
+        expressions: [
+          {
+            expr: { kind: "param", key: "date" },
+            alias: "snap",
+          },
+        ],
       },
       { date },
     );
@@ -162,7 +178,7 @@ describe("end-to-end SQLite — closure capture in select() + sum(CASE ...)", ()
     const db = new Db(driver);
     try {
       await driver.execute(
-        'CREATE TABLE "orders" ("id" integer primary key autoincrement, "category" text not null, "price" integer not null, "qty" integer not null, "active" integer not null)'
+        'CREATE TABLE "orders" ("id" integer primary key autoincrement, "category" text not null, "price" integer not null, "qty" integer not null, "active" integer not null)',
       );
       await driver.execute(`INSERT INTO "orders" ("category","price","qty","active") VALUES
         ('a', 10, 2, 1),
@@ -173,8 +189,10 @@ describe("end-to-end SQLite — closure capture in select() + sum(CASE ...)", ()
 
       const qe: QueryExecutor = {
         dialect: sqliteDialect,
-        query: (sql, params) => driver.execute(sql, params).then(r => r.rows as Record<string, unknown>[]),
-        run: (sql, params) => driver.execute(sql, params).then(r => ({ lastID: r.lastID, changes: r.changes })),
+        query: (sql, params) =>
+          driver.execute(sql, params).then((r) => r.rows as Record<string, unknown>[]),
+        run: (sql, params) =>
+          driver.execute(sql, params).then((r) => ({ lastID: r.lastID, changes: r.changes })),
       };
 
       const cutoff = 5;
@@ -192,32 +210,40 @@ describe("end-to-end SQLite — closure capture in select() + sum(CASE ...)", ()
         selectIr: null,
       });
 
-      const rows = await qb
-        .select({
-          param: "o",
-          paths: [["category"]],
-          aliases: ["category"],
-          aggregates: [{
-            kind: "aggregate",
-            func: "SUM",
-            arg: {
-              kind: "case",
-              branches: [{
-                when: {
-                  kind: "binary", op: "<",
-                  left: { kind: "member", param: "o", path: ["qty"] },
-                  right: { kind: "param", key: "cutoff" },
+      const rows = (await qb
+        .select(
+          {
+            param: "o",
+            paths: [["category"]],
+            aliases: ["category"],
+            aggregates: [
+              {
+                kind: "aggregate",
+                func: "SUM",
+                arg: {
+                  kind: "case",
+                  branches: [
+                    {
+                      when: {
+                        kind: "binary",
+                        op: "<",
+                        left: { kind: "member", param: "o", path: ["qty"] },
+                        right: { kind: "param", key: "cutoff" },
+                      },
+                      then: { kind: "const", value: 1 },
+                    },
+                  ],
+                  else: { kind: "const", value: 0 },
                 },
-                then: { kind: "const", value: 1 },
-              }],
-              else: { kind: "const", value: 0 },
-            },
-            alias: "smalls",
-          }],
-        }, { cutoff })
+                alias: "smalls",
+              },
+            ],
+          },
+          { cutoff },
+        )
         .groupBy("category")
         .orderBy("category")
-        .toArray() as unknown as Array<{ category: string; smalls: number }>;
+        .toArray()) as unknown as Array<{ category: string; smalls: number }>;
       expect(rows).toEqual([
         { category: "a", smalls: 2 },
         { category: "b", smalls: 1 },

@@ -12,6 +12,8 @@
 
 ## Checklist
 
+<<<<<<< HEAD
+
 - [ ] I ran `npx tsc --noEmit`
 - [ ] I ran `npm run test:sqlite`
 - [ ] I ran `npm run test:transformer`
@@ -21,4 +23,14 @@
 
 ## Notes for reviewers
 
-<!-- Anything that helps review: design tradeoffs, follow-ups, areas you want extra eyes on. -->
+# <!-- Anything that helps review: design tradeoffs, follow-ups, areas you want extra eyes on. -->
+
+- [ ] Tests added or updated (or N/A with reason)
+- [ ] Docs/changelog updated if user-facing or release-visible
+- [ ] No breaking changes (or called out explicitly above)
+
+## Notes for reviewers
+
+<!-- Design tradeoffs, follow-ups, or areas that need extra attention. -->
+
+> > > > > > > 9712f5b (Add pull request template)

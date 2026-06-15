@@ -4,10 +4,7 @@
  */
 
 export type { ParseOptions } from "./predicate-walk.js";
-export {
-  parseArrowToIr,
-  parseArrowToIrPredicate,
-} from "./predicate-walk.js";
+export { parseArrowToIr, parseArrowToIrPredicate } from "./predicate-walk.js";
 export { parseArrowToGroupByPaths } from "./group-by.js";
 export { parseArrowToIrSelect } from "./select.js";
 export { parseArrowToUpdateSet } from "./update.js";

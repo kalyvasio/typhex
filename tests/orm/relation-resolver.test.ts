@@ -6,7 +6,7 @@ import type {
 } from "../../src/orm/helpers/query-plan/query-plan.js";
 import { RelationAssembler } from "../../src/orm/helpers/relations/relation-assembler.js";
 import type { IrHaving, IrSelect, IrWhere } from "../../src/ir/types.js";
-import { QueryState } from "../../src/orm/query-builder.js";
+import { QueryState } from "../../src/orm/query-state.js";
 import type { QueryExecutor } from "../../src/orm/db.js";
 import { sqliteDialect } from "../../src/dbs/index.js";
 

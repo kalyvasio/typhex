@@ -90,8 +90,7 @@ function exprToIr(expr: ts.Expression, ctx: WhereCtx): IrNode | null {
 function isPrefixUnaryExpression(expr: ts.Expression): expr is ts.PrefixUnaryExpression {
   return (
     ts.isPrefixUnaryExpression(expr) &&
-    (expr.operator === ts.SyntaxKind.ExclamationToken ||
-      expr.operator === ts.SyntaxKind.TildeToken)
+    (expr.operator === ts.SyntaxKind.ExclamationToken || expr.operator === ts.SyntaxKind.TildeToken)
   );
 }
 

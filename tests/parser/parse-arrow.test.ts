@@ -222,7 +222,7 @@ describe("parser/parse-arrow", () => {
   });
 
   it("throws for unsupported binary operator", () => {
-    const fn = (u: { a: number; b: number }) => (u.a >>> u.b) > 0;
+    const fn = (u: { a: number; b: number }) => u.a >>> u.b > 0;
     expect(() => parseArrowToIr(fn)).toThrow("Unsupported binary");
   });
 

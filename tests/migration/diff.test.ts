@@ -88,7 +88,9 @@ describe("diffSchema", () => {
   });
 
   it("detects default drift", async () => {
-    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "active" integer default 0)`);
+    await driver.execute(
+      `CREATE TABLE "users" ("id" integer primary key, "active" integer default 0)`,
+    );
     const entities = [entity("users", { id: "integer primary key", active: "integer default 1" })];
     const actions = await diffSchema(driver, entities);
     const alter = actions.find(
@@ -101,7 +103,9 @@ describe("diffSchema", () => {
   });
 
   it("detects case-sensitive string default drift", async () => {
-    await driver.execute(`CREATE TABLE "users" ("id" integer primary key, "name" text default 'Anon')`);
+    await driver.execute(
+      `CREATE TABLE "users" ("id" integer primary key, "name" text default 'Anon')`,
+    );
     const entities = [entity("users", { id: "integer primary key", name: "text default 'anon'" })];
     const actions = await diffSchema(driver, entities);
     const alter = actions.find(
@@ -118,8 +122,15 @@ describe("diffSchema", () => {
     const entities = [entity("users", { id: "integer primary key", name: "text" })];
     const actions = await diffSchema(driver, entities);
     expect(actions).toHaveLength(2);
-    expect(actions).toContainEqual({ kind: "add_column", table: "users", column: "name", definition: "text" });
-    expect(actions).toContainEqual(expect.objectContaining({ kind: "drop_column", table: "users", column: "full_name" }));
+    expect(actions).toContainEqual({
+      kind: "add_column",
+      table: "users",
+      column: "name",
+      definition: "text",
+    });
+    expect(actions).toContainEqual(
+      expect.objectContaining({ kind: "drop_column", table: "users", column: "full_name" }),
+    );
   });
 
   it("handles multiple tables with mixed changes", async () => {

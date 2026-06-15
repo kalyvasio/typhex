@@ -51,12 +51,14 @@ function print(results: BenchmarkResult[]): void {
   console.log(`${"benchmark".padEnd(nameWidth)}  rows      ms      rows/sec`);
   console.log(`${"-".repeat(nameWidth)}  ----  ------  ------------`);
   for (const result of results) {
-    console.log([
-      result.name.padEnd(nameWidth),
-      String(result.rows).padStart(4),
-      result.ms.toFixed(1).padStart(6),
-      result.opsPerSecond.toFixed(0).padStart(12),
-    ].join("  "));
+    console.log(
+      [
+        result.name.padEnd(nameWidth),
+        String(result.rows).padStart(4),
+        result.ms.toFixed(1).padStart(6),
+        result.opsPerSecond.toFixed(0).padStart(12),
+      ].join("  "),
+    );
   }
 }
 
@@ -93,51 +95,66 @@ async function main(): Promise<void> {
   const results: BenchmarkResult[] = [];
 
   try {
-    results.push(await time("insertMany users", 1_000, async () => {
-      await seedUsers(1_000);
-    }));
+    results.push(
+      await time("insertMany users", 1_000, async () => {
+        await seedUsers(1_000);
+      }),
+    );
 
-    const users = await User.query().toArray() as Array<{ id: number }>;
-    results.push(await time("insertMany posts", 5_000, async () => {
-      await seedPosts(users, 5);
-    }));
+    const users = (await User.query().toArray()) as Array<{ id: number }>;
+    results.push(
+      await time("insertMany posts", 5_000, async () => {
+        await seedPosts(users, 5);
+      }),
+    );
 
-    results.push(await time("relation loading", 1_000, async () => {
-      await User.query()
-        .select((u: any) => ({
-          id: u.id,
-          posts: u.posts.query().select((p: any) => ({ id: p.id, title: p.title })),
-        }))
-        .toArray();
-    }));
-
-    results.push(await time("aggregation", 1, async () => {
-      await Post.query()
-        .select((p: any) => ({ authorId: p.authorId, total: count(p.id) }))
-        .groupBy("authorId")
-        .having((p: any) => count(p.id) > 0)
-        .toArray();
-    }));
-
-    results.push(await time("large pagination", 100, async () => {
-      for (let page = 0; page < 100; page++) {
-        await Post.query()
-          .orderBy("id", "asc")
-          .limit(50)
-          .offset(page * 50)
+    results.push(
+      await time("relation loading", 1_000, async () => {
+        await User.query()
+          .select((u: any) => ({
+            id: u.id,
+            posts: u.posts.query().select((p: any) => ({ id: p.id, title: p.title })),
+          }))
           .toArray();
-      }
-    }));
+      }),
+    );
 
-    results.push(await time("insertGraph", 100, async () => {
-      await User.query().insertGraph(
-        Array.from({ length: 100 }, (_, i) => ({
-          name: `graph-user-${i}`,
-          age: 30,
-          posts: [{ title: `graph-post-${i}-a`, views: 1 }, { title: `graph-post-${i}-b`, views: 2 }],
-        })),
-      );
-    }));
+    results.push(
+      await time("aggregation", 1, async () => {
+        await Post.query()
+          .select((p: any) => ({ authorId: p.authorId, total: count(p.id) }))
+          .groupBy("authorId")
+          .having((p: any) => count(p.id) > 0)
+          .toArray();
+      }),
+    );
+
+    results.push(
+      await time("large pagination", 100, async () => {
+        for (let page = 0; page < 100; page++) {
+          await Post.query()
+            .orderBy("id", "asc")
+            .limit(50)
+            .offset(page * 50)
+            .toArray();
+        }
+      }),
+    );
+
+    results.push(
+      await time("insertGraph", 100, async () => {
+        await User.query().insertGraph(
+          Array.from({ length: 100 }, (_, i) => ({
+            name: `graph-user-${i}`,
+            age: 30,
+            posts: [
+              { title: `graph-post-${i}-a`, views: 1 },
+              { title: `graph-post-${i}-b`, views: 2 },
+            ],
+          })),
+        );
+      }),
+    );
 
     print(results);
   } finally {

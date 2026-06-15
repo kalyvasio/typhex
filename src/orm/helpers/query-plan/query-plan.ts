@@ -52,7 +52,7 @@
 import { type IrSelectRelation, type JoinHint } from "../../../ir/types.js";
 import type { RelationType } from "../../../entity/relations.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
-import type { QueryCompiler, QueryOperation, WithClause } from "../../../dbs/types.js";
+import type { Dialect, QueryCompiler, QueryOperation, WithClause } from "../../../dbs/types.js";
 import {
   RelationJoinBuilder,
   RelationPathAliasBuilder,
@@ -73,14 +73,14 @@ export const DEFAULT_ROW_PARAM = "u";
  *  fresh aliases (`t1`, `t2`, …) during the planner's subquery phase. */
 const TABLE_ALIAS = "t0";
 
-/**
+/** @internal
  * Resolve a `QueryCompiler` from the QueryExecutor on a state. Throws if
  * the dialect isn't registered — used by the query-builder to look up
  * the dialect when it needs to compile SQL outside the planner path
  * (e.g. for `findById` shortcuts).
  */
 export function getQueryCompilerOrThrow(state: QueryState<unknown>): QueryCompiler {
-  return state.qe.dialect.queryCompiler;
+  return (state.qe.dialect as Dialect).queryCompiler;
 }
 
 // ─── plan types ───────────────────────────────────────────────────────────────
@@ -223,7 +223,7 @@ interface RelationDetection {
 
 // ─── public entry point ───────────────────────────────────────────────────────
 
-/**
+/** @internal
  * Plan a query against a `QueryState`. Use the static `build` entry
  * point — the constructor is private because every instance only ever
  * runs once (it holds per-build mutable state).

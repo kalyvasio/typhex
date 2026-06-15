@@ -169,13 +169,10 @@ describe("dbs/postgres", () => {
 
     it("compilePlan insertMany doNothing emits ON CONFLICT ... DO NOTHING with RETURNING", () => {
       const { sql, returningRow } = postgresQueryCompiler.compilePlan(
-        insertManyPlan(
-          "tags",
-          ["slug", "label"],
-          [["ts", "TypeScript"]],
-          ["id"],
-          { conflictColumns: ["slug"], action: "nothing" },
-        ),
+        insertManyPlan("tags", ["slug", "label"], [["ts", "TypeScript"]], ["id"], {
+          conflictColumns: ["slug"],
+          action: "nothing",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO NOTHING');
       expect(sql).toContain("RETURNING *");
@@ -184,13 +181,10 @@ describe("dbs/postgres", () => {
 
     it("compilePlan insertMany doUpdate uses EXCLUDED (uppercase)", () => {
       const { sql } = postgresQueryCompiler.compilePlan(
-        insertManyPlan(
-          "tags",
-          ["slug", "label"],
-          [["ts", "TypeScript"]],
-          ["id"],
-          { conflictColumns: ["slug"], action: "update" },
-        ),
+        insertManyPlan("tags", ["slug", "label"], [["ts", "TypeScript"]], ["id"], {
+          conflictColumns: ["slug"],
+          action: "update",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = EXCLUDED."label"');
     });
@@ -205,7 +199,7 @@ describe("dbs/postgres", () => {
         }),
       );
       expect(sql).toContain("SELECT COUNT(*) AS c");
-      expect(sql).toContain('FROM (');
+      expect(sql).toContain("FROM (");
       expect(sql).toContain('FROM "users"');
       expect(params).toEqual([18]);
     });
@@ -384,12 +378,17 @@ describe("dbs/postgres", () => {
 
     it("compilePlan update with CTE in WHERE but empty SET omits WITH", () => {
       const { sql } = postgresQueryCompiler.compilePlan({
-        ...updatePlan("users", ["id", "name"], {}, {
-          kind: "binary",
-          op: "===",
-          left: { kind: "column", alias: "adults", column: ["id"] },
-          right: { kind: "column", alias: "t0", column: ["id"] },
-        }),
+        ...updatePlan(
+          "users",
+          ["id", "name"],
+          {},
+          {
+            kind: "binary",
+            op: "===",
+            left: { kind: "column", alias: "adults", column: ["id"] },
+            right: { kind: "column", alias: "t0", column: ["id"] },
+          },
+        ),
         ctes: [
           {
             name: "adults",
@@ -483,9 +482,7 @@ describe("dbs/postgres", () => {
       const { sql, params } = postgresQueryCompiler.compilePlan(
         selectPlan("orders", {
           columnNames: ["category", "active"],
-          selectItems: [
-            { expr: { kind: "aggregate", func: "COUNT", arg: null, alias: "total" } },
-          ],
+          selectItems: [{ expr: { kind: "aggregate", func: "COUNT", arg: null, alias: "total" } }],
           where: {
             kind: "binary",
             op: "===",
@@ -745,141 +742,115 @@ describe("dbs/postgres", () => {
   });
 
   describe("createPostgresDriver (integration)", () => {
-    it(
-      "connects and runs queries",
-      async () => {
-        if (!hasPostgres()) return;
-        const driver = createPostgresDriver({ connectionString });
-        try {
-          const result = await driver.execute("SELECT 1 as x", []);
+    it("connects and runs queries", { skip: !hasPostgres() }, async () => {
+      if (!hasPostgres()) return;
+      const driver = createPostgresDriver({ connectionString });
+      try {
+        const result = await driver.execute("SELECT 1 as x", []);
+        expect(result.rows).toHaveLength(1);
+        expect((result.rows[0] as { x: number }).x).toBe(1);
+      } finally {
+        await driver.close();
+      }
+    });
+
+    it("supports concurrent queries via connection pooling", { skip: !hasPostgres() }, async () => {
+      if (!hasPostgres()) return;
+      const driver = createPostgresDriver({ connectionString, poolMin: 2, poolMax: 5 });
+      try {
+        // Fire multiple concurrent queries to exercise the pool
+        const results = await Promise.all([
+          driver.execute("SELECT 1 as n", []),
+          driver.execute("SELECT 2 as n", []),
+          driver.execute("SELECT 3 as n", []),
+          driver.execute("SELECT 4 as n", []),
+          driver.execute("SELECT 5 as n", []),
+        ]);
+        expect(results).toHaveLength(5);
+        results.forEach((result, i) => {
           expect(result.rows).toHaveLength(1);
-          expect((result.rows[0] as { x: number }).x).toBe(1);
-        } finally {
-          await driver.close();
-        }
-      },
-      { skip: !hasPostgres() },
-    );
-
-    it(
-      "supports concurrent queries via connection pooling",
-      async () => {
-        if (!hasPostgres()) return;
-        const driver = createPostgresDriver({ connectionString, poolMin: 2, poolMax: 5 });
-        try {
-          // Fire multiple concurrent queries to exercise the pool
-          const results = await Promise.all([
-            driver.execute("SELECT 1 as n", []),
-            driver.execute("SELECT 2 as n", []),
-            driver.execute("SELECT 3 as n", []),
-            driver.execute("SELECT 4 as n", []),
-            driver.execute("SELECT 5 as n", []),
-          ]);
-          expect(results).toHaveLength(5);
-          results.forEach((result, i) => {
-            expect(result.rows).toHaveLength(1);
-            expect((result.rows[0] as { n: number }).n).toBe(i + 1);
-          });
-        } finally {
-          await driver.close();
-        }
-      },
-      { skip: !hasPostgres() },
-    );
-
-    it(
-      "rolls back transaction on error",
-      async () => {
-        if (!hasPostgres()) return;
-        const driver = createPostgresDriver({ connectionString });
-        const db = new Db(driver);
-        try {
-          await driver.execute("DROP TABLE IF EXISTS pg_tx_rollback_test", []);
-          await driver.execute(
-            "CREATE TABLE pg_tx_rollback_test (id SERIAL PRIMARY KEY, val TEXT)",
-            [],
-          );
-
-          await expect(
-            db.transaction(async (trx) => {
-              await trx.run("INSERT INTO pg_tx_rollback_test (val) VALUES ($1)", [
-                "should-rollback",
-              ]);
-              throw new Error("intentional rollback");
-            }),
-          ).rejects.toThrow("intentional rollback");
-
-          const result = await driver.execute("SELECT * FROM pg_tx_rollback_test", []);
-          expect(result.rows).toHaveLength(0);
-        } finally {
-          await driver.execute("DROP TABLE IF EXISTS pg_tx_rollback_test", []);
-          await db.close();
-        }
-      },
-      { skip: !hasPostgres() },
-    );
-
-    it(
-      "wraps errors with SQL context",
-      async () => {
-        if (!hasPostgres()) return;
-        const driver = createPostgresDriver({ connectionString });
-        try {
-          await expect(
-            driver.execute("SELECT * FROM nonexistent_table_xyz_typhex", []),
-          ).rejects.toThrow(/PG\([\s\S]*SQL:\s*SELECT \* FROM nonexistent_table_xyz_typhex/);
-        } finally {
-          await driver.close();
-        }
-      },
-      { skip: !hasPostgres() },
-    );
-
-    it(
-      "closes pool cleanly",
-      async () => {
-        if (!hasPostgres()) return;
-        const driver = createPostgresDriver({ connectionString });
-        // Run a query to ensure pool is active
-        await driver.execute("SELECT 1", []);
-        // close() should resolve without error
-        await expect(driver.close()).resolves.toBeUndefined();
-      },
-      { skip: !hasPostgres() },
-    );
-
-    it(
-      "Entity CRUD with PostgreSQL",
-      async () => {
-        clearRegistry();
-        const User = Entity("pg_test_users", {
-          id: "SERIAL PRIMARY KEY",
-          name: "VARCHAR(255) NOT NULL",
-          age: "INTEGER NOT NULL",
+          expect((result.rows[0] as { n: number }).n).toBe(i + 1);
         });
+      } finally {
+        await driver.close();
+      }
+    });
 
-        const driver = createPostgresDriver({ connectionString });
-        const db = new Db(driver); // automatically sets default Db
+    it("rolls back transaction on error", { skip: !hasPostgres() }, async () => {
+      if (!hasPostgres()) return;
+      const driver = createPostgresDriver({ connectionString });
+      const db = new Db(driver);
+      try {
+        await driver.execute("DROP TABLE IF EXISTS pg_tx_rollback_test", []);
+        await driver.execute(
+          "CREATE TABLE pg_tx_rollback_test (id SERIAL PRIMARY KEY, val TEXT)",
+          [],
+        );
 
-        try {
-          await driver.execute('DROP TABLE IF EXISTS "pg_test_users"', []);
-          await db.migrate();
+        await expect(
+          db.transaction(async (trx) => {
+            await trx.run("INSERT INTO pg_tx_rollback_test (val) VALUES ($1)", ["should-rollback"]);
+            throw new Error("intentional rollback");
+          }),
+        ).rejects.toThrow("intentional rollback");
 
-          const u = await User.query().insert({ name: "Alice", age: 30 });
-          expect(u.id).toBe(1);
+        const result = await driver.execute("SELECT * FROM pg_tx_rollback_test", []);
+        expect(result.rows).toHaveLength(0);
+      } finally {
+        await driver.execute("DROP TABLE IF EXISTS pg_tx_rollback_test", []);
+        await db.close();
+      }
+    });
 
-          const found = await User.query()
-            .where((u) => u.name === "Alice")
-            .first();
-          expect(found?.name).toBe("Alice");
+    it("wraps errors with SQL context", { skip: !hasPostgres() }, async () => {
+      if (!hasPostgres()) return;
+      const driver = createPostgresDriver({ connectionString });
+      try {
+        await expect(
+          driver.execute("SELECT * FROM nonexistent_table_xyz_typhex", []),
+        ).rejects.toThrow(/PG\([\s\S]*SQL:\s*SELECT \* FROM nonexistent_table_xyz_typhex/);
+      } finally {
+        await driver.close();
+      }
+    });
 
-          const count = await User.query().count();
-          expect(count).toBe(1);
-        } finally {
-          await db.close();
-        }
-      },
-      { skip: !hasPostgres() },
-    );
+    it("closes pool cleanly", { skip: !hasPostgres() }, async () => {
+      if (!hasPostgres()) return;
+      const driver = createPostgresDriver({ connectionString });
+      // Run a query to ensure pool is active
+      await driver.execute("SELECT 1", []);
+      // close() should resolve without error
+      await expect(driver.close()).resolves.toBeUndefined();
+    });
+
+    it("Entity CRUD with PostgreSQL", { skip: !hasPostgres() }, async () => {
+      clearRegistry();
+      const User = Entity("pg_test_users", {
+        id: "SERIAL PRIMARY KEY",
+        name: "VARCHAR(255) NOT NULL",
+        age: "INTEGER NOT NULL",
+      });
+
+      const driver = createPostgresDriver({ connectionString });
+      const db = new Db(driver); // automatically sets default Db
+
+      try {
+        await driver.execute('DROP TABLE IF EXISTS "pg_test_users"', []);
+        await db.migrate();
+
+        const u = await User.query().insert({ name: "Alice", age: 30 });
+        expect(u.id).toBe(1);
+
+        const found = await User.query()
+          .where((u) => u.name === "Alice")
+          .first();
+        expect(found?.name).toBe("Alice");
+
+        const count = await User.query().count();
+        expect(count).toBe(1);
+      } finally {
+        await db.close();
+      }
+    });
   });
 });

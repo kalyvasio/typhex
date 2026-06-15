@@ -20,7 +20,13 @@ const db = new Db(createSqliteDriver({ path: ":memory:" }));
 await db.migrate();
 
 await Order.query().insert({ category: "a", price: 10, qty: 2, active: 1, deletedAt: null });
-await Order.query().insert({ category: "a", price: 20, qty: 6, active: 1, deletedAt: "2025-01-01" });
+await Order.query().insert({
+  category: "a",
+  price: 20,
+  qty: 6,
+  active: 1,
+  deletedAt: "2025-01-01",
+});
 await Order.query().insert({ category: "a", price: 15, qty: 4, active: 1, deletedAt: null });
 await Order.query().insert({ category: "b", price: 5, qty: 1, active: 1, deletedAt: null });
 await Order.query().insert({ category: "b", price: 15, qty: 9, active: 0, deletedAt: null });
@@ -58,10 +64,13 @@ console.log("Orders sorted large-first by qty bucket:", sortedByQty);
 
 const cutoff = 5;
 const buckets = await Order.query()
-  .select((o) => ({
-    category: o.category,
-    smalls: sum(o.qty < cutoff ? 1 : 0),
-  }), { cutoff })
+  .select(
+    (o) => ({
+      category: o.category,
+      smalls: sum(o.qty < cutoff ? 1 : 0),
+    }),
+    { cutoff },
+  )
   .groupBy("category")
   .orderBy("category")
   .toArray();

@@ -25,12 +25,10 @@ describe("Scalar subquery columns in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: countAllPosts }, alias: "totalPosts" },
     ];
-    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE 1=1) AS "totalPosts"`,
     );
@@ -42,12 +40,10 @@ describe("Scalar subquery columns in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: countActivePosts }, alias: "activePosts" },
     ];
-    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = ?)) AS "activePosts"`,
     );
@@ -59,12 +55,10 @@ describe("Scalar subquery columns in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: countActivePosts }, alias: "activePosts" },
     ];
-    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = $1)) AS "activePosts"`,
     );
@@ -75,12 +69,10 @@ describe("Scalar subquery columns in SELECT", () => {
     const items: SelectItem[] = [
       { expr: { kind: "subquery", plan: sumActivePostScores }, alias: "totalScore" },
     ];
-    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `(SELECT SUM("t1"."score") FROM "posts" AS "t1" WHERE ("t1"."active" = ?)) AS "totalScore"`,
     );
@@ -93,12 +85,10 @@ describe("Scalar subquery columns in SELECT", () => {
       { expr: { kind: "subquery", plan: countActivePosts }, alias: "active" },
       { expr: { kind: "subquery", plan: sumActivePostScores }, alias: "totalScore" },
     ];
-    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `"t0"."name" AS "name", ` +
         `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."active" = $1)) AS "active", ` +

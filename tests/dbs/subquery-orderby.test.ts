@@ -42,7 +42,9 @@ describe("ORDER BY subquery", () => {
     ];
     const { sql, params } = sqliteQueryCompiler.compileOrderByExpr(orders);
     expect(sql).toContain(`"t0"."name" ASC`);
-    expect(sql).toContain(`(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) DESC`);
+    expect(sql).toContain(
+      `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) DESC`,
+    );
     expect(params).toEqual([]);
   });
 });

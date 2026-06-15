@@ -9,13 +9,17 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as acorn from "acorn";
-import type { Driver, Connection } from "../driver/types.js";
+import type { Driver, Connection, ResolvedDriver } from "../driver/types.js";
 import type { MigrationDb, MigrationRecord, PendingMigration } from "./types.js";
 interface MigrationModule {
   upSql: string;
   downSql: string;
   up: (db: MigrationDb) => Promise<void>;
   down: (db: MigrationDb) => Promise<void>;
+}
+
+function asResolvedDriver(driver: Driver): ResolvedDriver {
+  return driver as ResolvedDriver;
 }
 
 class ConnectionMigrationDb implements MigrationDb {
@@ -32,13 +36,13 @@ class ConnectionMigrationDb implements MigrationDb {
 }
 
 async function ensureTrackingTable(driver: Driver): Promise<void> {
-  const compiled = driver.dialect.queryCompiler.compileTrackingTable();
+  const compiled = asResolvedDriver(driver).dialect.queryCompiler.compileTrackingTable();
   await driver.execute(compiled.sql, compiled.params);
 }
 
 async function getAppliedRows(driver: Driver): Promise<MigrationRecord[]> {
   await ensureTrackingTable(driver);
-  const compiled = driver.dialect.queryCompiler.compileAppliedMigrations();
+  const compiled = asResolvedDriver(driver).dialect.queryCompiler.compileAppliedMigrations();
   const rows = await driver.execute(compiled.sql, compiled.params).then((r) => r.rows);
   return rows as MigrationRecord[];
 }
@@ -194,7 +198,7 @@ export interface MigrationResult {
 export async function runMigrations(driver: Driver, dir: string): Promise<MigrationResult> {
   const applied = await getAppliedNames(driver);
   const files = listMigrationFiles(dir);
-  const compiler = driver.dialect.queryCompiler;
+  const compiler = asResolvedDriver(driver).dialect.queryCompiler;
   const result: MigrationResult = { applied: [], skipped: [] };
 
   await withConnection(driver, (conn) =>
@@ -292,7 +296,7 @@ async function runSingleMigration(
   }
 
   const mod = await loadModule(dir, file);
-  const compiler = driver.dialect.queryCompiler;
+  const compiler = asResolvedDriver(driver).dialect.queryCompiler;
   const tracking =
     direction === "up"
       ? compiler.compileRecordMigration(name)

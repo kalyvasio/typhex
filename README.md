@@ -1,5 +1,9 @@
 # Typhex
 
+[![CI](https://github.com/kalyvasio/typhex/actions/workflows/ci.yml/badge.svg)](https://github.com/kalyvasio/typhex/actions/workflows/ci.yml)
+[![Docs](https://github.com/kalyvasio/typhex/actions/workflows/docs.yml/badge.svg)](https://github.com/kalyvasio/typhex/actions/workflows/docs.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A TypeScript/JavaScript ORM that lets you write SQL queries with arrow-function predicates:
 
 ```ts

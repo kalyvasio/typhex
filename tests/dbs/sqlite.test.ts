@@ -9,11 +9,7 @@ import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
 import type { Expr, SelectItem } from "../../src/orm/expr.js";
-import {
-  insertManyPlan,
-  insertPlan,
-  selectPlan,
-} from "./compiler-plan-fixtures.js";
+import { insertManyPlan, insertPlan, selectPlan } from "./compiler-plan-fixtures.js";
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {
@@ -136,12 +132,11 @@ describe("dbs/sqlite", () => {
         { expr: { kind: "column", alias: "t0", column: ["id"] }, alias: "id" },
         { expr: { kind: "column", alias: "t1", column: ["name"] }, alias: "company_name" },
       ];
-      const result = sqliteQueryCompiler.compileSelectListExpr(
-        items,
-        false,
-        "t0",
-        ["id", "name", "companyId"],
-      );
+      const result = sqliteQueryCompiler.compileSelectListExpr(items, false, "t0", [
+        "id",
+        "name",
+        "companyId",
+      ]);
       expect(result.sql).toContain('"t1"."name"');
       expect(result.sql).toContain("company_name");
     });
@@ -269,17 +264,13 @@ describe("dbs/sqlite", () => {
 
     it("compilePlan insertMany doUpdate emits ON CONFLICT ... DO UPDATE SET", () => {
       const { sql } = sqliteQueryCompiler.compilePlan(
-        insertManyPlan(
-          "tags",
-          ["slug", "label"],
-          [["ts", "TypeScript"]],
-          undefined,
-          { conflictColumns: ["slug"], action: "update" },
-        ),
+        insertManyPlan("tags", ["slug", "label"], [["ts", "TypeScript"]], undefined, {
+          conflictColumns: ["slug"],
+          action: "update",
+        }),
       );
       expect(sql).toContain('ON CONFLICT ("slug") DO UPDATE SET "label" = excluded."label"');
     });
-
   });
 
   describe("sqliteMigrator", () => {

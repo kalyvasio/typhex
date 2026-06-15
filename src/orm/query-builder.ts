@@ -37,9 +37,6 @@ import {
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 import { QueryState, type CapturedSubquery, type QueryStateInit } from "./query-state.js";
 
-export { QueryState } from "./query-state.js";
-export type { CapturedSubquery, FromSource, QueryStateInit } from "./query-state.js";
-
 /** Whether the builder reads from the base table or a registered CTE. */
 export type QueryFromKind = "table" | "cte";
 
@@ -92,6 +89,7 @@ export class QueryBuilder<
     if (params.length > 0) console.log("[typhex] params:", params);
   }
 
+  /** @internal */
   protected buildPlan(operation: QueryOperation) {
     return QueryPlanBuilder.build(this.state, operation);
   }
@@ -160,19 +158,13 @@ export class QueryBuilder<
     return this.addOrderByInput(colOrIr, direction);
   }
 
-  private addOrderByIr(
-    ir: IrOrderBy,
-    params: Record<string, unknown> | null,
-  ): this {
+  private addOrderByIr(ir: IrOrderBy, params: Record<string, unknown> | null): this {
     this.addInlineParams(params);
     this.state.orderBy.push(ir);
     return this;
   }
 
-  private addOrderByInput(
-    input: string | ((row: T) => unknown),
-    direction: OrderDirection,
-  ): this {
+  private addOrderByInput(input: string | ((row: T) => unknown), direction: OrderDirection): this {
     const paramKeys = Object.keys(this.state.inlineParams ?? {});
     this.state.orderBy.push(
       resolveOrderBy(input as string | ((row: unknown) => unknown), direction, paramKeys),

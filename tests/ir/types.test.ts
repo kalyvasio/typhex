@@ -140,16 +140,26 @@ describe("ir/types", () => {
 
   describe("isIrOrderBy", () => {
     it("returns true for a valid IrOrderBy", () => {
-      const ob: IrOrderBy = { expr: { kind: "member", param: "u", path: ["name"] }, direction: "asc" };
+      const ob: IrOrderBy = {
+        expr: { kind: "member", param: "u", path: ["name"] },
+        direction: "asc",
+      };
       expect(isIrOrderBy(ob)).toBe(true);
     });
 
     it("returns true for desc direction", () => {
-      expect(isIrOrderBy({ expr: { kind: "member", param: "u", path: ["age"] }, direction: "desc" })).toBe(true);
+      expect(
+        isIrOrderBy({ expr: { kind: "member", param: "u", path: ["age"] }, direction: "desc" }),
+      ).toBe(true);
     });
 
     it("returns true for a relation path", () => {
-      expect(isIrOrderBy({ expr: { kind: "member", param: "u", path: ["author", "name"] }, direction: "asc" })).toBe(true);
+      expect(
+        isIrOrderBy({
+          expr: { kind: "member", param: "u", path: ["author", "name"] },
+          direction: "asc",
+        }),
+      ).toBe(true);
     });
 
     it("returns true for a subquery expr", () => {
@@ -173,7 +183,9 @@ describe("ir/types", () => {
     });
 
     it("returns false for unknown direction", () => {
-      expect(isIrOrderBy({ expr: { kind: "member", param: "u", path: ["name"] }, direction: "random" })).toBe(false);
+      expect(
+        isIrOrderBy({ expr: { kind: "member", param: "u", path: ["name"] }, direction: "random" }),
+      ).toBe(false);
     });
 
     it("returns false for null", () => {

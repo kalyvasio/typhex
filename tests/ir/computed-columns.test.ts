@@ -2,13 +2,11 @@ import { describe, it, expect } from "vitest";
 import { parseArrowToIr, parseArrowToIrSelect } from "../../src/parser/parse-arrow.js";
 import { createSqliteDriver } from "../../src/dbs/index.js";
 import { Db } from "../../src/orm/db.js";
-import { Entity } from "../../src/index.js";
 import type { IrNode, IrSelect, IrOrderBy } from "../../src/ir/types.js";
 import {
   compileIrWhere,
   compileIrSelectList,
   compileIrOrderBy,
-  sqliteQueryCompiler,
   postgresQueryCompiler,
 } from "./compile-ir-helpers.js";
 
@@ -43,24 +41,28 @@ describe("IS NULL / IS NOT NULL rewrite", () => {
     const irSelect: IrSelect = {
       param: "u",
       paths: [],
-      aggregates: [{
-        kind: "aggregate",
-        func: "SUM",
-        arg: {
-          kind: "case",
-          branches: [{
-            when: {
-              kind: "binary",
-              op: "===",
-              left: { kind: "member", param: "u", path: ["deletedAt"] },
-              right: { kind: "const", value: null },
-            },
-            then: { kind: "const", value: 1 },
-          }],
-          else: { kind: "const", value: 0 },
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "SUM",
+          arg: {
+            kind: "case",
+            branches: [
+              {
+                when: {
+                  kind: "binary",
+                  op: "===",
+                  left: { kind: "member", param: "u", path: ["deletedAt"] },
+                  right: { kind: "const", value: null },
+                },
+                then: { kind: "const", value: 1 },
+              },
+            ],
+            else: { kind: "const", value: 0 },
+          },
+          alias: "live",
         },
-        alias: "live",
-      }],
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "deletedAt"]);
     expect(sql).toBe(`SUM((CASE WHEN ("t0"."deletedAt" IS NULL) THEN 1 ELSE 0 END)) AS "live"`);
@@ -84,14 +86,17 @@ describe("computed SELECT columns", () => {
     const irSelect: IrSelect = {
       param: "o",
       paths: [],
-      expressions: [{
-        expr: {
-          kind: "binary", op: "*",
-          left: { kind: "member", param: "o", path: ["price"] },
-          right: { kind: "member", param: "o", path: ["qty"] },
+      expressions: [
+        {
+          expr: {
+            kind: "binary",
+            op: "*",
+            left: { kind: "member", param: "o", path: ["price"] },
+            right: { kind: "member", param: "o", path: ["qty"] },
+          },
+          alias: "revenue",
         },
-        alias: "revenue",
-      }],
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "price", "qty"]);
     expect(sql).toBe(`("t0"."price" * "t0"."qty") AS "revenue"`);
@@ -101,17 +106,21 @@ describe("computed SELECT columns", () => {
     const irSelect: IrSelect = {
       param: "o",
       paths: [],
-      expressions: [{
-        expr: {
-          kind: "case",
-          branches: [{
-            when: { kind: "member", param: "o", path: ["active"] },
-            then: { kind: "const", value: "on" },
-          }],
-          else: { kind: "const", value: "off" },
+      expressions: [
+        {
+          expr: {
+            kind: "case",
+            branches: [
+              {
+                when: { kind: "member", param: "o", path: ["active"] },
+                then: { kind: "const", value: "on" },
+              },
+            ],
+            else: { kind: "const", value: "off" },
+          },
+          alias: "status",
         },
-        alias: "status",
-      }],
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "active"]);
     expect(sql).toBe(`(CASE WHEN "t0"."active" THEN 'on' ELSE 'off' END) AS "status"`);
@@ -122,35 +131,47 @@ describe("computed SELECT columns", () => {
       param: "o",
       paths: [["category"]],
       aliases: ["category"],
-      aggregates: [{
-        kind: "aggregate", func: "SUM",
-        arg: { kind: "member", param: "o", path: ["price"] },
-        alias: "total",
-      }],
-      expressions: [{
-        expr: {
-          kind: "case",
-          branches: [{
-            when: {
-              kind: "binary", op: "<",
-              left: { kind: "member", param: "o", path: ["qty"] },
-              right: { kind: "const", value: 10 },
-            },
-            then: { kind: "const", value: "small" },
-          }],
-          else: { kind: "const", value: "large" },
+      aggregates: [
+        {
+          kind: "aggregate",
+          func: "SUM",
+          arg: { kind: "member", param: "o", path: ["price"] },
+          alias: "total",
         },
-        alias: "bucket",
-      }],
+      ],
+      expressions: [
+        {
+          expr: {
+            kind: "case",
+            branches: [
+              {
+                when: {
+                  kind: "binary",
+                  op: "<",
+                  left: { kind: "member", param: "o", path: ["qty"] },
+                  right: { kind: "const", value: 10 },
+                },
+                then: { kind: "const", value: "small" },
+              },
+            ],
+            else: { kind: "const", value: "large" },
+          },
+          alias: "bucket",
+        },
+      ],
     };
     const sql = compileIrSelectList(irSelect, ["id", "category", "price", "qty"]);
     expect(sql).toContain(`"t0"."category" AS "category"`);
     expect(sql).toContain(`SUM(`);
-    expect(sql).toContain(`(CASE WHEN ("t0"."qty" < 10) THEN 'small' ELSE 'large' END) AS "bucket"`);
+    expect(sql).toContain(
+      `(CASE WHEN ("t0"."qty" < 10) THEN 'small' ELSE 'large' END) AS "bucket"`,
+    );
   });
 
   it("runtime parser: select(o => ({ revenue: o.price * o.qty })) emits expressions[]", () => {
-    const ir = parseArrowToIrSelect((o: { price: number; qty: number }) => ({ revenue: o.price * o.qty }));
+    const ir = parseArrowToIrSelect((o: { price: number; qty: number }) => ({
+      revenue: o.price * o.qty,
+    }));
     expect(ir).not.toBeNull();
     expect(ir!.expressions).toHaveLength(1);
     expect(ir!.expressions![0].alias).toBe("revenue");
@@ -160,54 +181,62 @@ describe("computed SELECT columns", () => {
   it("runtime parser: shorthand single expression aliased as 'expr'", () => {
     const ir = parseArrowToIrSelect((o: { price: number }) => o.price * 100);
     expect(ir).not.toBeNull();
-    expect(ir!.expressions).toEqual([{
-      expr: {
-        kind: "binary", op: "*",
-        left: { kind: "member", param: "o", path: ["price"] },
-        right: { kind: "const", value: 100 },
+    expect(ir!.expressions).toEqual([
+      {
+        expr: {
+          kind: "binary",
+          op: "*",
+          left: { kind: "member", param: "o", path: ["price"] },
+          right: { kind: "const", value: 100 },
+        },
+        alias: "expr",
       },
-      alias: "expr",
-    }]);
+    ]);
   });
 });
 
 describe("ORDER BY computed expressions", () => {
   it("compiles ternary expression with direction", () => {
-    const orders: IrOrderBy[] = [{
-      expr: {
-        kind: "case",
-        branches: [{
-          when: { kind: "member", param: "u", path: ["featured"] },
-          then: { kind: "const", value: 0 },
-        }],
-        else: { kind: "const", value: 1 },
+    const orders: IrOrderBy[] = [
+      {
+        expr: {
+          kind: "case",
+          branches: [
+            {
+              when: { kind: "member", param: "u", path: ["featured"] },
+              then: { kind: "const", value: 0 },
+            },
+          ],
+          else: { kind: "const", value: 1 },
+        },
+        direction: "asc",
       },
-      direction: "asc",
-    }];
-    expect(compileIrOrderBy(orders)).toBe(
-      `(CASE WHEN "t0"."featured" THEN 0 ELSE 1 END) ASC`
-    );
+    ];
+    expect(compileIrOrderBy(orders)).toBe(`(CASE WHEN "t0"."featured" THEN 0 ELSE 1 END) ASC`);
   });
 
   it("compiles arithmetic expression with desc", () => {
-    const orders: IrOrderBy[] = [{
-      expr: {
-        kind: "binary", op: "*",
-        left: { kind: "member", param: "u", path: ["price"] },
-        right: { kind: "member", param: "u", path: ["qty"] },
+    const orders: IrOrderBy[] = [
+      {
+        expr: {
+          kind: "binary",
+          op: "*",
+          left: { kind: "member", param: "u", path: ["price"] },
+          right: { kind: "member", param: "u", path: ["qty"] },
+        },
+        direction: "desc",
       },
-      direction: "desc",
-    }];
-    expect(compileIrOrderBy(orders)).toBe(
-      `("t0"."price" * "t0"."qty") DESC`
-    );
+    ];
+    expect(compileIrOrderBy(orders)).toBe(`("t0"."price" * "t0"."qty") DESC`);
   });
 
   it("regression: bare-member orderBy renders as before", () => {
-    const orders: IrOrderBy[] = [{
-      expr: { kind: "member", param: "u", path: ["name"] },
-      direction: "asc",
-    }];
+    const orders: IrOrderBy[] = [
+      {
+        expr: { kind: "member", param: "u", path: ["name"] },
+        direction: "asc",
+      },
+    ];
     expect(compileIrOrderBy(orders)).toBe(`"t0"."name" ASC`);
   });
 
@@ -217,24 +246,13 @@ describe("ORDER BY computed expressions", () => {
   });
 });
 
-const orderSchema = {
-  id: "integer primary key autoincrement",
-  category: "text not null",
-  price: "integer not null",
-  qty: "integer not null",
-  active: "integer not null",
-  deletedAt: "text",
-} as const;
-
-class OrderRow extends Entity("orders", orderSchema) {}
-
 describe("end-to-end SQLite — Tier-1+2 features combined", () => {
   it("computes IS NULL, computed SELECT, ORDER BY expr in one round-trip", async () => {
     const driver = createSqliteDriver({ path: ":memory:" });
     const db = new Db(driver);
     try {
       await driver.execute(
-        'CREATE TABLE "orders" ("id" integer primary key autoincrement, "category" text not null, "price" integer not null, "qty" integer not null, "active" integer not null, "deletedAt" text)'
+        'CREATE TABLE "orders" ("id" integer primary key autoincrement, "category" text not null, "price" integer not null, "qty" integer not null, "active" integer not null, "deletedAt" text)',
       );
       await driver.execute(`INSERT INTO "orders" ("category","price","qty","active","deletedAt") VALUES
         ('a', 10, 2, 1, NULL),
@@ -243,22 +261,22 @@ describe("end-to-end SQLite — Tier-1+2 features combined", () => {
         ('b', 15, 1, 1, NULL)`);
 
       const live = await driver.execute(
-        'SELECT COUNT(*) AS c FROM "orders" "t0" WHERE ("t0"."deletedAt" IS NULL)'
+        'SELECT COUNT(*) AS c FROM "orders" "t0" WHERE ("t0"."deletedAt" IS NULL)',
       );
       expect(Number(live.rows[0].c)).toBe(3);
 
       const revenue = await driver.execute(
-        'SELECT ("t0"."price" * "t0"."qty") AS "revenue" FROM "orders" "t0" ORDER BY "t0"."id"'
+        'SELECT ("t0"."price" * "t0"."qty") AS "revenue" FROM "orders" "t0" ORDER BY "t0"."id"',
       );
       expect(revenue.rows.map((r: any) => r.revenue)).toEqual([20, 60, 20, 15]);
 
       const buckets = await driver.execute(
-        `SELECT (CASE WHEN ("t0"."qty" < 3) THEN 'small' ELSE 'large' END) AS "bucket" FROM "orders" "t0" ORDER BY "t0"."id"`
+        `SELECT (CASE WHEN ("t0"."qty" < 3) THEN 'small' ELSE 'large' END) AS "bucket" FROM "orders" "t0" ORDER BY "t0"."id"`,
       );
       expect(buckets.rows.map((r: any) => r.bucket)).toEqual(["small", "large", "large", "small"]);
 
       const ordered = await driver.execute(
-        'SELECT "t0"."id" FROM "orders" "t0" ORDER BY (CASE WHEN ("t0"."qty" = 4) THEN 0 ELSE 1 END), "t0"."id"'
+        'SELECT "t0"."id" FROM "orders" "t0" ORDER BY (CASE WHEN ("t0"."qty" = 4) THEN 0 ELSE 1 END), "t0"."id"',
       );
       expect(ordered.rows.map((r: any) => r.id)).toEqual([3, 1, 2, 4]);
     } finally {

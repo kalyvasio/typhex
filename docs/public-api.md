@@ -57,7 +57,7 @@ Public type exports:
 `ColumnDef`, `TyphexConfig`, `LoadConfigOptions`
 
 **Migration types:**
-`DiffAction`, `Dialect`, `MigrationFile`, `MigrationRecord`, `MigrationResult`
+`DiffAction`, `DialectName`, `MigrationFile`, `MigrationRecord`, `MigrationResult`
 
 The IR types (`IrNode`, `IrOrderBy`, `IrSelect`), parser helpers
 (`parseArrowToIr`, `parseArrowToIrSelect`), and `QueryState` are stripped
@@ -104,15 +104,15 @@ public entry points above.
 
 ## Compatibility Matrix
 
-| Component | Supported |
-| --- | --- |
-| Node.js | `>=18` |
-| TypeScript | `>=5.0` peer dependency |
-| Module format | ESM package (`"type": "module"`) |
-| SQLite | `better-sqlite3` via `createSqliteDriver` |
-| PostgreSQL | `pg` via `createPostgresDriver` |
-| Runtime parser | Supported safe subset of arrow predicates |
-| TypeScript transformer | Supported via `typhex/transformer` |
+| Component              | Supported                                 |
+| ---------------------- | ----------------------------------------- |
+| Node.js                | `>=18`                                    |
+| TypeScript             | `>=5.0` peer dependency                   |
+| Module format          | ESM package (`"type": "module"`)          |
+| SQLite                 | `better-sqlite3` via `createSqliteDriver` |
+| PostgreSQL             | `pg` via `createPostgresDriver`           |
+| Runtime parser         | Supported safe subset of arrow predicates |
+| TypeScript transformer | Supported via `typhex/transformer`        |
 
 ## Release Rules
 

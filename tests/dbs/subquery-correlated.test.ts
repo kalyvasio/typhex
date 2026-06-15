@@ -14,12 +14,10 @@ describe("Correlated scalar subquery in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: correlatedActivePosts }, alias: "postCount" },
     ];
-    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "postCount"`,
     );
@@ -31,12 +29,10 @@ describe("Correlated scalar subquery in SELECT", () => {
       { expr: col("t0", "name"), alias: "name" },
       { expr: { kind: "subquery", plan: correlatedActivePosts }, alias: "postCount" },
     ];
-    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `"t0"."name" AS "name", (SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "postCount"`,
     );
@@ -57,15 +53,11 @@ describe("Correlated scalar subquery in SELECT", () => {
         eq(col("t1", "active"), konst(true)),
       ),
     });
-    const items: SelectItem[] = [
-      { expr: { kind: "subquery", plan: sumPlan }, alias: "score" },
-    ];
-    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const items: SelectItem[] = [{ expr: { kind: "subquery", plan: sumPlan }, alias: "score" }];
+    const { sql, params } = postgresQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `(SELECT SUM("t1"."score") FROM "posts" AS "t1" WHERE (("t1"."authorId" = "t0"."id") AND ("t1"."active" = $1))) AS "score"`,
     );
@@ -79,15 +71,11 @@ describe("Correlated scalar subquery from destructured outer arrow", () => {
       selectItems: countPostsSelect,
       where: eq(col("t1", "authorId"), col("t0", "id")),
     });
-    const items: SelectItem[] = [
-      { expr: { kind: "subquery", plan: sub }, alias: "c" },
-    ];
-    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(
-      items,
-      false,
-      "t0",
-      ["id", "name"],
-    );
+    const items: SelectItem[] = [{ expr: { kind: "subquery", plan: sub }, alias: "c" }];
+    const { sql, params } = sqliteQueryCompiler.compileSelectListExpr(items, false, "t0", [
+      "id",
+      "name",
+    ]);
     expect(sql).toBe(
       `(SELECT COUNT(*) FROM "posts" AS "t1" WHERE ("t1"."authorId" = "t0"."id")) AS "c"`,
     );

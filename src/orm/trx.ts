@@ -6,8 +6,7 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { Connection, TransactionOptions } from "../driver/types.js";
-import type { Dialect } from "../dbs/types.js";
+import type { DialectInfo, ResolvedConnection, TransactionOptions } from "../driver/types.js";
 
 const _txStorage = new AsyncLocalStorage<Trx>();
 export function getActiveTrx(): Trx | undefined {
@@ -44,7 +43,7 @@ export abstract class Trx {
   /** @internal — Trx instances are created by `Db.transaction()` */
   constructor(
     /** @internal */
-    protected readonly _conn: Connection,
+    protected readonly _conn: ResolvedConnection,
     options?: TransactionOptions,
     ctx?: TrxContext,
   ) {
@@ -58,7 +57,7 @@ export abstract class Trx {
   // ── QueryExecutor ──────────────────────────────────────────────────────────
 
   /** The SQL dialect in use. */
-  get dialect(): Dialect {
+  get dialect(): DialectInfo {
     return this._conn.dialect;
   }
 
@@ -118,7 +117,7 @@ export abstract class Trx {
   /** Create a savepoint-scoped child Trx and begin it. */
   async beginTrx(): Promise<Trx> {
     const Ctor = this.constructor as new (
-      conn: Connection,
+      conn: ResolvedConnection,
       options?: TransactionOptions,
       ctx?: TrxContext,
     ) => Trx;
