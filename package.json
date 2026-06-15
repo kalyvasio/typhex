@@ -98,7 +98,7 @@
   },
   "dependencies": {
     "acorn": "^8.14.0",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "^12.10.1",
     "pg": "^8.19.0"
   },
   "devDependencies": {
