@@ -51,7 +51,7 @@ jobs:
 
       - run: npm run release:check
       - run: npm run pack:check
-      - run: npm install -g npm@latest
+      - run: npm install -g npm@11.5.1
 
       - name: Check whether npm version already exists
         id: npm
