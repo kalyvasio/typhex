@@ -4,10 +4,10 @@
 
 Security fixes are applied to the latest release on the default branch (`main`). Older versions may not receive patches.
 
-| Version | Supported |
-| ------- | --------- |
-| latest on `main` | yes |
-| older tags | best effort |
+| Version          | Supported   |
+| ---------------- | ----------- |
+| latest on `main` | yes         |
+| older tags       | best effort |
 
 ## Reporting a vulnerability
 
