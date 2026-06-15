@@ -17,7 +17,7 @@ describe("runtime parser — bitwise operators", () => {
   ] as const) {
     it(`parses u.a ${jsOp} u.b > 0 into IrBinary with op "${op}"`, () => {
       const src = `(u) => (u.a ${jsOp} u.b) > 0`;
-       
+
       const fn = new Function("return " + src)() as (u: { a: number; b: number }) => boolean;
       const ir = parseArrowToIr(fn) as { op: string; left: { op: string } };
       expect(ir.op).toBe(">");

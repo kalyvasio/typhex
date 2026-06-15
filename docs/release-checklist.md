@@ -28,6 +28,17 @@ Use this checklist before tagging a production release.
 - Verify source maps are generated or intentionally omitted.
 - Publish with npm provenance enabled.
 
+## Publish
+
+- Confirm the Git tag matches the package version exactly: `v${package.json.version}`.
+- Push the tag to trigger `.github/workflows/release.yml`.
+- Configure npm authentication before the first tag-triggered release:
+  - preferred: npm trusted publishing for this repository/workflow; or
+  - fallback: an `NPM_TOKEN` GitHub Actions secret with publish permissions.
+- Prerelease versions such as `0.1.0-alpha.0` publish with the npm `alpha` dist-tag.
+- Stable versions publish with the npm `latest` dist-tag.
+- The release workflow skips npm publish and GitHub release creation when the version/tag already exists, so reruns are safe after partial failures.
+
 ## Migrations
 
 - Generate a migration from a clean database.

@@ -7,11 +7,14 @@ Typhex follows semantic versioning for the documented public API. During the
 
 ## Unreleased
 
+## 0.1.0-alpha.0 - 2026-06-15
+
+- Initial public alpha preview.
 - Added release hardening metadata and package verification scripts.
 - Added CI quality gates for linting, formatting, API compatibility, coverage,
   and package dry-runs.
 - Added an explicit MIT license file.
-
-## 0.1.0 - Pending
-
-- Initial public preview.
+- Added a production dependency audit gate for release checks.
+- Added deterministic parser/compiler fuzz coverage across SQLite and PostgreSQL
+  SQL compilation.
+- Upgraded Vitest and coverage tooling to remove critical dev audit findings.
