@@ -28,6 +28,7 @@ import {
 } from "../parser/resolve.js";
 import { type OnConflictClause, type QueryOperation } from "../dbs/types.js";
 import { RelationResolver } from "./helpers/relations/relation-resolver.js";
+import { RelationFetchCompiler } from "./helpers/relations/relation-fetcher.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
 import {
   DEFAULT_ROW_PARAM,
@@ -45,6 +46,25 @@ export type NoCtes = Record<never, never>;
 
 /** Registered CTE names → row types (second arg to `where` / `withCte` callback). */
 export type RegisteredCtes<Ctes extends Record<string, unknown>> = Ctes;
+
+/** One secondary eager-load query compiled by `toSql()` (WHERE IN follow-up). */
+export interface RelationFetchSql {
+  /** Relation path, e.g. `"posts"` or `"posts (junction post_tags)"`. */
+  relation: string;
+  sql: string;
+  params: unknown[];
+}
+
+/** Compiled SQL and bound parameters, as returned by `toSql()`. */
+export interface SqlAndParams {
+  sql: string;
+  params: unknown[];
+  /**
+   * Secondary WHERE IN queries used to eager-load relations after the main SELECT.
+   * Parent key values are shown as `«column»` sentinels (unknown until execution).
+   */
+  relationFetches?: RelationFetchSql[];
+}
 
 /** Base table row for `where` / `update` (not merged with CTE namespaces). */
 export type TableRow<
@@ -500,6 +520,33 @@ export class QueryBuilder<
     return Number(rows[0]?.c ?? 0);
   }
 
+  /**
+   * Compile the current query to SQL and bound parameters without executing it.
+   * `kind` selects the statement shape: the SELECT behind `toArray()` (default),
+   * the COUNT behind `count()`, or the DELETE behind `delete()`.
+   * For selects with eager-loaded relations, also returns the secondary WHERE IN
+   * fetch queries (parent keys shown as `«column»` sentinels).
+   * Works without a live database connection (see `TYPHEX_COMPILE_ONLY`).
+   */
+  toSql(kind: "select" | "count" | "delete" = "select"): SqlAndParams {
+    const compiler = getQueryCompilerOrThrow(this.state);
+    if (kind === "count") {
+      const { sql, params } = compiler.compileResultSize(this.buildPlan({ kind: "select" }));
+      return { sql, params };
+    }
+    const plan = this.buildPlan({ kind });
+    const { sql, params } = compiler.compilePlan(plan);
+    if (kind !== "select" || plan.relationFetches.length === 0) {
+      return { sql, params };
+    }
+    const relationFetches = new RelationFetchCompiler(
+      this.state.qe,
+      plan.relationFetches,
+      plan.skipLoadFor,
+    ).compile();
+    return relationFetches.length > 0 ? { sql, params, relationFetches } : { sql, params };
+  }
+
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
   async update(set: Record<string, unknown>): Promise<number>;
   async update(
@@ -631,26 +678,51 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     ) as Promise<R>;
   }
 
+  /** Compile the INSERT to SQL and bound parameters without executing it. */
+  toSql(): SqlAndParams {
+    const { sql, params } = Array.isArray(this._payload)
+      ? this.compileInsertMany(this._payload)
+      : this.compileInsert(this._payload);
+    return { sql, params };
+  }
+
+  private compileInsert(row: Record<string, unknown>, onConflict?: OnConflictClause) {
+    const cols = this.state.columnNames.filter((c) => row[c] !== undefined);
+    this.state.insertIr = undefined;
+    return getQueryCompilerOrThrow(this.state).compilePlan(
+      this.buildPlan({
+        kind: "insert",
+        columns: cols,
+        values: cols.map((c) => row[c]),
+        pk: this.state.pkColumns,
+        onConflict,
+      }),
+    );
+  }
+
+  private compileInsertMany(rows: Record<string, unknown>[], onConflict?: OnConflictClause) {
+    // Collect columns in entity-defined order, keeping any column present in at least one row.
+    const cols = this.state.columnNames.filter((c) => rows.some((r) => r[c] !== undefined));
+    const paramRows = rows.map((r) => cols.map((c) => r[c] ?? null));
+    this.state.insertIr = undefined;
+    return getQueryCompilerOrThrow(this.state).compilePlan(
+      this.buildPlan({
+        kind: "insertMany",
+        columns: cols,
+        rows: paramRows,
+        pk: this.state.pkColumns,
+        onConflict,
+      }),
+    );
+  }
+
   private async _doInsert(
     row: Record<string, unknown>,
     onConflict?: OnConflictClause,
   ): Promise<EntityInstance<C> | undefined> {
-    const { columnNames, qe, hydrate } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const cols = columnNames.filter((c) => row[c] !== undefined);
-    const params = cols.map((c) => row[c]);
+    const { qe, hydrate } = this.state;
     const pkCols = this.state.pkColumns;
-    this.state.insertIr = undefined;
-
-    const compiled = compiler.compilePlan(
-      this.buildPlan({
-        kind: "insert",
-        columns: cols,
-        values: params,
-        pk: pkCols,
-        onConflict,
-      }),
-    );
+    const compiled = this.compileInsert(row, onConflict);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
 
     if (compiled.returningRow) {
@@ -677,24 +749,8 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     onConflict?: OnConflictClause,
   ): Promise<EntityInstance<C>[]> {
     if (rows.length === 0) return [];
-    const { columnNames, qe, hydrate } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const pkCols = this.state.pkColumns;
-
-    // Collect columns in entity-defined order, keeping any column present in at least one row.
-    const cols = columnNames.filter((c) => rows.some((r) => r[c] !== undefined));
-    const paramRows = rows.map((r) => cols.map((c) => r[c] ?? null));
-    this.state.insertIr = undefined;
-
-    const compiled = compiler.compilePlan(
-      this.buildPlan({
-        kind: "insertMany",
-        columns: cols,
-        rows: paramRows,
-        pk: pkCols,
-        onConflict,
-      }),
-    );
+    const { qe, hydrate } = this.state;
+    const compiled = this.compileInsertMany(rows, onConflict);
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(compiled.sql, compiled.params);
 
     if (compiled.returningRow) {

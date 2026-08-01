@@ -296,6 +296,7 @@ export class InsertBuilder<C extends AnyEntityClass, R> extends QueryBuilder<C> 
     doUpdate(updateColumns?: string[]): Promise<R>;
     onConflict(columns: string[]): this;
     then<T1 = R, T2 = never>(res?: ((v: R) => T1 | PromiseLike<T1>) | null, rej?: ((e: unknown) => T2 | PromiseLike<T2>) | null): PromiseLike<T1 | T2>;
+    toSql(): SqlAndParams;
 }
 
 // @public
@@ -551,6 +552,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U, Ctes>;
     select(columns: string[]): QueryBuilder<C, T, Ctes>;
     toArray(): Promise<EntityInstance<C>[]>;
+    toSql(kind?: "select" | "count" | "delete"): SqlAndParams;
     unionAll<OC extends AnyEntityClass, OT>(other: QueryBuilder<OC, OT, any, any>): QueryBuilder<C, T, Ctes, FromKind>;
     update(set: Record<string, unknown>): Promise<number>;
     // (undocumented)
@@ -604,6 +606,15 @@ export interface RelationDef<_E = unknown, TType extends RelationType = Relation
     readonly _options: RelationOptions | JunctionOptions;
     readonly _relType: TType;
     readonly _target: () => unknown;
+}
+
+// @public
+export interface RelationFetchSql {
+    // (undocumented)
+    params: unknown[];
+    relation: string;
+    // (undocumented)
+    sql: string;
 }
 
 // @public
@@ -664,6 +675,15 @@ export class SingleRowQueryBuilder<T = unknown> {
     delete(): Promise<void>;
     patch(set: Record<string, unknown>): Promise<void>;
     save(): Promise<void>;
+}
+
+// @public
+export interface SqlAndParams {
+    // (undocumented)
+    params: unknown[];
+    relationFetches?: RelationFetchSql[];
+    // (undocumented)
+    sql: string;
 }
 
 // @public

@@ -14,6 +14,7 @@ import type {
 import { PostgresTrx } from "./trx.js";
 import { postgresDialect } from "./dialect.js";
 import { isRecord } from "../../utils.js";
+import { createCompileOnlyDriver, isCompileOnlyEnabled } from "../../driver/compile-only.js";
 
 const { Pool } = pg;
 type PoolClient = pg.PoolClient;
@@ -67,6 +68,7 @@ export interface PostgresDriverOptions {
 
 /** Creates a PostgreSQL driver backed by `pg`. */
 export function createPostgresDriver(options: PostgresDriverOptions): Driver {
+  if (isCompileOnlyEnabled()) return createCompileOnlyDriver(postgresDialect);
   const connectionString = options.connectionString ?? options.url;
   const baseConfig = connectionString
     ? { connectionString }

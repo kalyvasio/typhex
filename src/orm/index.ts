@@ -8,5 +8,7 @@ export {
   type RegisteredCtes,
   type NoCtes,
   type QueryFromKind,
+  type SqlAndParams,
+  type RelationFetchSql,
 } from "./query-builder.js";
 export { SingleRowQueryBuilder } from "./single-row-query-builder.js";

@@ -1,6 +1,7 @@
 /**
  * Relation fetcher: fetches related entities via WHERE IN queries.
  * Does NOT mutate rows — returns fetched data as maps.
+ * Also compiles those queries for `toSql()` (parent keys as «col» sentinels).
  */
 
 import type { QueryExecutor } from "../../db.js";
@@ -9,7 +10,38 @@ import type { IrSelectRelation } from "../../../ir/types.js";
 import { whereAnd, makeCompositeKey, buildRelationFetchWhereIr } from "../../query-helpers.js";
 import { getEntityByTableName } from "../../../entity/global-driver.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
+import type { RelationFetchSql } from "../../query-builder.js";
 import { groupBy } from "../../../utils.js";
+
+/** Build the WHERE IN query for one relation fetch; shared by the runtime and `toSql()` paths. */
+function buildRelationFetchQuery(
+  qe: QueryExecutor,
+  srcRows: Record<string, unknown>[],
+  srcCols: string[],
+  tgtCols: string[],
+  entity: AnyEntityClass,
+  rel?: IrSelectRelation,
+) {
+  const baseWhere = buildRelationFetchWhereIr(srcRows, srcCols, tgtCols);
+  if (!baseWhere) return undefined;
+
+  const whereIr = rel?.whereIr ? whereAnd(baseWhere, rel.whereIr) : baseWhere;
+  let chain = entity.query(qe).where(whereIr, rel?.whereParams ?? {});
+  for (const o of rel?.orderBy ?? []) {
+    const col = o.expr.kind === "member" ? (o.expr.path[0] ?? "") : "";
+    chain = chain.orderBy(col, o.direction);
+  }
+  if (rel?.limitNum != null) chain = chain.limit(rel.limitNum);
+  if (rel?.offsetNum != null) chain = chain.offset(rel.offsetNum);
+  if (rel?.subPaths && rel.subPaths.length > 0) {
+    const cols = rel.subPaths.flatMap((p) => p[0] ?? p);
+    for (const col of tgtCols) {
+      if (!cols.includes(col)) cols.push(col);
+    }
+    chain = chain.select(cols);
+  }
+  return chain;
+}
 
 export type RelationFetchResult = Map<string, Map<string, unknown> | Map<string, unknown[]>>;
 
@@ -139,26 +171,8 @@ export class RelationFetcher {
     entity: AnyEntityClass,
     rel?: IrSelectRelation,
   ): Promise<unknown[]> {
-    const baseWhere = buildRelationFetchWhereIr(srcRows, srcCols, tgtCols);
-    if (!baseWhere) return [];
-
-    const whereIr = rel?.whereIr ? whereAnd(baseWhere, rel.whereIr) : baseWhere;
-    let chain = entity.query(this.qe).where(whereIr, rel?.whereParams ?? {});
-    for (const o of rel?.orderBy ?? []) {
-      const col = o.expr.kind === "member" ? (o.expr.path[0] ?? "") : "";
-      chain = chain.orderBy(col, o.direction);
-    }
-    if (rel?.limitNum != null) chain = chain.limit(rel.limitNum);
-    if (rel?.offsetNum != null) chain = chain.offset(rel.offsetNum);
-    if (rel?.subPaths && rel.subPaths.length > 0) {
-      const cols = rel.subPaths.flatMap((p) => p[0] ?? p);
-      for (const col of tgtCols) {
-        if (!cols.includes(col)) cols.push(col);
-      }
-      chain = chain.select(cols);
-    }
-
-    return chain.toArray();
+    const chain = buildRelationFetchQuery(this.qe, srcRows, srcCols, tgtCols, entity, rel);
+    return chain ? chain.toArray() : [];
   }
 
   private remapCols(
@@ -181,5 +195,106 @@ export class RelationFetcher {
 
   private groupByCompositeKey(rows: unknown[], keys: string[]): Map<string, unknown[]> {
     return groupBy(rows, (row) => makeCompositeKey(row as Record<string, unknown>, keys));
+  }
+}
+
+/**
+ * Compiles the pending relation fetches of a select plan into SQL for `toSql()`,
+ * mirroring the queries RelationFetcher would run. Parent key values are bound
+ * as «col» sentinels since they are unknown until execution.
+ */
+export class RelationFetchCompiler {
+  constructor(
+    private readonly qe: QueryExecutor,
+    private readonly fetches: RelationFetchMetadata[],
+    private readonly skip: Set<string>,
+  ) {}
+
+  compile(): RelationFetchSql[] {
+    const out: RelationFetchSql[] = [];
+    for (const meta of this.fetches) {
+      if (this.skip.has(meta.relation.name)) continue;
+      out.push(...this.compileRelation(meta, meta.relation.name));
+    }
+    return out;
+  }
+
+  private compileRelation(meta: RelationFetchMetadata, label: string): RelationFetchSql[] {
+    switch (meta.relationType) {
+      case "many-to-many":
+        return this.compileManyToMany(meta, label);
+      case "one-to-many":
+        return this.compileFetchRows(
+          meta.parentPkColumns!,
+          meta.fkColumns,
+          meta.targetEntity,
+          meta.relation,
+          label,
+        );
+      default:
+        return this.compileFetchRows(
+          meta.fkColumns,
+          meta.targetPkColumns,
+          meta.targetEntity,
+          meta.relation,
+          label,
+        );
+    }
+  }
+
+  /** Many-to-many: the same two queries fetchManyToMany runs through the junction. */
+  private compileManyToMany(meta: RelationFetchMetadata, label: string): RelationFetchSql[] {
+    const j = meta.junction!;
+    const junctionEntity = getEntityByTableName(j.table) as AnyEntityClass | undefined;
+    if (!junctionEntity) {
+      throw new Error(
+        `[typhex] toSql: many-to-many relation "${meta.relation.name}" junction "${j.table}" is not registered`,
+      );
+    }
+
+    return [
+      ...this.compileFetchRows(
+        meta.parentPkColumns!,
+        j.foreignKey,
+        junctionEntity,
+        undefined,
+        `${label} (junction ${j.table})`,
+      ),
+      ...this.compileFetchRows(
+        j.referenceKey,
+        meta.targetPkColumns,
+        meta.targetEntity,
+        meta.relation,
+        label,
+      ),
+    ];
+  }
+
+  /** Compile one WHERE IN fetch, binding parent key values as «col» sentinels. */
+  private compileFetchRows(
+    srcCols: string[],
+    tgtCols: string[],
+    entity: AnyEntityClass,
+    rel: IrSelectRelation | undefined,
+    label: string,
+  ): RelationFetchSql[] {
+    const sentinelRow: Record<string, unknown> = {};
+    for (const col of srcCols) sentinelRow[col] = `\u00ab${col}\u00bb`;
+
+    const chain = buildRelationFetchQuery(this.qe, [sentinelRow], srcCols, tgtCols, entity, rel);
+    if (!chain) return [];
+
+    const compiled = chain.toSql();
+    return [
+      { relation: label, sql: compiled.sql, params: compiled.params },
+      ...this.prefixNested(compiled.relationFetches ?? [], label),
+    ];
+  }
+
+  private prefixNested(fetches: RelationFetchSql[], parentLabel: string): RelationFetchSql[] {
+    return fetches.map((f) => ({
+      ...f,
+      relation: f.relation ? `${parentLabel}.${f.relation}` : parentLabel,
+    }));
   }
 }

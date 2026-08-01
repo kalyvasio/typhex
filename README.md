@@ -366,6 +366,43 @@ Nested transactions use savepoints. Transaction options include isolation level,
 
 See the [Transactions guide](docs/guide/transactions.md).
 
+## Compiling to SQL
+
+`toSql()` compiles a query to SQL and bound parameters without executing it:
+
+```ts
+const { sql, params } = User.query()
+  .where((u) => u.age > 18)
+  .toSql();
+// sql:    SELECT * FROM users WHERE age > ?
+// params: [18]
+
+User.query()
+  .where((u) => u.age > 18)
+  .toSql("count"); // the COUNT behind count()
+User.query()
+  .where((u) => u.age > 18)
+  .toSql("delete"); // the DELETE behind delete()
+User.query().insert({ name: "Alice" }).toSql(); // the INSERT
+```
+
+When a SELECT eager-loads relations, `toSql()` also returns the secondary WHERE IN
+fetch queries under `relationFetches`. Parent key values are unknown until execution,
+so they appear as `«column»` sentinels in `params`:
+
+```ts
+const { sql, params, relationFetches } = User.query()
+  .select((u) => ({ id: u.id, posts: u.posts }))
+  .toSql();
+// sql: main SELECT on users
+// relationFetches[0].sql: SELECT ... FROM posts WHERE authorId IN (?)
+// relationFetches[0].params: ["«id»"]
+```
+
+Compilation is synchronous and never touches the database. For tooling that only
+extracts SQL (editors, CI checks), set `TYPHEX_COMPILE_ONLY=1`: drivers then skip
+opening real connections entirely — `toSql()` works, while executing any query throws.
+
 ## Debugging
 
 Set `TYPHEX_DEBUG=1` to log SQL and parameters:
