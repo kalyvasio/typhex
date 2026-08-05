@@ -10,5 +10,6 @@ export {
   type QueryFromKind,
   type SqlAndParams,
   type RelationFetchSql,
+  Statement,
 } from "./query-builder.js";
 export { SingleRowQueryBuilder } from "./single-row-query-builder.js";

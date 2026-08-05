@@ -284,7 +284,7 @@ export class RelationFetchCompiler {
     const chain = buildRelationFetchQuery(this.qe, [sentinelRow], srcCols, tgtCols, entity, rel);
     if (!chain) return [];
 
-    const compiled = chain.toSql();
+    const compiled = chain.toArray().toSql();
     return [
       { relation: label, sql: compiled.sql, params: compiled.params },
       ...this.prefixNested(compiled.relationFetches ?? [], label),

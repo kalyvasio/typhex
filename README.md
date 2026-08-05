@@ -368,21 +368,34 @@ See the [Transactions guide](docs/guide/transactions.md).
 
 ## Compiling to SQL
 
-`toSql()` compiles a query to SQL and bound parameters without executing it:
+Terminal methods (`toArray`, `first`, `count`, `delete`, `insert`, `insertMany`)
+return lazy statements: `await` one to execute it, or call `.toSql()` on it to get
+the SQL and bound parameters without executing anything:
 
 ```ts
+const users = await User.query()
+  .where((u) => u.age > 18)
+  .toArray(); // executes
+
 const { sql, params } = User.query()
   .where((u) => u.age > 18)
-  .toSql();
+  .toArray()
+  .toSql(); // compiles only
 // sql:    SELECT * FROM users WHERE age > ?
 // params: [18]
 
 User.query()
   .where((u) => u.age > 18)
-  .toSql("count"); // the COUNT behind count()
+  .first()
+  .toSql(); // SELECT … LIMIT 1
 User.query()
   .where((u) => u.age > 18)
-  .toSql("delete"); // the DELETE behind delete()
+  .count()
+  .toSql(); // the COUNT
+User.query()
+  .where((u) => u.age > 18)
+  .delete()
+  .toSql(); // the DELETE
 User.query().insert({ name: "Alice" }).toSql(); // the INSERT
 ```
 
@@ -393,6 +406,7 @@ so they appear as `«column»` sentinels in `params`:
 ```ts
 const { sql, params, relationFetches } = User.query()
   .select((u) => ({ id: u.id, posts: u.posts }))
+  .toArray()
   .toSql();
 // sql: main SELECT on users
 // relationFetches[0].sql: SELECT ... FROM posts WHERE authorId IN (?)
