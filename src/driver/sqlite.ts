@@ -14,6 +14,7 @@ import type {
 import { SqliteTrx } from "../dbs/sqlite/trx.js";
 import { sqliteDialect } from "../dbs/sqlite/dialect.js";
 import { isRecord } from "../utils.js";
+import { createCompileOnlyDriver, isCompileOnlyEnabled } from "./compile-only.js";
 
 const require = createRequire(import.meta.url);
 
@@ -65,6 +66,7 @@ export function createSqliteDriver(options: SqliteDriverOptions): Driver {
   if (!path) {
     throw new Error("createSqliteDriver: `path` (or `database`) is required");
   }
+  if (isCompileOnlyEnabled()) return createCompileOnlyDriver(sqliteDialect);
   const Database = require("better-sqlite3") as typeof import("better-sqlite3");
   const db = new Database(path);
 

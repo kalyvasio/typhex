@@ -49,7 +49,7 @@ Public type exports:
 `StripParens`, `IsNotNull`, `IsGenerated`, `HasDefault`, `OptionalOnInsert`
 
 **Builder/executor types:**
-`DbOptions`, `QueryExecutor`, `OrderDirection`
+`DbOptions`, `QueryExecutor`, `OrderDirection`, `SqlAndParams`, `RelationFetchSql`
 
 **Driver/config types:**
 `Driver`, `Connection`, `ExecuteResult`, `TransactionOptions`,
