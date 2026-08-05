@@ -50,6 +50,7 @@ describe("toSql", () => {
       .where((u) => u.age > 18)
       .orderBy((u) => u.name, "asc")
       .limit(10)
+      .toArray()
       .toSql();
     expect(sql).toMatch(/^SELECT /i);
     expect(sql).toContain("tosql_users");
@@ -63,22 +64,34 @@ describe("toSql", () => {
     const country = "US";
     const { sql, params } = ToSqlUser.query(sqliteDb)
       .where((u) => u.country === country, { country })
+      .toArray()
       .toSql();
     expect(sql).toMatch(/WHERE .*country.* = \?/i);
     expect(params).toEqual(["US"]);
   });
 
-  it('compiles the COUNT statement with kind "count"', () => {
+  it("compiles the SELECT behind first() with LIMIT 1", () => {
+    const { sql, params } = ToSqlUser.query(sqliteDb)
+      .where((u) => u.age > 18)
+      .first()
+      .toSql();
+    expect(sql).toMatch(/LIMIT/i);
+    expect(params).toEqual([18, 1]);
+  });
+
+  it("compiles the COUNT behind count()", () => {
     const { sql } = ToSqlUser.query(sqliteDb)
       .where((u) => u.age > 18)
-      .toSql("count");
+      .count()
+      .toSql();
     expect(sql).toMatch(/COUNT/i);
   });
 
-  it('compiles the DELETE statement with kind "delete"', () => {
+  it("compiles the DELETE behind delete()", () => {
     const { sql, params } = ToSqlUser.query(sqliteDb)
       .where((u) => u.age > 18)
-      .toSql("delete");
+      .delete()
+      .toSql();
     expect(sql).toMatch(/^DELETE FROM/i);
     expect(params).toEqual([18]);
   });
@@ -104,9 +117,10 @@ describe("toSql", () => {
 
   it("uses dialect-specific placeholders", () => {
     const query = () => ToSqlUser.query(postgresDb).where((u) => u.age > 18);
-    expect(query().toSql().sql).toContain("$1");
+    expect(query().toArray().toSql().sql).toContain("$1");
     const sqlite = ToSqlUser.query(sqliteDb)
       .where((u) => u.age > 18)
+      .toArray()
       .toSql();
     expect(sqlite.sql).toContain("?");
   });
@@ -118,6 +132,7 @@ describe("toSql", () => {
         name: a.name,
         posts: a.posts,
       }))
+      .toArray()
       .toSql();
 
     expect(sql).toMatch(/FROM ["']?tosql_authors/i);
@@ -137,6 +152,7 @@ describe("toSql", () => {
         title: p.title,
         author: p.author,
       }))
+      .toArray()
       .toSql();
 
     expect(relationFetches).toBeDefined();

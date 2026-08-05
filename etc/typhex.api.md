@@ -512,12 +512,12 @@ export interface PostgresDriverOptions {
 // @public
 export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityInstance<C>, Ctes extends Record<string, unknown> = NoCtes, FromKind extends QueryFromKind = "table"> {
     clone(): QueryBuilder<C, T, Ctes, FromKind>;
-    count(): Promise<number>;
+    count(): Statement<number>;
     crossJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
-    delete(): Promise<number>;
+    delete(): Statement<number>;
     deleteReturning(): Promise<EntityInstance<C>[]>;
     findById(id: unknown): Promise<EntityInstance<C> | null>;
-    first(): Promise<EntityInstance<C> | undefined>;
+    first(): Statement<EntityInstance<C> | undefined>;
     from<N extends keyof Ctes & string>(name: N): QueryBuilder<C, Ctes[N], Ctes, "cte">;
     // (undocumented)
     from<Row = EntityInstance<C>>(name: string): QueryBuilder<C, Row, Ctes, "cte">;
@@ -551,8 +551,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     rightJoin<E extends AnyEntityClass>(entity: E, on: (joined: EntityInstance<E>, row: T) => boolean): this;
     select<U>(fn: (row: SelectRow<C>) => U): QueryBuilder<C, U, Ctes>;
     select(columns: string[]): QueryBuilder<C, T, Ctes>;
-    toArray(): Promise<EntityInstance<C>[]>;
-    toSql(kind?: "select" | "count" | "delete"): SqlAndParams;
+    toArray(): Statement<EntityInstance<C>[]>;
     unionAll<OC extends AnyEntityClass, OT>(other: QueryBuilder<OC, OT, any, any>): QueryBuilder<C, T, Ctes, FromKind>;
     update(set: Record<string, unknown>): Promise<number>;
     // (undocumented)
@@ -723,6 +722,17 @@ export type SQLTypeMap = {
     bigint: bigint;
     bigserial: bigint;
 };
+
+// @public
+export class Statement<T> implements PromiseLike<T> {
+    // (undocumented)
+    catch<T2 = never>(rej?: ((reason: unknown) => T2 | PromiseLike<T2>) | null): Promise<T | T2>;
+    // (undocumented)
+    finally(onFinally?: (() => void) | null): Promise<T>;
+    // (undocumented)
+    then<T1 = T, T2 = never>(res?: ((value: T) => T1 | PromiseLike<T1>) | null, rej?: ((reason: unknown) => T2 | PromiseLike<T2>) | null): Promise<T1 | T2>;
+    toSql(): SqlAndParams;
+}
 
 // @public
 export type StripParens<S extends string> = S extends `${infer Base}(${string})${infer Rest}` ? `${Base}${Rest}` : S;

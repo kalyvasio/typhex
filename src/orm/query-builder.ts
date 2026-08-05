@@ -66,6 +66,46 @@ export interface SqlAndParams {
   relationFetches?: RelationFetchSql[];
 }
 
+/**
+ * Lazy terminal statement returned by `toArray()`, `first()`, `count()`, and
+ * `delete()`: `await` it to execute, or call `toSql()` to compile it to SQL and
+ * bound parameters without executing (works without a live database connection,
+ * see `TYPHEX_COMPILE_ONLY`).
+ */
+export class Statement<T> implements PromiseLike<T> {
+  private promise?: Promise<T>;
+
+  /** @internal */
+  constructor(
+    private readonly run: () => Promise<T>,
+    private readonly compile: () => SqlAndParams,
+  ) {}
+
+  /** Compile to SQL and bound parameters without executing. */
+  toSql(): SqlAndParams {
+    return this.compile();
+  }
+
+  then<T1 = T, T2 = never>(
+    res?: ((value: T) => T1 | PromiseLike<T1>) | null,
+    rej?: ((reason: unknown) => T2 | PromiseLike<T2>) | null,
+  ): Promise<T1 | T2> {
+    return this.execute().then(res, rej);
+  }
+
+  catch<T2 = never>(rej?: ((reason: unknown) => T2 | PromiseLike<T2>) | null): Promise<T | T2> {
+    return this.execute().catch(rej);
+  }
+
+  finally(onFinally?: (() => void) | null): Promise<T> {
+    return this.execute().finally(onFinally);
+  }
+
+  private execute(): Promise<T> {
+    return (this.promise ??= this.run());
+  }
+}
+
 /** Base table row for `where` / `update` (not merged with CTE namespaces). */
 export type TableRow<
   C extends AnyEntityClass,
@@ -489,9 +529,35 @@ export class QueryBuilder<
     return row ?? null;
   }
 
-  /** Execute the query and return all matching rows, with relations loaded
-   *  and the hydration function applied if one is set. */
-  async toArray(): Promise<EntityInstance<C>[]> {
+  /** All matching rows, with relations loaded and hydration applied.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  toArray(): Statement<EntityInstance<C>[]> {
+    return new Statement(
+      () => this.runSelect(),
+      () => this.compileSelect(),
+    );
+  }
+
+  /** The first matching row, or undefined if the result set is empty.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  first(): Statement<EntityInstance<C> | undefined> {
+    const query = this.limit(1);
+    return new Statement(
+      async () => (await query.runSelect())[0],
+      () => query.compileSelect(),
+    );
+  }
+
+  /** The COUNT of rows the query would produce without limit/offset/orderBy.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  count(): Statement<number> {
+    return new Statement(
+      () => this.runCount(),
+      () => this.compileCount(),
+    );
+  }
+
+  private async runSelect(): Promise<EntityInstance<C>[]> {
     const { hydrate, qe } = this.state;
     const plan = this.buildPlan({ kind: "select" });
     const compiler = getQueryCompilerOrThrow(this.state);
@@ -503,48 +569,35 @@ export class QueryBuilder<
     return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
   }
 
-  /** Return the first matching row, or undefined if the result set is empty. */
-  async first(): Promise<EntityInstance<C> | undefined> {
-    const arr = await this.limit(1).toArray();
-    return arr[0];
-  }
-
-  /** Execute a COUNT query and return rows the query would produce without limit/offset/orderBy. */
-  async count(): Promise<number> {
-    const { qe } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const plan = this.buildPlan({ kind: "select" });
-    const { sql, params } = compiler.compileResultSize(plan);
+  private async runCount(): Promise<number> {
+    const { sql, params } = this.compileCount();
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
-    const rows = (await qe.query(sql, params)) as [{ c: number }];
+    const rows = (await this.state.qe.query(sql, params)) as [{ c: number }];
     return Number(rows[0]?.c ?? 0);
   }
 
-  /**
-   * Compile the current query to SQL and bound parameters without executing it.
-   * `kind` selects the statement shape: the SELECT behind `toArray()` (default),
-   * the COUNT behind `count()`, or the DELETE behind `delete()`.
-   * For selects with eager-loaded relations, also returns the secondary WHERE IN
-   * fetch queries (parent keys shown as `«column»` sentinels).
-   * Works without a live database connection (see `TYPHEX_COMPILE_ONLY`).
-   */
-  toSql(kind: "select" | "count" | "delete" = "select"): SqlAndParams {
-    const compiler = getQueryCompilerOrThrow(this.state);
-    if (kind === "count") {
-      const { sql, params } = compiler.compileResultSize(this.buildPlan({ kind: "select" }));
-      return { sql, params };
-    }
-    const plan = this.buildPlan({ kind });
-    const { sql, params } = compiler.compilePlan(plan);
-    if (kind !== "select" || plan.relationFetches.length === 0) {
-      return { sql, params };
-    }
+  private compileSelect(): SqlAndParams {
+    const plan = this.buildPlan({ kind: "select" });
+    const { sql, params } = getQueryCompilerOrThrow(this.state).compilePlan(plan);
+    if (plan.relationFetches.length === 0) return { sql, params };
     const relationFetches = new RelationFetchCompiler(
       this.state.qe,
       plan.relationFetches,
       plan.skipLoadFor,
     ).compile();
     return relationFetches.length > 0 ? { sql, params, relationFetches } : { sql, params };
+  }
+
+  private compileCount(): SqlAndParams {
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compileResultSize(this.buildPlan({ kind: "select" }));
+    return { sql, params };
+  }
+
+  private compileDelete(): SqlAndParams {
+    const compiler = getQueryCompilerOrThrow(this.state);
+    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "delete" }));
+    return { sql, params };
   }
 
   /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
@@ -596,13 +649,19 @@ export class QueryBuilder<
     return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
   }
 
-  /** Execute a DELETE for the current WHERE clause and return the number of affected rows. */
-  async delete(): Promise<number> {
-    const { qe } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "delete" }));
+  /** DELETE for the current WHERE clause; resolves to the number of affected rows.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  delete(): Statement<number> {
+    return new Statement(
+      () => this.runDelete(),
+      () => this.compileDelete(),
+    );
+  }
+
+  private async runDelete(): Promise<number> {
+    const { sql, params } = this.compileDelete();
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
-    const result = await qe.run(sql, params);
+    const result = await this.state.qe.run(sql, params);
     return result.changes;
   }
 

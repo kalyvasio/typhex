@@ -36,6 +36,7 @@ export type {
   OrderDirection,
   SqlAndParams,
   RelationFetchSql,
+  Statement,
 } from "./orm/index.js";
 
 // Driver types
