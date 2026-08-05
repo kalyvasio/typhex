@@ -292,8 +292,8 @@ export type InferTable<T extends Record<string, string>> = Flatten<{
 
 // @public
 export class InsertBuilder<C extends AnyEntityClass, R> extends QueryBuilder<C> implements PromiseLike<R> {
-    doNothing(): Promise<R>;
-    doUpdate(updateColumns?: string[]): Promise<R>;
+    doNothing(): Statement<R>;
+    doUpdate(updateColumns?: string[]): Statement<R>;
     onConflict(columns: string[]): this;
     then<T1 = R, T2 = never>(res?: ((v: R) => T1 | PromiseLike<T1>) | null, rej?: ((e: unknown) => T2 | PromiseLike<T2>) | null): PromiseLike<T1 | T2>;
     toSql(): SqlAndParams;
@@ -515,8 +515,8 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     count(): Statement<number>;
     crossJoin(keysOrFn: string[] | ((row: T) => unknown)): this;
     delete(): Statement<number>;
-    deleteReturning(): Promise<EntityInstance<C>[]>;
-    findById(id: unknown): Promise<EntityInstance<C> | null>;
+    deleteReturning(): Statement<EntityInstance<C>[]>;
+    findById(id: unknown): Statement<EntityInstance<C> | null>;
     first(): Statement<EntityInstance<C> | undefined>;
     from<N extends keyof Ctes & string>(name: N): QueryBuilder<C, Ctes[N], Ctes, "cte">;
     // (undocumented)
@@ -553,12 +553,12 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     select(columns: string[]): QueryBuilder<C, T, Ctes>;
     toArray(): Statement<EntityInstance<C>[]>;
     unionAll<OC extends AnyEntityClass, OT>(other: QueryBuilder<OC, OT, any, any>): QueryBuilder<C, T, Ctes, FromKind>;
-    update(set: Record<string, unknown>): Promise<number>;
+    update(set: Record<string, unknown>): Statement<number>;
     // (undocumented)
-    update(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Promise<number>;
-    updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]>;
+    update(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Statement<number>;
+    updateReturning(set: Record<string, unknown>): Statement<EntityInstance<C>[]>;
     // (undocumented)
-    updateReturning(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Promise<EntityInstance<C>[]>;
+    updateReturning(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Statement<EntityInstance<C>[]>;
     // Warning: (ae-forgotten-export) The symbol "HasRegisteredCtes" needs to be exported by the entry point index.d.ts
     // Warning: (ae-forgotten-export) The symbol "TableRow" needs to be exported by the entry point index.d.ts
     // Warning: (ae-forgotten-export) The symbol "RegisteredCtes" needs to be exported by the entry point index.d.ts

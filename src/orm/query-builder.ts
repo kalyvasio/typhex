@@ -1,8 +1,8 @@
 /**
  * Query builder: the single place where all SQL is built and executed.
  * Provides both query (select, count) and mutation (insert, update, delete)
- * methods. All methods that hit the database return Promises
- * (except insert, which is synchronous to support save()).
+ * methods. Terminal methods return lazy, awaitable statements that execute only
+ * when awaited and can instead be compiled with `toSql()`.
  */
 
 import {
@@ -522,11 +522,15 @@ export class QueryBuilder<
     return new InsertGraphPlanner(this.state as QueryState<EntityInstance<C>>, input).execute();
   }
 
-  /** Select single row by primary key (scalar or composite object). */
-  async findById(id: unknown): Promise<EntityInstance<C> | null> {
+  /** Select one row by primary key.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  findById(id: unknown): Statement<EntityInstance<C> | null> {
     const pkCols = this.requirePkColumns("findById");
-    const row = await this.where(buildFindByIdIr(pkCols, pkToRecord(pkCols, id))).first();
-    return row ?? null;
+    const query = this.where(buildFindByIdIr(pkCols, pkToRecord(pkCols, id))).limit(1);
+    return new Statement(
+      async () => (await query.runSelect())[0] ?? null,
+      () => query.compileSelect(),
+    );
   }
 
   /** All matching rows, with relations loaded and hydration applied.
@@ -600,53 +604,83 @@ export class QueryBuilder<
     return { sql, params };
   }
 
-  /** Execute an UPDATE for the current WHERE clause and return the number of affected rows. */
-  async update(set: Record<string, unknown>): Promise<number>;
-  async update(
+  /** UPDATE the current WHERE clause; resolves to the number of affected rows.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  update(set: Record<string, unknown>): Statement<number>;
+  update(
     setFn: HasRegisteredCtes<Ctes> extends true
       ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown>
       : (row: EntityInstance<C>) => Record<string, unknown>,
-  ): Promise<number>;
-  async update(
+  ): Statement<number>;
+  update(
     setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
-  ): Promise<number> {
+  ): Statement<number> {
     const resolved = resolveUpdateSet(
       setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
     );
-    this.state.updateSetIr = resolved.setIr;
-    const { qe } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(this.buildPlan({ kind: "update", ...resolved }));
+    return new Statement(
+      () => this.runUpdate(resolved, false),
+      () => this.compileUpdate(resolved, false),
+    );
+  }
+
+  private async runUpdate(
+    resolved: ReturnType<typeof resolveUpdateSet>,
+    returning: false,
+  ): Promise<number>;
+  private async runUpdate(
+    resolved: ReturnType<typeof resolveUpdateSet>,
+    returning: true,
+  ): Promise<EntityInstance<C>[]>;
+  private async runUpdate(
+    resolved: ReturnType<typeof resolveUpdateSet>,
+    returning: boolean,
+  ): Promise<number | EntityInstance<C>[]> {
+    const { sql, params } = this.compileUpdate(resolved, returning);
+    if (returning) {
+      if (!sql) return [];
+      if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
+      const rows = (await this.state.qe.query(sql, params)) as Record<string, unknown>[];
+      if (!this.state.hydrate) return rows as EntityInstance<C>[];
+      return Promise.all(rows.map((row) => this.state.hydrate!(row))) as Promise<
+        EntityInstance<C>[]
+      >;
+    }
     if (!sql) return 0;
     if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
-    const result = await qe.run(sql, params);
+    const result = await this.state.qe.run(sql, params);
     return result.changes;
   }
 
-  /** UPDATE ... RETURNING * (when supported); returns hydrated rows. */
-  async updateReturning(set: Record<string, unknown>): Promise<EntityInstance<C>[]>;
-  async updateReturning(
+  private compileUpdate(
+    resolved: ReturnType<typeof resolveUpdateSet>,
+    returning: boolean,
+  ): SqlAndParams {
+    this.state.updateSetIr = resolved.setIr;
+    const { sql, params } = getQueryCompilerOrThrow(this.state).compilePlan(
+      this.buildPlan({ kind: "update", ...resolved, returning }),
+    );
+    return { sql, params };
+  }
+
+  /** UPDATE ... RETURNING * (when supported).
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  updateReturning(set: Record<string, unknown>): Statement<EntityInstance<C>[]>;
+  updateReturning(
     setFn: HasRegisteredCtes<Ctes> extends true
       ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown>
       : (row: EntityInstance<C>) => Record<string, unknown>,
-  ): Promise<EntityInstance<C>[]>;
-  async updateReturning(
+  ): Statement<EntityInstance<C>[]>;
+  updateReturning(
     setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
-  ): Promise<EntityInstance<C>[]> {
+  ): Statement<EntityInstance<C>[]> {
     const resolved = resolveUpdateSet(
       setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
     );
-    this.state.updateSetIr = resolved.setIr;
-    const { qe, hydrate } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(
-      this.buildPlan({ kind: "update", ...resolved, returning: true }),
+    return new Statement(
+      () => this.runUpdate(resolved, true),
+      () => this.compileUpdate(resolved, true),
     );
-    if (!sql) return [];
-    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
-    const rows = (await qe.query(sql, params)) as Record<string, unknown>[];
-    if (!hydrate) return rows as EntityInstance<C>[];
-    return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
   }
 
   /** DELETE for the current WHERE clause; resolves to the number of affected rows.
@@ -665,17 +699,28 @@ export class QueryBuilder<
     return result.changes;
   }
 
-  /** DELETE ... RETURNING * (when supported). */
-  async deleteReturning(): Promise<EntityInstance<C>[]> {
-    const { qe, hydrate } = this.state;
-    const compiler = getQueryCompilerOrThrow(this.state);
-    const { sql, params } = compiler.compilePlan(
+  /** DELETE ... RETURNING * (when supported).
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  deleteReturning(): Statement<EntityInstance<C>[]> {
+    return new Statement(
+      () => this.runDeleteReturning(),
+      () => this.compileDeleteReturning(),
+    );
+  }
+
+  private async runDeleteReturning(): Promise<EntityInstance<C>[]> {
+    const { sql, params } = this.compileDeleteReturning();
+    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
+    const rows = (await this.state.qe.query(sql, params)) as Record<string, unknown>[];
+    if (!this.state.hydrate) return rows as EntityInstance<C>[];
+    return Promise.all(rows.map((row) => this.state.hydrate!(row))) as Promise<EntityInstance<C>[]>;
+  }
+
+  private compileDeleteReturning(): SqlAndParams {
+    const { sql, params } = getQueryCompilerOrThrow(this.state).compilePlan(
       this.buildPlan({ kind: "delete", returning: true }),
     );
-    if (QueryBuilder.isDebugSqlEnabled) this.logSql(sql, params);
-    const rows = (await qe.query(sql, params)) as Record<string, unknown>[];
-    if (!hydrate) return rows as EntityInstance<C>[];
-    return Promise.all(rows.map((r) => hydrate(r))) as Promise<EntityInstance<C>[]>;
+    return { sql, params };
   }
 }
 
@@ -711,14 +756,27 @@ export class InsertBuilder<C extends AnyEntityClass, R>
     return this;
   }
 
-  /** `ON CONFLICT (...) DO UPDATE SET ...` — executes the insert. */
-  doUpdate(updateColumns?: string[]): Promise<R> {
-    return this._execute({ conflictColumns: this._conflictCols!, action: "update", updateColumns });
+  /** `ON CONFLICT (...) DO UPDATE SET ...`.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  doUpdate(updateColumns?: string[]): Statement<R> {
+    return this.conflictStatement({
+      conflictColumns: this._conflictCols!,
+      action: "update",
+      updateColumns,
+    });
   }
 
-  /** `ON CONFLICT (...) DO NOTHING` — executes the insert. */
-  doNothing(): Promise<R> {
-    return this._execute({ conflictColumns: this._conflictCols!, action: "nothing" });
+  /** `ON CONFLICT (...) DO NOTHING`.
+   *  Await to execute, or call `toSql()` to compile without executing. */
+  doNothing(): Statement<R> {
+    return this.conflictStatement({ conflictColumns: this._conflictCols!, action: "nothing" });
+  }
+
+  private conflictStatement(clause: OnConflictClause): Statement<R> {
+    return new Statement(
+      () => this._execute(clause),
+      () => this.compilePayload(clause),
+    );
   }
 
   /** PromiseLike: allows `await insert(row)` without a conflict clause. */
@@ -739,9 +797,13 @@ export class InsertBuilder<C extends AnyEntityClass, R>
 
   /** Compile the INSERT to SQL and bound parameters without executing it. */
   toSql(): SqlAndParams {
+    return this.compilePayload();
+  }
+
+  private compilePayload(onConflict?: OnConflictClause): SqlAndParams {
     const { sql, params } = Array.isArray(this._payload)
-      ? this.compileInsertMany(this._payload)
-      : this.compileInsert(this._payload);
+      ? this.compileInsertMany(this._payload, onConflict)
+      : this.compileInsert(this._payload, onConflict);
     return { sql, params };
   }
 

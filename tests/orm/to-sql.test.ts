@@ -31,6 +31,26 @@ const ToSqlPost = Entity(
   },
 );
 
+const ToSqlTag = Entity("tosql_tags", {
+  id: "integer primary key autoincrement",
+  name: "text not null",
+});
+
+const ToSqlArticle = Entity(
+  "tosql_articles",
+  {
+    id: "integer primary key autoincrement",
+    title: "text not null",
+  },
+  {
+    tags: rel.manyToMany(() => ToSqlTag, {
+      junction: "tosql_article_tags",
+      foreignKey: "articleId",
+      referenceKey: "tagId",
+    }),
+  },
+);
+
 describe("toSql", () => {
   let sqliteDb: Db;
   let postgresDb: Db;
@@ -96,6 +116,44 @@ describe("toSql", () => {
     expect(params).toEqual([18]);
   });
 
+  it("compiles the UPDATE behind update()", () => {
+    const { sql, params } = ToSqlUser.query(sqliteDb)
+      .where((u) => u.name === "Alice")
+      .update({ age: 31 })
+      .toSql();
+    expect(sql).toMatch(/^UPDATE /i);
+    expect(sql).toMatch(/SET .*age.* = \?/i);
+    expect(params).toEqual([31, "Alice"]);
+  });
+
+  it("compiles UPDATE RETURNING behind updateReturning()", () => {
+    const { sql, params } = ToSqlUser.query(sqliteDb)
+      .where((u) => u.name === "Alice")
+      .updateReturning({ age: 31 })
+      .toSql();
+    expect(sql).toMatch(/^UPDATE /i);
+    expect(sql).toMatch(/RETURNING/i);
+    expect(params).toEqual([31, "Alice"]);
+  });
+
+  it("compiles DELETE RETURNING behind deleteReturning()", () => {
+    const { sql, params } = ToSqlUser.query(sqliteDb)
+      .where((u) => u.name === "Alice")
+      .deleteReturning()
+      .toSql();
+    expect(sql).toMatch(/^DELETE FROM/i);
+    expect(sql).toMatch(/RETURNING/i);
+    expect(params).toEqual(["Alice"]);
+  });
+
+  it("compiles findById() as a limited primary-key SELECT", () => {
+    const { sql, params } = ToSqlUser.query(sqliteDb).findById(7).toSql();
+    expect(sql).toMatch(/^SELECT /i);
+    expect(sql).toMatch(/WHERE .*id.* = \?/i);
+    expect(sql).toMatch(/LIMIT/i);
+    expect(params).toEqual([7, 1]);
+  });
+
   it("compiles an INSERT from insert()", () => {
     const { sql, params } = ToSqlUser.query(sqliteDb)
       .insert({ name: "Alice", age: 30, country: "US" })
@@ -113,6 +171,30 @@ describe("toSql", () => {
       .toSql();
     expect(sql).toMatch(/^INSERT INTO/i);
     expect(params).toEqual(["Alice", 30, "US", "Bob", 26, "UK"]);
+  });
+
+  it("compiles ON CONFLICT DO NOTHING behind doNothing()", () => {
+    const { sql, params } = ToSqlUser.query(sqliteDb)
+      .insert({ name: "Alice", age: 30, country: "US" })
+      .onConflict(["name"])
+      .doNothing()
+      .toSql();
+    expect(sql).toMatch(/^INSERT INTO/i);
+    expect(sql).toMatch(/ON CONFLICT.*DO NOTHING/i);
+    expect(params).toEqual(["Alice", 30, "US"]);
+  });
+
+  it("compiles ON CONFLICT DO UPDATE behind doUpdate() on insertMany()", () => {
+    const { sql } = ToSqlUser.query(sqliteDb)
+      .insertMany([
+        { name: "Alice", age: 30, country: "US" },
+        { name: "Bob", age: 26, country: "UK" },
+      ])
+      .onConflict(["name"])
+      .doUpdate(["age"])
+      .toSql();
+    expect(sql).toMatch(/^INSERT INTO/i);
+    expect(sql).toMatch(/ON CONFLICT.*DO UPDATE/i);
   });
 
   it("uses dialect-specific placeholders", () => {
@@ -143,6 +225,21 @@ describe("toSql", () => {
     expect(postsFetch!.sql).toMatch(/FROM ["']?tosql_posts/i);
     expect(postsFetch!.sql).toMatch(/IN\s*\(/i);
     expect(postsFetch!.params).toContain("«id»");
+  });
+
+  it("compiles many-to-many relation fetches without running migrate()", () => {
+    const { relationFetches } = ToSqlArticle.query(sqliteDb)
+      .select((a) => ({ id: a.id, title: a.title, tags: a.tags }))
+      .toArray()
+      .toSql();
+
+    expect(relationFetches).toBeDefined();
+    const junctionFetch = relationFetches!.find((f) => f.relation.includes("junction"));
+    expect(junctionFetch).toBeDefined();
+    expect(junctionFetch!.sql).toMatch(/FROM ["']?tosql_article_tags/i);
+    const tagsFetch = relationFetches!.find((f) => f.relation === "tags");
+    expect(tagsFetch).toBeDefined();
+    expect(tagsFetch!.sql).toMatch(/FROM ["']?tosql_tags/i);
   });
 
   it("includes secondary WHERE IN SQL for many-to-one relation selects", () => {

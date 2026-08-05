@@ -148,6 +148,8 @@ export function getRegisteredEntities(): readonly RegisteredEntity[] {
 }
 
 export function getEntityByTableName(tableName: string): RegisteredEntity | undefined {
+  // Junction entities materialize lazily; without this, lookups fail before migrate()/validate().
+  junctionRegistry.drain();
   return entityRegistry.find((e) => e.table._table === tableName);
 }
 
