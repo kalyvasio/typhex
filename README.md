@@ -368,9 +368,11 @@ See the [Transactions guide](docs/guide/transactions.md).
 
 ## Compiling to SQL
 
-Terminal methods (`toArray`, `first`, `count`, `delete`, `insert`, `insertMany`)
-return lazy statements: `await` one to execute it, or call `.toSql()` on it to get
-the SQL and bound parameters without executing anything:
+Terminal methods (`toArray`, `first`, `findById`, `count`, `update`,
+`updateReturning`, `delete`, `deleteReturning`, `insert`, `insertMany`, and
+`onConflict(...).doNothing()` / `.doUpdate()`) return lazy statements: `await` one
+to execute it, or call `.toSql()` on it to get the SQL and bound parameters without
+executing anything:
 
 ```ts
 const users = await User.query()
