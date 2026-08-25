@@ -137,8 +137,7 @@ export class QueryBuilder<
     this.state = state instanceof QueryState ? state : new QueryState(state);
   }
 
-  /** Return a shallow copy of this builder with mutable state (params, orderBy) deep-copied,
-   *  so chained calls do not mutate the original. */
+  /** Return a copy of this builder whose mutable query state is independent. */
   clone(): QueryBuilder<C, T, Ctes, FromKind> {
     return new QueryBuilder(this.state.clone());
   }
@@ -167,7 +166,7 @@ export class QueryBuilder<
 
     for (const [key, value] of Object.entries(params ?? {})) {
       if (value instanceof QueryBuilder) {
-        subqueryParams[key] = { state: value.state };
+        subqueryParams[key] = { state: value.state.clone() };
       } else {
         sqlParams[key] = value;
       }
@@ -191,15 +190,21 @@ export class QueryBuilder<
     predicate: IrWhere | ((row: any, ctes?: any) => boolean),
     params?: Record<string, unknown>,
   ): this {
+    const next = this.clone();
     const { sqlParams, subqueryParams } = QueryBuilder.splitParams(params);
-    Object.assign(this.state.whereParams, sqlParams);
-    Object.assign(this.state.subqueryParams, subqueryParams);
-    this.state.whereIr = resolveWhereIr(
+    const previousWhere = next.state.whereIr;
+    next.state.whereIr = resolveWhereIr(
       predicate as IrWhere | ((entity: unknown) => boolean),
       params ? Object.keys(params) : [],
       Object.keys(subqueryParams),
     );
-    return this;
+    next.state.whereParams = sqlParams;
+    next.replacePredicateSubqueries(previousWhere, subqueryParams, [
+      next.state.havingIr,
+      next.state.orderBy,
+      next.state.selectIr,
+    ]);
+    return next as this;
   }
 
   /** @internal — used by the TypeScript transformer */
@@ -211,11 +216,12 @@ export class QueryBuilder<
     colOrIr: IrOrderBy | string | ((row: T) => unknown),
     second: OrderDirection | Record<string, unknown> | null = "asc",
   ): this {
+    const next = this.clone();
     if (isIrOrderBy(colOrIr)) {
-      return this.addOrderByIr(colOrIr, typeof second === "object" ? second : null);
+      return next.addOrderByIr(colOrIr, typeof second === "object" ? second : null) as this;
     }
     const direction = typeof second === "string" ? second : "asc";
-    return this.addOrderByInput(colOrIr, direction);
+    return next.addOrderByInput(colOrIr, direction) as this;
   }
 
   private addOrderByIr(ir: IrOrderBy, params: Record<string, unknown> | null): this {
@@ -303,16 +309,17 @@ export class QueryBuilder<
     onFn: ((joined: EntityInstance<any>, row: T) => boolean) | undefined,
     joinType: JoinType,
   ): this {
+    const next = this.clone();
     if (QueryBuilder.isEntityClass(keysOrFnOrEntity)) {
       if (!onFn) {
         throw new Error(`${joinType}Join(entity): ON callback is required`);
       }
       const onIr = resolveJoinOnIr(joinType, onFn as (joined: unknown, row: unknown) => boolean);
-      this.state.entityJoinHints = [
-        ...(this.state.entityJoinHints ?? []),
+      next.state.entityJoinHints = [
+        ...(next.state.entityJoinHints ?? []),
         { joinType, entity: keysOrFnOrEntity, onIr },
       ];
-      return this;
+      return next as this;
     }
     return this.addJoinHints(keysOrFnOrEntity as string[] | ((row: T) => unknown), joinType);
   }
@@ -324,22 +331,25 @@ export class QueryBuilder<
   }
 
   private addJoinHints(keysOrFn: string[] | ((row: T) => unknown), joinType: JoinType): this {
+    const next = this.clone();
     const relationKeys = resolveJoinKeys(keysOrFn as string[] | ((row: unknown) => unknown));
     const newHints: JoinHint[] = relationKeys.map((k) => ({ relationKey: k, joinType }));
-    this.state.joinHints = [...(this.state.joinHints ?? []), ...newHints];
-    return this;
+    next.state.joinHints = [...(next.state.joinHints ?? []), ...newHints];
+    return next as this;
   }
 
   /** Set the maximum number of rows to return. */
   limit(n: number): this {
-    this.state.limitNum = n;
-    return this;
+    const next = this.clone();
+    next.state.limitNum = n;
+    return next as this;
   }
 
   /** Set the number of rows to skip before returning results. */
   offset(n: number): this {
-    this.state.offsetNum = n;
-    return this;
+    const next = this.clone();
+    next.state.offsetNum = n;
+    return next as this;
   }
 
   withCte<const N extends string, IC extends AnyEntityClass, IT>(
@@ -429,12 +439,13 @@ export class QueryBuilder<
     columnsOrIr: string[] | IrSelect | ((row: SelectRow<C>) => Record<string, unknown>),
     params: Record<string, unknown> | null = null,
   ): QueryBuilder<C, unknown, Ctes> {
-    const paramKeys = this.addInlineParams(params);
-    this.state.selectIr = resolveSelectIr(
+    const next = this.clone();
+    const paramKeys = next.addInlineParams(params);
+    next.state.selectIr = resolveSelectIr(
       columnsOrIr as string[] | IrSelect | ((row: unknown) => Record<string, unknown>),
       paramKeys,
     );
-    return this as QueryBuilder<C, unknown, Ctes>;
+    return next as QueryBuilder<C, unknown, Ctes>;
   }
 
   /** Adds a GROUP BY clause. Accepts column names, index numbers, or an arrow function selecting group-by fields. */
@@ -442,18 +453,19 @@ export class QueryBuilder<
     columnOrFn: string | string[] | number | number[] | ((row: EntityInstance<C>) => unknown),
     ...rest: (string | number)[]
   ): this {
+    const next = this.clone();
     const entries = resolveGroupByPaths(
       columnOrFn as string | string[] | number | number[] | ((row: unknown) => unknown),
       ...rest,
     );
-    const nextSelectIr = this.state.selectIr ?? { param: DEFAULT_ROW_PARAM, paths: [] };
+    const nextSelectIr = next.state.selectIr ?? { param: DEFAULT_ROW_PARAM, paths: [] };
     const memberPaths = entries.filter((e): e is string[] => Array.isArray(e));
-    this.state.selectIr = {
+    next.state.selectIr = {
       ...nextSelectIr,
       paths: nextSelectIr.paths.length > 0 ? nextSelectIr.paths : memberPaths,
       groupBy: entries,
     };
-    return this;
+    return next as this;
   }
 
   /** @internal — used by the TypeScript transformer */
@@ -469,23 +481,62 @@ export class QueryBuilder<
     predicate: IrHaving | ((row: any, ctes?: any) => boolean),
     params?: Record<string, unknown>,
   ): this {
+    const next = this.clone();
     const { sqlParams, subqueryParams } = QueryBuilder.splitParams(params);
-    Object.assign(this.state.subqueryParams, subqueryParams);
-    this.state.havingIr = resolveHavingIr(
+    const previousHaving = next.state.havingIr;
+    next.state.havingIr = resolveHavingIr(
       predicate as IrHaving | ((entity: unknown) => boolean),
       params ? Object.keys(params) : [],
       Object.keys(subqueryParams),
     );
-    this.state.havingParams = sqlParams;
-    return this;
+    next.state.havingParams = sqlParams;
+    next.replacePredicateSubqueries(previousHaving, subqueryParams, [
+      next.state.whereIr,
+      next.state.orderBy,
+      next.state.selectIr,
+    ]);
+    return next as this;
+  }
+
+  private replacePredicateSubqueries(
+    previousPredicate: IrWhere | null,
+    subqueryParams: Record<string, CapturedSubquery>,
+    otherIr: unknown[],
+  ): void {
+    const previousKeys = QueryBuilder.collectSubqueryRefs(previousPredicate);
+    const retainedKeys = QueryBuilder.collectSubqueryRefs(otherIr);
+    for (const key of previousKeys) {
+      if (!retainedKeys.has(key)) delete this.state.subqueryParams[key];
+    }
+    Object.assign(this.state.subqueryParams, subqueryParams);
+  }
+
+  private static collectSubqueryRefs(value: unknown, refs = new Set<string>()): Set<string> {
+    if (Array.isArray(value)) {
+      for (const item of value) QueryBuilder.collectSubqueryRefs(item, refs);
+      return refs;
+    }
+    if (value == null || typeof value !== "object") return refs;
+
+    const node = value as Record<string, unknown>;
+    if (node.kind === "const") return refs;
+    if (node.kind === "subqueryRef") {
+      if (typeof node.key === "string") refs.add(node.key);
+      return refs;
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key !== "whereParams") QueryBuilder.collectSubqueryRefs(child, refs);
+    }
+    return refs;
   }
 
   /** Update matching rows with `set`, then re-fetch and return the updated row,
    *  or null if no matching row is found after the update. */
   async patch(set: Record<string, unknown>): Promise<EntityInstance<C> | null> {
-    await this.update(set);
+    const query = this.clone();
+    await query.update(set);
     const fresh = new QueryBuilder<C, T>({
-      ...this.state,
+      ...query.state,
       orderBy: [],
       limitNum: null,
       offsetNum: null,
@@ -499,7 +550,7 @@ export class QueryBuilder<
   /** Insert a single row. Awaitable directly, or chain `.onConflict(cols).doUpdate()` / `.doNothing()`. */
   insert(row: Record<string, unknown>): InsertBuilder<C, EntityInstance<C> | undefined> {
     return new InsertBuilder<C, EntityInstance<C> | undefined>(
-      this.state as QueryState<EntityInstance<C>>,
+      this.state.clone() as QueryState<EntityInstance<C>>,
       row,
     );
   }
@@ -507,7 +558,7 @@ export class QueryBuilder<
   /** Insert multiple rows in one statement. Awaitable directly, or chain `.onConflict(cols).doUpdate()` / `.doNothing()`. */
   insertMany(rows: Record<string, unknown>[]): InsertBuilder<C, EntityInstance<C>[]> {
     return new InsertBuilder<C, EntityInstance<C>[]>(
-      this.state as QueryState<EntityInstance<C>>,
+      this.state.clone() as QueryState<EntityInstance<C>>,
       rows,
     );
   }
@@ -519,7 +570,10 @@ export class QueryBuilder<
   async insertGraph(
     input: Record<string, unknown> | Record<string, unknown>[],
   ): Promise<EntityInstance<C> | EntityInstance<C>[]> {
-    return new InsertGraphPlanner(this.state as QueryState<EntityInstance<C>>, input).execute();
+    return new InsertGraphPlanner(
+      this.state.clone() as QueryState<EntityInstance<C>>,
+      input,
+    ).execute();
   }
 
   /** Select one row by primary key.
@@ -536,9 +590,10 @@ export class QueryBuilder<
   /** All matching rows, with relations loaded and hydration applied.
    *  Await to execute, or call `toSql()` to compile without executing. */
   toArray(): Statement<EntityInstance<C>[]> {
+    const query = this.clone();
     return new Statement(
-      () => this.runSelect(),
-      () => this.compileSelect(),
+      () => query.runSelect(),
+      () => query.compileSelect(),
     );
   }
 
@@ -555,9 +610,10 @@ export class QueryBuilder<
   /** The COUNT of rows the query would produce without limit/offset/orderBy.
    *  Await to execute, or call `toSql()` to compile without executing. */
   count(): Statement<number> {
+    const query = this.clone();
     return new Statement(
-      () => this.runCount(),
-      () => this.compileCount(),
+      () => query.runCount(),
+      () => query.compileCount(),
     );
   }
 
@@ -615,12 +671,13 @@ export class QueryBuilder<
   update(
     setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
   ): Statement<number> {
+    const query = this.clone();
     const resolved = resolveUpdateSet(
       setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
     );
     return new Statement(
-      () => this.runUpdate(resolved, false),
-      () => this.compileUpdate(resolved, false),
+      () => query.runUpdate(resolved, false),
+      () => query.compileUpdate(resolved, false),
     );
   }
 
@@ -674,21 +731,23 @@ export class QueryBuilder<
   updateReturning(
     setOrFn: Record<string, unknown> | ((row: any, ctes?: any) => Record<string, unknown>),
   ): Statement<EntityInstance<C>[]> {
+    const query = this.clone();
     const resolved = resolveUpdateSet(
       setOrFn as Record<string, unknown> | ((row: unknown) => Record<string, unknown>),
     );
     return new Statement(
-      () => this.runUpdate(resolved, true),
-      () => this.compileUpdate(resolved, true),
+      () => query.runUpdate(resolved, true),
+      () => query.compileUpdate(resolved, true),
     );
   }
 
   /** DELETE for the current WHERE clause; resolves to the number of affected rows.
    *  Await to execute, or call `toSql()` to compile without executing. */
   delete(): Statement<number> {
+    const query = this.clone();
     return new Statement(
-      () => this.runDelete(),
-      () => this.compileDelete(),
+      () => query.runDelete(),
+      () => query.compileDelete(),
     );
   }
 
@@ -702,9 +761,10 @@ export class QueryBuilder<
   /** DELETE ... RETURNING * (when supported).
    *  Await to execute, or call `toSql()` to compile without executing. */
   deleteReturning(): Statement<EntityInstance<C>[]> {
+    const query = this.clone();
     return new Statement(
-      () => this.runDeleteReturning(),
-      () => this.compileDeleteReturning(),
+      () => query.runDeleteReturning(),
+      () => query.compileDeleteReturning(),
     );
   }
 
