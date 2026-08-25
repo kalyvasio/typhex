@@ -151,6 +151,12 @@ export function irAggregateToTsLiteral(agg: IrAggregate): ts.ObjectLiteralExpres
 }
 
 export function irSelectToTsLiteral(sel: IrSelect): ts.ObjectLiteralExpression {
+  if (sel.relations && sel.relations.length > 0) {
+    throw new Error(
+      "[typhex] transformer cannot emit relation select IR; leave the select arrow for runtime parsing",
+    );
+  }
+
   const f = ts.factory;
   const props: ts.ObjectLiteralElementLike[] = [
     f.createPropertyAssignment("param", f.createStringLiteral(sel.param)),

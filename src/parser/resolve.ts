@@ -18,7 +18,7 @@ import {
   parseArrowToGroupByPaths,
   parseArrowToUpdateSet,
 } from "./parse-arrow.js";
-import { DEFAULT_ROW_PARAM } from "../orm/helpers/query-plan/query-plan.js";
+import { DEFAULT_ROW_PARAM } from "../arrow/constants.js";
 
 /** Resolve a where input (pre-built predicate IR or arrow fn) to an IrWhere. */
 export function resolveWhereIr(

@@ -12,13 +12,17 @@ import type {
   IrParam,
   IrIn,
   IrCall,
-  IrExists,
   IrAggregate,
   IrWhere,
   IrCase,
 } from "../ir/types.js";
 import { DEFAULT_ROW_PARAM, ALLOWED_METHODS, ACORN_BINARY_OPS } from "../arrow/constants.js";
-import { AGGREGATE_FUNCS, toIrFuncName } from "../arrow/aggregates.js";
+import {
+  buildIrAggregate,
+  getAggregateSeparatorArgIndex,
+  toIrAggregateFunc,
+} from "../arrow/aggregates.js";
+import { buildIrCase, buildIrExists } from "../arrow/index.js";
 import type { AcornExpr } from "./acorn-types.js";
 import { extractArrowBody, inferParamNames, parseExpressionSource } from "./arrow-source.js";
 import {
@@ -127,15 +131,7 @@ function walkConditional(
   const when = walk(node.test, params, paramKeys, subqueryKeys);
   const then = walk(node.consequent, params, paramKeys, subqueryKeys);
   const alternate = walk(node.alternate, params, paramKeys, subqueryKeys);
-
-  if (alternate.kind === "case") {
-    return {
-      kind: "case",
-      branches: [{ when, then }, ...alternate.branches],
-      ...(alternate.else !== undefined ? { else: alternate.else } : {}),
-    };
-  }
-  return { kind: "case", branches: [{ when, then }], else: alternate };
+  return buildIrCase(when, then, alternate);
 }
 
 function walkBinaryLike(
@@ -265,7 +261,7 @@ function tryParseSomeEvery(
   params: string[],
   paramKeys: string[],
   subqueryKeys: string[],
-): IrExists | null {
+): IrNode | null {
   if (method !== "some" && method !== "every") return null;
   if (node.arguments.length !== 1) return null;
   if (!isMemberExpression(node.callee)) return null;
@@ -283,14 +279,7 @@ function tryParseSomeEvery(
   const innerExpr = extractCallbackExpression(cb.body, method);
   const innerWhere = walk(innerExpr, [innerParam], paramKeys, subqueryKeys);
 
-  return {
-    kind: "exists",
-    ...(method === "every" ? { negated: true } : {}),
-    rootParam: receiver.param,
-    relationKey: receiver.path[0],
-    innerParam,
-    innerWhere,
-  } as IrExists;
+  return buildIrExists(method, receiver.param, receiver.path[0], innerParam, innerWhere);
 }
 
 interface AggregateParseResult {
@@ -309,8 +298,8 @@ export function tryParseAggregate(
   if (!isIdentifier(callee)) return null;
 
   const rawName = callee.name;
-  const funcName = toIrFuncName(rawName);
-  if (!AGGREGATE_FUNCS.has(funcName)) return null;
+  const func = toIrAggregateFunc(rawName);
+  if (!func) return null;
 
   const { arg, distinct } = parseAggregateArg(
     callNode.arguments[0] ?? null,
@@ -320,15 +309,8 @@ export function tryParseAggregate(
     opts,
     subqueryKeys,
   );
-  const separator = parseAggregateSeparator(funcName, callNode.arguments);
-
-  const ir: IrAggregate = {
-    kind: "aggregate",
-    func: funcName as IrAggregate["func"],
-    arg,
-    ...(distinct ? { distinct: true } : {}),
-    ...(separator !== undefined ? { separator } : {}),
-  };
+  const separator = parseAggregateSeparator(func, callNode.arguments);
+  const ir = buildIrAggregate(func, arg, distinct, separator);
   return { ir, rawName };
 }
 
@@ -384,11 +366,11 @@ function parseDistinctWrapper(
 }
 
 function parseAggregateSeparator(
-  funcName: string,
+  func: IrAggregate["func"],
   args: Array<ESTree.Expression | ESTree.SpreadElement>,
 ): string | undefined {
-  if (funcName !== "GROUP_CONCAT" && funcName !== "STRING_AGG") return undefined;
-  if (args.length < 2) return undefined;
-  const sep = args[1];
+  const index = getAggregateSeparatorArgIndex(func);
+  if (index === null) return undefined;
+  const sep = args[index];
   return sep && sep.type !== "SpreadElement" && isStringLiteral(sep) ? sep.value : undefined;
 }

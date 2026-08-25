@@ -65,9 +65,7 @@ import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../e
 import { ExprBuilder, type SubqueryPlans } from "./expr-builder.js";
 import { SelectClassifier, EMPTY_CLASSIFIED, type ClassifiedSelect } from "./select-classifier.js";
 import { QueryIrAnalyzer, type ExprIrAnalysis, type QueryIrAnalysis } from "./query-ir-analyzer.js";
-
-/** Default name for the row-param when no explicit one is in scope. */
-export const DEFAULT_ROW_PARAM = "u";
+import { DEFAULT_ROW_PARAM } from "../../../arrow/constants.js";
 
 /** Alias of the main table for the top-level plan. Subquery plans pick
  *  fresh aliases (`t1`, `t2`, …) during the planner's subquery phase. */

@@ -8,6 +8,7 @@ import type { AcornExpr } from "./acorn-types.js";
 import { extractArrowBody, inferParamNames, parseExpressionSource } from "./arrow-source.js";
 import { isArrayExpression, isMemberExpression, isNumberLiteral } from "./acorn-helpers.js";
 import { resolvePathFromParam } from "./acorn-member.js";
+import { DEFAULT_ROW_PARAM } from "../arrow/constants.js";
 
 /**
  * Parse a `.groupBy(...)` arrow into an array of member paths and/or
@@ -26,7 +27,7 @@ export function parseArrowToGroupByPaths(
   const src = fn.toString();
   const body = extractArrowBody(src);
   if (!body) return [];
-  const paramName = inferParamNames(src)[0] ?? "u";
+  const paramName = inferParamNames(src)[0] ?? DEFAULT_ROW_PARAM;
 
   let expr: AcornExpr;
   try {

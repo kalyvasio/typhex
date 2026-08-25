@@ -30,13 +30,10 @@ import { type OnConflictClause, type QueryOperation } from "../dbs/types.js";
 import { RelationResolver } from "./helpers/relations/relation-resolver.js";
 import { RelationFetchCompiler } from "./helpers/relations/relation-fetcher.js";
 import { buildFindByIdIr, pkToRecord } from "./query-helpers.js";
-import {
-  DEFAULT_ROW_PARAM,
-  QueryPlanBuilder,
-  getQueryCompilerOrThrow,
-} from "./helpers/query-plan/query-plan.js";
+import { QueryPlanBuilder, getQueryCompilerOrThrow } from "./helpers/query-plan/query-plan.js";
 import { InsertGraphPlanner } from "./helpers/insert-graph/insert-graph-planner.js";
 import { QueryState, type CapturedSubquery, type QueryStateInit } from "./query-state.js";
+import { DEFAULT_ROW_PARAM } from "../arrow/constants.js";
 
 /** Whether the builder reads from the base table or a registered CTE. */
 export type QueryFromKind = "table" | "cte";
