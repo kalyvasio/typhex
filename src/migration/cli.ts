@@ -129,111 +129,123 @@ async function main() {
   const dir = resolveWithinCwd(config.migrationsFolder ?? "./migrations", "--dir");
   const dbPath = resolveDbPath(args.db, config.database);
 
-  if (command === "migrate:generate") {
-    const entitiesPath = args.entities ?? config.entities;
-    if (!entitiesPath) {
-      console.error("migrate:generate requires --entities or config.entities");
-      process.exit(1);
+  switch (command) {
+    case "migrate:generate": {
+      const entitiesPath = args.entities ?? config.entities;
+      if (!entitiesPath) {
+        console.error("migrate:generate requires --entities or config.entities");
+        process.exit(1);
+      }
+      const entitiesResolved = resolveWithinCwd(entitiesPath, "--entities");
+      await withDriver(config, dbPath, async (driver) => {
+        await import(entitiesResolved);
+        const entities = getRegisteredEntities();
+        if (entities.length === 0) {
+          console.log("No entities registered. Nothing to generate.");
+          return;
+        }
+        const files = await generateMigrationFiles(driver, entities);
+        if (files.length === 0) {
+          console.log("Schema is up to date. No migrations generated.");
+          return;
+        }
+        const paths = writeMigrationFiles(dir, files);
+        console.log(`Generated ${paths.length} migration(s):`);
+        for (const path of paths) console.log(`  ${path}`);
+      });
+      break;
     }
-    const entitiesResolved = resolveWithinCwd(entitiesPath, "--entities");
-    await withDriver(config, dbPath, async (driver) => {
-      await import(entitiesResolved);
-      const entities = getRegisteredEntities();
-      if (entities.length === 0) {
-        console.log("No entities registered. Nothing to generate.");
-        return;
+    case "migrate:run":
+      await withDriver(config, dbPath, async (driver) => {
+        const result = await runMigrations(driver, dir);
+        if (result.applied.length === 0) {
+          console.log("No pending migrations.");
+        } else {
+          console.log(`Applied ${result.applied.length} migration(s):`);
+          for (const name of result.applied) console.log(`  ✓ ${name}`);
+        }
+        if (result.skipped.length > 0) {
+          console.log(`Skipped ${result.skipped.length} (already applied).`);
+        }
+      });
+      break;
+    case "migrate:status":
+      await withDriver(config, dbPath, async (driver) => {
+        const status = await migrationStatus(driver, dir);
+        if (status.applied.length > 0) {
+          console.log("Applied migrations:");
+          for (const record of status.applied) {
+            console.log(`  ✓ ${record.name}  (${record.applied_at})`);
+          }
+        }
+        if (status.pending.length > 0) {
+          console.log("Pending migrations:");
+          for (const name of status.pending) console.log(`  ○ ${name}`);
+        }
+        if (status.applied.length === 0 && status.pending.length === 0) {
+          console.log("No migrations found.");
+        }
+      });
+      break;
+    case "migrate:dry-run":
+      await withDriver(config, dbPath, async (driver) => {
+        const plan = await dryRunMigrations(driver, dir);
+        if (plan.pending.length === 0) {
+          console.log("No executable pending migrations.");
+          return;
+        }
+        console.log(`Would apply ${plan.pending.length} migration(s):`);
+        for (const migration of plan.pending) {
+          console.log(`  ○ ${migration.name} (${migration.statements.length} statement(s))`);
+        }
+        if (plan.skipped.length > 0) {
+          console.log(`Skipped ${plan.skipped.length} migration(s).`);
+        }
+      });
+      break;
+    case "migrate:pending":
+      await withDriver(config, dbPath, async (driver) => {
+        const pending = await pendingMigrations(driver, dir);
+        if (pending.length === 0) {
+          console.log("No executable pending migrations.");
+          return;
+        }
+        for (const migration of pending) console.log(migration.name);
+      });
+      break;
+    case "migrate:applied":
+      await withDriver(config, dbPath, async (driver) => {
+        const applied = await appliedMigrations(driver);
+        if (applied.length === 0) {
+          console.log("No applied migrations.");
+          return;
+        }
+        for (const migration of applied) console.log(`${migration.name}\t${migration.applied_at}`);
+      });
+      break;
+    case "migrate:up":
+      if (!args.name) {
+        console.error("migrate:up requires --name <migration-name>");
+        process.exit(1);
       }
-      const files = await generateMigrationFiles(driver, entities);
-      if (files.length === 0) {
-        console.log("Schema is up to date. No migrations generated.");
-        return;
+      await withDriver(config, dbPath, async (driver) => {
+        await upMigration(driver, dir, args.name);
+        console.log(`Applied: ${args.name}`);
+      });
+      break;
+    case "migrate:down":
+      if (!args.name) {
+        console.error("migrate:down requires --name <migration-name>");
+        process.exit(1);
       }
-      const paths = writeMigrationFiles(dir, files);
-      console.log(`Generated ${paths.length} migration(s):`);
-      for (const p of paths) console.log(`  ${p}`);
-    });
-  } else if (command === "migrate:run") {
-    await withDriver(config, dbPath, async (driver) => {
-      const result = await runMigrations(driver, dir);
-      if (result.applied.length === 0) {
-        console.log("No pending migrations.");
-      } else {
-        console.log(`Applied ${result.applied.length} migration(s):`);
-        for (const n of result.applied) console.log(`  ✓ ${n}`);
-      }
-      if (result.skipped.length > 0) {
-        console.log(`Skipped ${result.skipped.length} (already applied).`);
-      }
-    });
-  } else if (command === "migrate:status") {
-    await withDriver(config, dbPath, async (driver) => {
-      const status = await migrationStatus(driver, dir);
-      if (status.applied.length > 0) {
-        console.log("Applied migrations:");
-        for (const r of status.applied) console.log(`  ✓ ${r.name}  (${r.applied_at})`);
-      }
-      if (status.pending.length > 0) {
-        console.log("Pending migrations:");
-        for (const n of status.pending) console.log(`  ○ ${n}`);
-      }
-      if (status.applied.length === 0 && status.pending.length === 0) {
-        console.log("No migrations found.");
-      }
-    });
-  } else if (command === "migrate:dry-run") {
-    await withDriver(config, dbPath, async (driver) => {
-      const plan = await dryRunMigrations(driver, dir);
-      if (plan.pending.length === 0) {
-        console.log("No executable pending migrations.");
-        return;
-      }
-      console.log(`Would apply ${plan.pending.length} migration(s):`);
-      for (const migration of plan.pending) {
-        console.log(`  ○ ${migration.name} (${migration.statements.length} statement(s))`);
-      }
-      if (plan.skipped.length > 0) {
-        console.log(`Skipped ${plan.skipped.length} migration(s).`);
-      }
-    });
-  } else if (command === "migrate:pending") {
-    await withDriver(config, dbPath, async (driver) => {
-      const pending = await pendingMigrations(driver, dir);
-      if (pending.length === 0) {
-        console.log("No executable pending migrations.");
-        return;
-      }
-      for (const migration of pending) console.log(migration.name);
-    });
-  } else if (command === "migrate:applied") {
-    await withDriver(config, dbPath, async (driver) => {
-      const applied = await appliedMigrations(driver);
-      if (applied.length === 0) {
-        console.log("No applied migrations.");
-        return;
-      }
-      for (const migration of applied) console.log(`${migration.name}\t${migration.applied_at}`);
-    });
-  } else if (command === "migrate:up") {
-    if (!args.name) {
-      console.error("migrate:up requires --name <migration-name>");
-      process.exit(1);
-    }
-    await withDriver(config, dbPath, async (driver) => {
-      await upMigration(driver, dir, args.name);
-      console.log(`Applied: ${args.name}`);
-    });
-  } else if (command === "migrate:down") {
-    if (!args.name) {
-      console.error("migrate:down requires --name <migration-name>");
-      process.exit(1);
-    }
-    await withDriver(config, dbPath, async (driver) => {
-      await downMigration(driver, dir, args.name);
-      console.log(`Rolled back: ${args.name}`);
-    });
-  } else {
-    console.error(`Unknown command: ${command}`);
-    usage();
+      await withDriver(config, dbPath, async (driver) => {
+        await downMigration(driver, dir, args.name);
+        console.log(`Rolled back: ${args.name}`);
+      });
+      break;
+    default:
+      console.error(`Unknown command: ${command}`);
+      usage();
   }
 }
 

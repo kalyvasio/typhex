@@ -234,7 +234,7 @@ SELECT COUNT(*) AS c FROM (
 ) AS "_count"                                        -- params: ["US"]
 ```
 
-## Update, Patch, and Delete
+## Update and Delete
 
 ```ts
 const updated = await User.query()
@@ -248,11 +248,13 @@ UPDATE users SET age = ? WHERE name = ?
 ```
 
 ```ts
-const patched = await User.query()
+const updatedRow = await User.query()
   .where((u) => u.name === "Bob")
-  .patch({ age: 26 });
+  .updateAndFetch({ age: 26 });
 // Same UPDATE as above, then a SELECT ... WHERE name = ? LIMIT 1 to return the row
 ```
+
+`patch()` is a deprecated alias for `updateAndFetch()` retained for compatibility.
 
 ```ts
 const deleted = await User.query()

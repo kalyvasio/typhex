@@ -10,7 +10,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as acorn from "acorn";
 import type { Driver, Connection, ResolvedDriver } from "../driver/types.js";
-import type { MigrationDb, MigrationRecord, PendingMigration } from "./types.js";
+import { isRecord } from "../utils.js";
+import type { MigrationDb, MigrationDryRun, MigrationRecord, PendingMigration } from "./types.js";
 interface MigrationModule {
   upSql: string;
   downSql: string;
@@ -141,10 +142,6 @@ function readStaticStringExport(file: string, name: string, node: unknown): stri
   throw new Error(`Migration "${file}" export "${name}" must be a static string literal.`);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value != null && typeof value === "object";
-}
-
 function buildPendingMigration(dir: string, file: string): PendingMigration {
   const { upSql, downSql } = readMigrationSql(dir, file);
   return {
@@ -246,10 +243,7 @@ export async function pendingMigrations(driver: Driver, dir: string): Promise<Pe
     .map((file) => buildPendingMigration(dir, file));
 }
 
-export async function dryRunMigrations(
-  driver: Driver,
-  dir: string,
-): Promise<{ applied: MigrationRecord[]; pending: PendingMigration[]; skipped: string[] }> {
+export async function dryRunMigrations(driver: Driver, dir: string): Promise<MigrationDryRun> {
   const applied = await getAppliedRows(driver);
   const appliedNames = new Set(applied.map((r) => r.name));
   const pending: PendingMigration[] = [];

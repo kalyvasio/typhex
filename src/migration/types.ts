@@ -1,4 +1,3 @@
-import type { Driver } from "../driver/types.js";
 import type { DialectName, DiffAction, DbColumnInfo } from "../dbs/types.js";
 
 export type { DialectName, DiffAction, DbColumnInfo };
@@ -43,9 +42,4 @@ export interface MigrationDryRun {
   applied: MigrationRecord[];
   pending: PendingMigration[];
   skipped: string[];
-}
-
-export interface MigrationConfig {
-  dir: string;
-  driver: Driver;
 }

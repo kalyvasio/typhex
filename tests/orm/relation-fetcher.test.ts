@@ -157,16 +157,26 @@ describe("fetchRelations", () => {
     expect(selectedCols.filter((c) => c === "id")).toHaveLength(1);
   });
 
-  it("handles empty path array in orderBy (uses empty string as column name)", async () => {
+  it("rejects an empty member path in relation orderBy", async () => {
     const rows = [{ id: 1, companyId: 10 }];
-    const { meta, chain } = makeMeta([{ id: 10 }]);
+    const { meta } = makeMeta([{ id: 10 }]);
     (meta.relation as any).orderBy = [
       { expr: { kind: "member", param: "u", path: [] }, direction: "desc" },
-    ]; // path[0] is undefined → ?? ""
+    ];
 
-    await new RelationFetcher(null as any, rows, [meta], new Set()).fetch();
+    await expect(new RelationFetcher(null as any, rows, [meta], new Set()).fetch()).rejects.toThrow(
+      'relation "company" orderBy expects a column member expression',
+    );
+  });
 
-    expect(chain.orderBy).toHaveBeenCalledWith("", "desc");
+  it("rejects non-member expressions in relation orderBy", async () => {
+    const rows = [{ id: 1, companyId: 10 }];
+    const { meta } = makeMeta([{ id: 10 }]);
+    (meta.relation as any).orderBy = [{ expr: { kind: "const", value: 1 }, direction: "desc" }];
+
+    await expect(new RelationFetcher(null as any, rows, [meta], new Set()).fetch()).rejects.toThrow(
+      'relation "company" orderBy expects a column member expression',
+    );
   });
 
   it("handles empty sub-array in subPaths (uses fallback via ??)", async () => {

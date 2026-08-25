@@ -26,7 +26,7 @@ import type {
 import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
 import { getActiveTrx, isResolvedQueryExecutor } from "../orm/db.js";
-import { getPkColumns } from "./pk-columns.js";
+import { getPkColumnsFromSchema } from "./pk-columns.js";
 
 /** Resolved relation value type for a `RelationDef` R: an array for to-many, a single instance for to-one. */
 export type RelationLoadedValue<R> =
@@ -157,7 +157,7 @@ export function Entity<
   const rels = (relations ?? {}) as TRels;
   const tableDef = createTableDef(tableName, schema, rels);
   const cols = Object.keys(schema);
-  const pkCols = getPkColumns(schema);
+  const pkCols = getPkColumnsFromSchema(schema);
 
   function resolveDb() {
     const resolved = getDefaultDb();
@@ -189,7 +189,7 @@ export function Entity<
       const tbl = entityClass?.table;
       if (tbl) {
         const schema = tbl._schema;
-        return { table: tbl._table, pk: getPkColumns(schema), schema };
+        return { table: tbl._table, pk: getPkColumnsFromSchema(schema), schema };
       }
       return null;
     } catch (e) {

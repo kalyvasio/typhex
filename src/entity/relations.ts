@@ -104,11 +104,6 @@ export type ManyToMany<E extends AnyEntityClass | EntityBase> = E extends Entity
   ? ManyRelation<E>
   : RelatedEntityInstance<EntityClassOf<E>, "many">;
 
-/** @deprecated Prefer OneToMany<Post> with import type + EntityClassOf. Kept for backward compatibility. */
-export type UntypedOneToMany = RelationQueryBuilder<SelectRow<any>> & EntityInstance<any>[];
-/** @deprecated Prefer ManyToOne<Post> with import type + EntityClassOf. Kept for backward compatibility. */
-export type UntypedManyToOne = RelationQueryBuilder<SelectRow<any>> & EntityInstance<any>;
-
 /** Converts a `RelationDef` to its runtime queryable shape (array builder or single instance). */
 export type RelationQueryable<R> =
   R extends RelationDef<infer E, infer TType>

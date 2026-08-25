@@ -76,11 +76,7 @@ export class Db implements QueryExecutor {
     get dialect(): DialectInfo;
     downMigration(name: string, dir?: string): Promise<void>;
     get driver(): Driver;
-    dryRunMigrations(dir?: string): Promise<{
-        applied: MigrationRecord[];
-        pending: PendingMigration[];
-        skipped: string[];
-    }>;
+    dryRunMigrations(dir?: string): Promise<MigrationDryRun>;
     static fromConfig(options?: {
         configPath?: string;
         cwd?: string;
@@ -193,11 +189,7 @@ export interface Driver<TDialect extends DialectInfo = DialectInfo> {
 }
 
 // @public (undocumented)
-export function dryRunMigrations(driver: Driver, dir: string): Promise<{
-    applied: MigrationRecord[];
-    pending: PendingMigration[];
-    skipped: string[];
-}>;
+export function dryRunMigrations(driver: Driver, dir: string): Promise<MigrationDryRun>;
 
 // @public
 export function Entity<TTable extends string, const TSchema extends Record<string, string>, const TRels extends RelationsMap = {}>(tableName: TTable, schema: TSchema, relations?: TRels): EntityClass<TTable, TSchema, TRels>;
@@ -282,11 +274,11 @@ export type InferTable<T extends Record<string, string>> = Flatten<{
 }>;
 
 // @public
-export class InsertBuilder<C extends AnyEntityClass, R> extends QueryBuilder<C> implements PromiseLike<R> {
+export class InsertBuilder<C extends AnyEntityClass, R> implements PromiseLike<R> {
     doNothing(): Statement<R>;
     doUpdate(updateColumns?: string[]): Statement<R>;
     onConflict(columns: string[]): this;
-    then<T1 = R, T2 = never>(res?: ((v: R) => T1 | PromiseLike<T1>) | null, rej?: ((e: unknown) => T2 | PromiseLike<T2>) | null): PromiseLike<T1 | T2>;
+    then<T1 = R, T2 = never>(res?: ((value: R) => T1 | PromiseLike<T1>) | null, rej?: ((reason: unknown) => T2 | PromiseLike<T2>) | null): PromiseLike<T1 | T2>;
     toSql(): SqlAndParams;
 }
 
@@ -534,6 +526,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     limit(n: number): this;
     offset(n: number): this;
     orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
+    // @deprecated (undocumented)
     patch(set: Record<string, unknown>): Promise<EntityInstance<C> | null>;
     // (undocumented)
     protected requirePkColumns(context: string): string[];
@@ -547,6 +540,7 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     update(set: Record<string, unknown>): Statement<number>;
     // (undocumented)
     update(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Statement<number>;
+    updateAndFetch(set: Record<string, unknown>): Promise<EntityInstance<C> | null>;
     updateReturning(set: Record<string, unknown>): Statement<EntityInstance<C>[]>;
     // (undocumented)
     updateReturning(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Statement<EntityInstance<C>[]>;

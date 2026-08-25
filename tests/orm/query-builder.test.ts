@@ -277,6 +277,14 @@ describe("QueryBuilder", () => {
   });
 
   describe("insert", () => {
+    it("does not expose query clauses or select terminals", () => {
+      const insert = newBuilder(db).insert({ name: "Alice" });
+
+      expect(insert).not.toHaveProperty("select");
+      expect(insert).not.toHaveProperty("where");
+      expect(insert).not.toHaveProperty("toArray");
+    });
+
     it("builds INSERT and calls db.run", async () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
         { id: 1, name: "Alice", age: null, country: null },
@@ -567,7 +575,7 @@ describe("QueryBuilder", () => {
     });
   });
 
-  describe("patch", () => {
+  describe("updateAndFetch", () => {
     it("updates and re-fetches the row", async () => {
       const ir: IrNode = {
         kind: "binary",
@@ -579,7 +587,7 @@ describe("QueryBuilder", () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
         { id: 1, name: "Updated", age: 30 },
       ]);
-      const row = await newBuilder(db).where(where(ir)).patch({ name: "Updated" });
+      const row = await newBuilder(db).where(where(ir)).updateAndFetch({ name: "Updated" });
       expect(row).toEqual({ id: 1, name: "Updated", age: 30 });
       expect(db.run).toHaveBeenCalled();
       expect(db.query).toHaveBeenCalled();
@@ -594,8 +602,17 @@ describe("QueryBuilder", () => {
       };
       (db.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
-      const row = await newBuilder(db).where(where(ir)).patch({ name: "Gone" });
+      const row = await newBuilder(db).where(where(ir)).updateAndFetch({ name: "Gone" });
       expect(row).toBeNull();
+    });
+
+    it("retains patch as a forwarding alias", async () => {
+      const builder = newBuilder(db);
+      const updateAndFetch = vi.spyOn(builder, "updateAndFetch").mockResolvedValue(null);
+
+      await builder.patch({ name: "Updated" });
+
+      expect(updateAndFetch).toHaveBeenCalledWith({ name: "Updated" });
     });
   });
 
