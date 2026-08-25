@@ -19,7 +19,6 @@ Public runtime exports:
 - `InsertBuilder`
 - `Entity`
 - `rel`
-- `getPkColumnsFromSchema`
 - `createDriver`
 - `createSqliteDriver`
 - `createPostgresDriver`
@@ -54,7 +53,7 @@ Public type exports:
 **Driver/config types:**
 `Driver`, `Connection`, `ExecuteResult`, `TransactionOptions`,
 `SqliteDriverOptions`, `CreateDriverOptions`, `PostgresDriverOptions`,
-`ColumnDef`, `TyphexConfig`, `LoadConfigOptions`
+`DialectColumnDef`, `ColumnDef` (compatibility alias), `TyphexConfig`, `LoadConfigOptions`
 
 **Migration types:**
 `DiffAction`, `DialectName`, `MigrationFile`, `MigrationRecord`, `MigrationResult`

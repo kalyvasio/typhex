@@ -6,7 +6,7 @@
  */
 
 import type {
-  ColumnDef,
+  DialectColumnDef,
   CompileQueryOpts,
   CompileResult,
   CompileSelectOpts,
@@ -350,7 +350,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     }
   }
 
-  compileCreateTableIfNotExists(table: string, schema: Record<string, ColumnDef>): string {
+  compileCreateTableIfNotExists(table: string, schema: Record<string, DialectColumnDef>): string {
     return this.compileCreateTable(table, schema, true);
   }
 
@@ -457,7 +457,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     startIdx?: number,
   ): ExpandPlaceholdersResult;
 
-  protected toColumnDef(def: ColumnDef): string {
+  protected toColumnDef(def: DialectColumnDef): string {
     return getColumnDef(def, this.dialect);
   }
 
@@ -956,7 +956,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileCreateTable(
     table: string,
-    schema: Record<string, ColumnDef>,
+    schema: Record<string, DialectColumnDef>,
     ifNotExists: boolean,
   ): string {
     const cols = Object.entries(schema).map(

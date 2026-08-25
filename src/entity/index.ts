@@ -1,4 +1,4 @@
-export { Entity, getPkColumnsFromSchema } from "./entity.js";
+export { Entity } from "./entity.js";
 export type {
   AnyEntityClass,
   EntityClass,

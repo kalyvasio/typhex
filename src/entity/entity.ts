@@ -5,8 +5,6 @@
 
 import type { Trx } from "../orm/trx.js";
 import type { QueryExecutor, ResolvedQueryExecutor } from "../orm/db.js";
-import { getColumnNames } from "../schema/types.js";
-import type { TableDefinition } from "../schema/types.js";
 import { QueryBuilder } from "../orm/query-builder.js";
 import { QueryState } from "../orm/query-state.js";
 import { SingleRowQueryBuilder } from "../orm/single-row-query-builder.js";
@@ -29,7 +27,6 @@ import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
 import { getActiveTrx, isResolvedQueryExecutor } from "../orm/db.js";
 import { getPkColumns } from "./pk-columns.js";
-export { getPkColumnsFromSchema } from "./pk-columns.js";
 
 /** Resolved relation value type for a `RelationDef` R: an array for to-many, a single instance for to-one. */
 export type RelationLoadedValue<R> =
@@ -159,7 +156,7 @@ export function Entity<
 >(tableName: TTable, schema: TSchema, relations?: TRels): EntityClass<TTable, TSchema, TRels> {
   const rels = (relations ?? {}) as TRels;
   const tableDef = createTableDef(tableName, schema, rels);
-  const cols = getColumnNames(schema as TableDefinition);
+  const cols = Object.keys(schema);
   const pkCols = getPkColumns(schema);
 
   function resolveDb() {
@@ -246,9 +243,7 @@ export function Entity<
           sourcePkCols: pkCols,
           options: opts,
           resolveTarget: () => resolveRelationTarget(rd),
-          materialize: (junctionSchema) => {
-            Entity(opts.junction, junctionSchema);
-          },
+          materialize: (junctionSchema) => Entity(opts.junction, junctionSchema),
         });
       }
     }

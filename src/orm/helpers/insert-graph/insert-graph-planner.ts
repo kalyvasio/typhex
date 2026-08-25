@@ -1,10 +1,7 @@
 import type { DialectInsertCapabilities } from "../../../dbs/types.js";
-import {
-  getPkColumnsFromSchema,
-  type AnyEntityClass,
-  type EntityInstance,
-} from "../../../entity/entity.js";
+import type { AnyEntityClass, EntityInstance } from "../../../entity/entity.js";
 import { getEntityByTableName } from "../../../entity/global-driver.js";
+import { getPkColumnsFromSchema } from "../../../entity/pk-columns.js";
 import type {
   JunctionOptions,
   RelationDef,

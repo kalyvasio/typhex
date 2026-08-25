@@ -76,8 +76,16 @@ The shared IR is compiled to SQL by dialect modules. The two built-in dialects (
 - `ON CONFLICT` syntax variations
 - Database-specific aggregates (`groupConcat` vs `stringAgg` / `arrayAgg` / `jsonAgg`)
 
-## Schema Registry
+## Entity Ownership
 
-`Entity()` registers each table definition in a global registry. When `new Db(driver)` is called, it sets the driver as the default for all registered entities, and `db.migrate()` iterates the registry to create missing tables.
+Pass entity classes to `Db` to give schema operations an explicit boundary:
 
-This design means you don't need to pass a `db` instance to every query — the driver is resolved automatically from the registry.
+```ts
+const db = new Db({ driver, entities: [User, Post] });
+```
+
+`migrate()`, `validate()`, and `generateMigrations()` use that collection. The
+process-global registry remains as a compatibility fallback when `entities` is
+omitted. A new `Db` also becomes the default query executor unless
+`setAsDefault: false` is passed, preserving `Entity.query()` convenience
+without coupling schema ownership to that default.

@@ -5,15 +5,7 @@
 // Core runtime
 export { Db, Trx, QueryBuilder, SingleRowQueryBuilder, InsertBuilder } from "./orm/index.js";
 export { count, sum, avg, min, max, distinct } from "./orm/aggregates.js";
-export {
-  Entity,
-  rel,
-  getPkColumnsFromSchema,
-  oneToOne,
-  manyToOne,
-  oneToMany,
-  manyToMany,
-} from "./entity/index.js";
+export { Entity, rel, oneToOne, manyToOne, oneToMany, manyToMany } from "./entity/index.js";
 export { createSqliteDriver, createDriver } from "./driver/index.js";
 export { createPostgresDriver } from "./dbs/postgres/driver.js";
 export {
@@ -49,9 +41,7 @@ export type {
 } from "./driver/types.js";
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export type { PostgresDriverOptions } from "./dbs/index.js";
-export type { ColumnDef, ColumnChange, DbColumnInfo } from "./dbs/types.js";
-export type { CompiledCteBody } from "./dbs/types.js";
-export type { QueryStateWithClause } from "./orm/query-state.js";
+export type { ColumnDef, DialectColumnDef, ColumnChange, DbColumnInfo } from "./dbs/types.js";
 
 // Entity machinery
 export type {

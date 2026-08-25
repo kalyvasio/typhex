@@ -38,22 +38,8 @@ export type ColumnChange = {
     to: boolean;
 };
 
-// @public
-export type ColumnDef = string | {
-    [K in DialectName]?: string;
-};
-
-// @public
-export interface CompiledCteBody {
-    // (undocumented)
-    bodyParams: unknown[];
-    // (undocumented)
-    bodySql: string;
-    // (undocumented)
-    name: string;
-    // (undocumented)
-    recursive?: boolean;
-}
+// @public @deprecated (undocumented)
+export type ColumnDef = DialectColumnDef;
 
 // @public
 export interface Connection<TDialect extends DialectInfo = DialectInfo> {
@@ -112,6 +98,7 @@ export class Db implements QueryExecutor {
         changes: number;
     }>;
     runMigrations(dir?: string): Promise<MigrationResult>;
+    setAsDefault(): this;
     transaction<T>(fn: (trx: Trx) => Promise<T>, options?: TransactionOptions): Promise<T>;
     upMigration(name: string, dir?: string): Promise<void>;
     validate(): Promise<void>;
@@ -133,13 +120,20 @@ export interface DbColumnInfo {
 
 // @public
 export type DbOptions = {
-    driver: Driver;
     migrationsFolder?: string;
+    entities?: readonly RegisteredEntity[];
+    setAsDefault?: boolean;
+} & ({
+    driver: Driver;
 } | {
     dialect: DialectName;
     database?: string;
     url?: string;
-    migrationsFolder?: string;
+});
+
+// @public
+export type DialectColumnDef = string | {
+    [K in DialectName]?: string;
 };
 
 // @public
@@ -155,7 +149,7 @@ export type DialectName = "sqlite" | "postgres";
 export type DiffAction = {
     kind: "add_table";
     table: string;
-    schema: Record<string, ColumnDef>;
+    schema: Record<string, DialectColumnDef>;
 } | {
     kind: "drop_table";
     table: string;
@@ -164,7 +158,7 @@ export type DiffAction = {
     kind: "add_column";
     table: string;
     column: string;
-    definition: ColumnDef;
+    definition: DialectColumnDef;
 } | {
     kind: "drop_column";
     table: string;
@@ -175,7 +169,7 @@ export type DiffAction = {
     table: string;
     column: string;
     oldDef: string;
-    newDef: ColumnDef;
+    newDef: DialectColumnDef;
     columnInfo: DbColumnInfo;
     changes: ColumnChange[];
 };
@@ -268,9 +262,6 @@ export type Flatten<T> = {
 
 // @public
 export function generateMigrationFiles(driver: Driver, entities: readonly RegisteredEntity[]): Promise<MigrationFile[]>;
-
-// @public
-export function getPkColumnsFromSchema(schema: Record<string, string>): string[];
 
 // @public
 export type HasDefault<S extends string> = Lowercase<S> extends `${string}default${string}` ? true : false;
@@ -788,16 +779,6 @@ export interface TyphexConfig {
 
 // @public (undocumented)
 export function upMigration(driver: Driver, dir: string, name: string): Promise<void>;
-
-// @public
-export interface WithClause {
-    // (undocumented)
-    inner: unknown;
-    // (undocumented)
-    kind: "simple" | "recursive";
-    // (undocumented)
-    name: string;
-}
 
 // (No @packageDocumentation comment for this package)
 
