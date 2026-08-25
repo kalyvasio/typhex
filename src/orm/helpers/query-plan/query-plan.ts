@@ -52,7 +52,7 @@
 import { type IrSelectRelation, type JoinHint } from "../../../ir/types.js";
 import type { RelationType } from "../../../entity/relations.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
-import type { Dialect, QueryCompiler, QueryOperation, WithClause } from "../../../dbs/types.js";
+import type { Dialect, QueryCompiler, QueryOperation } from "../../../dbs/types.js";
 import {
   RelationJoinBuilder,
   RelationPathAliasBuilder,
@@ -60,7 +60,7 @@ import {
   type RelationJoinMeta,
   type OneToManyExistsMeta,
 } from "../relations/relation-joins.js";
-import type { FromSource, QueryState } from "../../query-state.js";
+import type { QueryState } from "../../query-state.js";
 import type { Expr, GroupByItem, JoinSpec, OrderItem, SelectItem } from "../../expr.js";
 import { ExprBuilder, type SubqueryPlans } from "./expr-builder.js";
 import { SelectClassifier, EMPTY_CLASSIFIED, type ClassifiedSelect } from "./select-classifier.js";
@@ -131,6 +131,17 @@ export interface JoinedProjection {
   members: Array<{ alias: string; subPath: string }>;
 }
 
+export interface QueryPlanCte {
+  name: string;
+  kind: "simple" | "recursive";
+  plan: QueryPlan;
+}
+
+export type QueryPlanFromSource =
+  | { kind: "table" }
+  | { kind: "cte"; name: string }
+  | { kind: "subquery"; plan: QueryPlan };
+
 /**
  * Dialect-agnostic execution plan. Produced by `QueryPlanBuilder` and
  * consumed by `QueryCompiler.compilePlan` (which produces SQL) plus the
@@ -178,10 +189,10 @@ export interface QueryPlan {
   whereParams: Record<string, unknown>;
   havingParams: Record<string, unknown>;
 
-  /** WITH clauses (uncompiled); rendered during compilation. */
-  ctes?: WithClause[];
+  /** Planned WITH clauses; rendered during compilation. */
+  ctes?: QueryPlanCte[];
   /** Outer FROM source (base table, CTE name, or inline subquery). */
-  fromSource?: FromSource;
+  fromSource?: QueryPlanFromSource;
   /** UNION ALL branch for this SELECT. */
   unionAll?: QueryPlan;
   /** Primary key columns of the entity table. */
@@ -379,8 +390,8 @@ export class QueryPlanBuilder {
       skipLoadFor: classified.skipLoadFor,
       whereParams: this.state.whereParams,
       havingParams: this.state.havingParams,
-      ctes: this.state.ctes,
-      fromSource: this.state.fromSource ?? undefined,
+      ctes: this.buildCtes(),
+      fromSource: this.buildFromSource(),
       unionAll:
         isSelect && this.state.unionAll
           ? QueryPlanBuilder.build(this.state.unionAll, { kind: "select" })
@@ -390,6 +401,27 @@ export class QueryPlanBuilder {
       inScopeRegisteredCteNames: this.state.inScopeRegisteredCteNames,
       referencedRegisteredCtes: this.irAnalyzer.planReferencedRegisteredCtes(this.analysis),
     };
+  }
+
+  private buildCtes(): QueryPlanCte[] | undefined {
+    if (!this.state.ctes?.length) return undefined;
+    return this.state.ctes.map((cte) => ({
+      name: cte.name,
+      kind: cte.kind,
+      plan: QueryPlanBuilder.build(cte.inner, { kind: "select" }),
+    }));
+  }
+
+  private buildFromSource(): QueryPlanFromSource | undefined {
+    const source = this.state.fromSource;
+    if (!source) return undefined;
+    if (source.kind === "subquery") {
+      return {
+        kind: "subquery",
+        plan: QueryPlanBuilder.build(source.state, { kind: "select" }),
+      };
+    }
+    return source;
   }
 
   private buildUpdateSet(exprBuilder: ExprBuilder): Record<string, Expr> | undefined {

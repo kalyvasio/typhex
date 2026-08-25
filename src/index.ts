@@ -50,7 +50,8 @@ export type {
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export type { PostgresDriverOptions } from "./dbs/index.js";
 export type { ColumnDef, ColumnChange, DbColumnInfo } from "./dbs/types.js";
-export type { WithClause, CompiledCteBody } from "./dbs/types.js";
+export type { CompiledCteBody } from "./dbs/types.js";
+export type { QueryStateWithClause } from "./orm/query-state.js";
 
 // Entity machinery
 export type {

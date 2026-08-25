@@ -28,10 +28,12 @@ import type {
   OrderItem,
   SelectItem,
 } from "../orm/expr.js";
-import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
-import { QueryPlanBuilder } from "../orm/helpers/query-plan/query-plan.js";
-import type { FromSource, QueryState } from "../orm/query-state.js";
-import type { DialectName, WithClause } from "./types.js";
+import type {
+  QueryPlan,
+  QueryPlanCte,
+  QueryPlanFromSource,
+} from "../orm/helpers/query-plan/query-plan.js";
+import type { DialectName } from "./types.js";
 import type { JoinType } from "../ir/types.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
@@ -214,24 +216,13 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     };
   }
 
-  protected compileCteBodies(
-    ctes: WithClause[] | undefined,
-    allowedCteNames: string[] = [],
-  ): CompiledCteBody[] {
+  protected compileCteBodies(ctes: QueryPlanCte[] | undefined): CompiledCteBody[] {
     if (!ctes?.length) return [];
 
     const bodies: CompiledCteBody[] = [];
 
     for (const clause of ctes) {
-      const innerState = clause.inner as QueryState<unknown>;
-      const innerPlan = QueryPlanBuilder.build(innerState, { kind: "select" });
-      const priorNames = [...allowedCteNames, ...bodies.map((c) => c.name)];
-      const allowedForInner =
-        clause.kind === "recursive" ? [...priorNames, clause.name] : priorNames;
-      const body = this.compilePlan(innerPlan, {
-        paramStartIndex: 1,
-        allowedCteNames: allowedForInner,
-      });
+      const body = this.compilePlan(clause.plan, { paramStartIndex: 1 });
       bodies.push({
         name: clause.name,
         bodySql: body.sql,
@@ -247,11 +238,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     plan: {
       tableName: string;
       tableAlias: string;
-      fromSource?: FromSource;
+      fromSource?: QueryPlanFromSource;
     },
-    allowedCteNames: string[],
     paramStartIndex: number,
-    compileOptions: CompileQueryOpts = {},
   ): { fromClause: string; fromParams: unknown[] } {
     const source = plan.fromSource ?? { kind: "table" as const };
     const alias = this.escapeIdentifier(plan.tableAlias);
@@ -268,11 +257,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
           fromParams: [],
         };
       case "subquery": {
-        const innerPlan = QueryPlanBuilder.build(source.state, { kind: "select" });
-        const compiled = this.compilePlan(innerPlan, {
+        const compiled = this.compilePlan(source.plan, {
           wrap: true,
           paramStartIndex,
-          allowedCteNames: compileOptions.allowedCteNames,
         });
         return {
           fromClause: `${compiled.sql} AS ${alias}`,
@@ -283,20 +270,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected prepareReadPlan(plan: QueryPlan, options: CompileQueryOpts): PreparedReadPlan {
-    const compiledCteBodies = options.skipCteRender
-      ? []
-      : this.compileCteBodies(plan.ctes, options.allowedCteNames);
-    const allowedCteNames = [
-      ...(options.allowedCteNames ?? []),
-      ...compiledCteBodies.map((c) => c.name),
-    ];
+    const compiledCteBodies = options.skipCteRender ? [] : this.compileCteBodies(plan.ctes);
 
-    const fromResolved = this.resolvePlanFromClause(
-      plan,
-      allowedCteNames,
-      options.paramStartIndex ?? 1,
-      options,
-    );
+    const fromResolved = this.resolvePlanFromClause(plan, options.paramStartIndex ?? 1);
     const { expand, paramStartIndex } = this.createExpander({
       ...options,
       paramStartIndex: (options.paramStartIndex ?? 1) + fromResolved.fromParams.length,

@@ -67,13 +67,6 @@ export type DiffAction =
 export type { Connection, ExecuteResult };
 export type { TransactionOptions, Driver };
 
-/** Registered CTE (uncompiled). The authoritative inner shape is `QueryState` from `query-state.ts`. */
-export interface WithClause {
-  name: string;
-  kind: "simple" | "recursive";
-  inner: unknown;
-}
-
 /** Compiled CTE body before prepending to outer SQL. */
 export interface CompiledCteBody {
   name: string;
@@ -140,8 +133,6 @@ export interface CompileQueryOpts {
    *  for use as a subquery. */
   wrap?: boolean;
   paramStartIndex?: number;
-  /** CTE names already defined earlier in the same WITH list (inner body compilation). */
-  allowedCteNames?: string[];
   /** Skip rendering WITH clauses (when compiling a UNION ALL branch). */
   skipCteRender?: boolean;
 }
