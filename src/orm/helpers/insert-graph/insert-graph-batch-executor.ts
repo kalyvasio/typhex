@@ -1,5 +1,5 @@
-import type { Dialect, QueryCompiler } from "../../../dbs/types.js";
-import type { QueryExecutor } from "../../db.js";
+import type { QueryCompiler } from "../../../dbs/types.js";
+import type { ResolvedQueryExecutor } from "../../db.js";
 import { InsertGraphExecutor } from "./insert-graph-executor.js";
 import type { PlannedNode } from "./insert-graph-planner.js";
 import { groupBy } from "../../../utils.js";
@@ -12,8 +12,8 @@ type InsertGroup = {
 };
 
 export class InsertGraphBatchExecutor extends InsertGraphExecutor {
-  protected async insertReadyNodes(qe: QueryExecutor, nodes: PlannedNode[]): Promise<void> {
-    const compiler = (qe.dialect as Dialect).queryCompiler;
+  protected async insertReadyNodes(qe: ResolvedQueryExecutor, nodes: PlannedNode[]): Promise<void> {
+    const compiler = qe.dialect.queryCompiler;
     for (const group of groupByTable(nodes)) {
       await this.insertNodeGroup(compiler, qe, group);
     }
@@ -21,7 +21,7 @@ export class InsertGraphBatchExecutor extends InsertGraphExecutor {
 
   private async insertNodeGroup(
     compiler: QueryCompiler,
-    qe: QueryExecutor,
+    qe: ResolvedQueryExecutor,
     group: InsertGroup,
   ): Promise<void> {
     await new SequenceIdAssigner(compiler, qe, group.tableName, group.items).assign();
@@ -32,7 +32,7 @@ export class InsertGraphBatchExecutor extends InsertGraphExecutor {
     await this.insertNodeBatch(qe, group);
   }
 
-  private async insertNodeBatch(qe: QueryExecutor, group: InsertGroup): Promise<void> {
+  private async insertNodeBatch(qe: ResolvedQueryExecutor, group: InsertGroup): Promise<void> {
     const entity = group.items[0].entity;
     const inserted = await entity.query(qe).insertMany(group.items.map((node) => node.scalarData));
     if (inserted.length > 0 && inserted.length !== group.items.length) {

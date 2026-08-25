@@ -203,7 +203,7 @@ export interface QueryCompiler {
 /** Resolve column definition for a dialect. */
 export function getColumnDef(def: ColumnDef, dialect: DialectName): string {
   if (typeof def === "string") return def;
-  const resolved = def[dialect] ?? def.sqlite ?? def.postgres;
+  const resolved = def[dialect];
   if (resolved == null) {
     throw new Error(`No column definition provided for dialect "${dialect}"`);
   }

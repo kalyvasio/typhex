@@ -13,6 +13,18 @@ type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 export class SqliteQueryCompiler extends BaseQueryCompiler {
   protected readonly dialect = "sqlite" as const;
 
+  protected placeholder(): string {
+    return "?";
+  }
+
+  protected compileXorSql(left: string, right: string): string {
+    return `((${left} & ~${right}) | (~${left} & ${right}))`;
+  }
+
+  protected shiftUpdateWherePlaceholders(whereSql: string): string {
+    return whereSql;
+  }
+
   compileNextSequenceValues(): CompileResult {
     throw new Error("SQLite does not support sequence allocation");
   }
@@ -100,12 +112,9 @@ export class SqliteQueryCompiler extends BaseQueryCompiler {
     );
   }
 
-  protected renderInsertManyValue(
-    value: unknown,
-    paramIndex: number,
-  ): { sql: string; params: unknown[] } {
+  protected renderInsertManyValue(value: unknown): { sql: string; params: unknown[] } {
     return {
-      sql: this.placeholder(paramIndex),
+      sql: this.placeholder(),
       params: [value === SQL_DEFAULT ? null : value],
     };
   }

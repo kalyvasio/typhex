@@ -5,7 +5,7 @@
  */
 
 import type { DialectInfo, Driver, ResolvedDriver, TransactionOptions } from "../driver/types.js";
-import type { DialectName } from "../dbs/types.js";
+import type { Dialect, DialectName } from "../dbs/types.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
 import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
@@ -32,6 +32,22 @@ export interface QueryExecutor {
   query(sql: string, params?: unknown[]): Promise<unknown[]>;
   /** Executes a SQL statement and returns affected-row metadata. */
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }>;
+}
+
+/** @internal */
+export interface ResolvedQueryExecutor extends QueryExecutor {
+  readonly dialect: Dialect;
+}
+
+/** @internal */
+export function isResolvedQueryExecutor(
+  executor: QueryExecutor,
+): executor is ResolvedQueryExecutor {
+  return (
+    "queryCompiler" in executor.dialect &&
+    "insertCapabilities" in executor.dialect &&
+    "migrator" in executor.dialect
+  );
 }
 
 /** Options passed to the `Db` constructor: either a pre-built driver or dialect + connection details. */

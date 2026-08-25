@@ -13,7 +13,7 @@ import type {
 } from "../ir/types.js";
 import type { AnyEntityClass } from "../entity/entity.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
-import type { QueryExecutor } from "./db.js";
+import type { ResolvedQueryExecutor } from "./db.js";
 
 /** @internal — captured inline subquery state */
 export interface CapturedSubquery {
@@ -35,7 +35,7 @@ export type QueryStateFromSource =
 export interface QueryStateInit<T = unknown> {
   tableName: string;
   columnNames: string[];
-  qe: QueryExecutor;
+  qe: ResolvedQueryExecutor;
   pkColumns: string[];
   whereIr: IrWhere | null;
   whereParams: Record<string, unknown>;
@@ -72,7 +72,7 @@ export interface QueryStateInit<T = unknown> {
 export class QueryState<T = unknown> implements QueryStateInit<T> {
   tableName: string;
   columnNames: string[];
-  qe: QueryExecutor;
+  qe: ResolvedQueryExecutor;
   pkColumns: string[];
   whereIr: IrWhere | null;
   whereParams: Record<string, unknown>;

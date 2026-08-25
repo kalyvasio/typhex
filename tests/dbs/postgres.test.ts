@@ -55,6 +55,36 @@ describe("dbs/postgres", () => {
       expect(result.sql).toContain("$1");
       expect(result.params).toEqual([18]);
     });
+
+    it("compiles XOR with the Postgres operator", () => {
+      const expr: Expr = {
+        kind: "binary",
+        op: "^",
+        left: { kind: "column", alias: "t0", column: ["left"] },
+        right: { kind: "column", alias: "t0", column: ["right"] },
+      };
+      expect(postgresQueryCompiler.compileWhereExpr(expr).sql).toBe('("t0"."left" # "t0"."right")');
+    });
+
+    it("compilePlan select preserves INNER JOIN for Postgres cross joins", () => {
+      const result = postgresQueryCompiler.compilePlan(
+        selectPlan("contacts", {
+          columnNames: ["id", "companyId"],
+          joins: [
+            {
+              joinType: "cross",
+              targetTable: "companies",
+              alias: "t1",
+              foreignKeys: ["companyId"],
+              targetPkColumns: ["id"],
+            },
+          ],
+        }),
+      );
+      expect(result.sql).toContain(" INNER JOIN ");
+      expect(result.sql).not.toContain(" CROSS JOIN ");
+    });
+
     it("compilePlan insertMany produces multi-row INSERT with RETURNING * and sequential $N placeholders", () => {
       const { sql, params, returningRow } = postgresQueryCompiler.compilePlan(
         insertManyPlan(

@@ -1,11 +1,11 @@
 import type { QueryCompiler } from "../../../dbs/types.js";
-import type { QueryExecutor } from "../../db.js";
+import type { ResolvedQueryExecutor } from "../../db.js";
 import type { PlannedNode } from "./insert-graph-planner.js";
 
 export class SequenceIdAssigner {
   constructor(
     private readonly compiler: QueryCompiler,
-    private readonly qe: QueryExecutor,
+    private readonly qe: ResolvedQueryExecutor,
     private readonly tableName: string,
     private readonly nodes: PlannedNode[],
   ) {}

@@ -1,4 +1,4 @@
-import type { Dialect, DialectInsertCapabilities } from "../../../dbs/types.js";
+import type { DialectInsertCapabilities } from "../../../dbs/types.js";
 import {
   getPkColumnsFromSchema,
   type AnyEntityClass,
@@ -13,7 +13,7 @@ import type {
   RelationType,
 } from "../../../entity/relations.js";
 import { isRecord, toArray } from "../../../utils.js";
-import type { QueryExecutor } from "../../db.js";
+import type { ResolvedQueryExecutor } from "../../db.js";
 import { type QueryState } from "../../query-state.js";
 import { InsertGraphBatchExecutor } from "./insert-graph-batch-executor.js";
 import { InsertGraphExecutor } from "./insert-graph-executor.js";
@@ -50,7 +50,7 @@ export type PlannedNode = PlannedNodeInput & {
 };
 
 export type InsertGraphPlan = {
-  qe: QueryExecutor;
+  qe: ResolvedQueryExecutor;
   nodes: PlannedNode[];
   rootNodeIds: number[];
 };
@@ -73,7 +73,7 @@ export class InsertGraphPlanner<C extends AnyEntityClass> {
     const graphs = toArray(this.input);
     if (graphs.length === 0) return [] as EntityInstance<C>[];
 
-    const capabilities = (this.state.qe.dialect as Dialect).insertCapabilities;
+    const capabilities = this.state.qe.dialect.insertCapabilities;
     const plan = this.buildInsertGraphPlan(graphs, capabilities);
 
     await selectExecutor(plan).execute();

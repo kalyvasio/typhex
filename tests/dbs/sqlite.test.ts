@@ -8,8 +8,9 @@ import {
 import { clearRegistry, setDefaultDb } from "../../src/entity/global-driver.js";
 import { Db } from "../../src/orm/db.js";
 import { SQL_DEFAULT } from "../../src/dbs/types.js";
+import { createSqliteDriver as canonicalCreateSqliteDriver } from "../../src/driver/sqlite.js";
 import type { Expr, SelectItem } from "../../src/orm/expr.js";
-import { insertManyPlan, insertPlan, selectPlan } from "./compiler-plan-fixtures.js";
+import { insertManyPlan, insertPlan, selectPlan, updatePlan } from "./compiler-plan-fixtures.js";
 
 describe("dbs/sqlite", () => {
   beforeEach(() => {
@@ -21,6 +22,10 @@ describe("dbs/sqlite", () => {
   });
 
   describe("createSqliteDriver", () => {
+    it("resolves the dbs barrel to the canonical driver", () => {
+      expect(createSqliteDriver).toBe(canonicalCreateSqliteDriver);
+    });
+
     it("creates a driver with async execute", async () => {
       const driver = createSqliteDriver({ path: ":memory:" });
       try {
@@ -90,6 +95,36 @@ describe("dbs/sqlite", () => {
       expect(result.params).toEqual([18]);
     });
 
+    it("compiles XOR with SQLite bitwise SQL", () => {
+      const expr: Expr = {
+        kind: "binary",
+        op: "^",
+        left: { kind: "column", alias: "t0", column: ["left"] },
+        right: { kind: "column", alias: "t0", column: ["right"] },
+      };
+      expect(sqliteQueryCompiler.compileWhereExpr(expr).sql).toBe(
+        '(("t0"."left" & ~"t0"."right") | (~"t0"."left" & "t0"."right"))',
+      );
+    });
+
+    it("keeps update WHERE placeholders unnumbered", () => {
+      const { sql, params } = sqliteQueryCompiler.compilePlan(
+        updatePlan(
+          "users",
+          ["id", "name"],
+          { name: "Bob" },
+          {
+            kind: "binary",
+            op: "===",
+            left: { kind: "column", alias: "t0", column: ["id"] },
+            right: { kind: "const", value: 1 },
+          },
+        ),
+      );
+      expect(sql).toBe('UPDATE "users" SET "name" = ? WHERE ("users"."id" = ?)');
+      expect(params).toEqual(["Bob", 1]);
+    });
+
     it("compiles WHERE with relation alias on column", () => {
       // Relation paths are alias-resolved by the planner; here we render the
       // resolved ExprColumn directly.
@@ -125,6 +160,24 @@ describe("dbs/sqlite", () => {
       );
       expect(result.sql).toContain("LEFT JOIN");
       expect(result.sql).toContain('"companies"');
+    });
+
+    it("compilePlan select emits CROSS JOIN for SQLite cross joins", () => {
+      const result = sqliteQueryCompiler.compilePlan(
+        selectPlan("contacts", {
+          columnNames: ["id", "companyId"],
+          joins: [
+            {
+              joinType: "cross",
+              targetTable: "companies",
+              alias: "t1",
+              foreignKeys: ["companyId"],
+              targetPkColumns: ["id"],
+            },
+          ],
+        }),
+      );
+      expect(result.sql).toContain(" CROSS JOIN ");
     });
 
     it("compileSelectList renders relation-aliased columns", () => {

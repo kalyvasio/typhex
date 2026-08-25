@@ -5,12 +5,25 @@ import type {
   ExpandPlaceholdersResult,
   CompiledCteBody,
 } from "../types.js";
-import type { ExprAggregate, JoinSpec } from "../../orm/expr.js";
+import type { ExprAggregate } from "../../orm/expr.js";
+import type { JoinType } from "../../ir/types.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
 
 export class PostgresQueryCompiler extends BaseQueryCompiler {
   protected readonly dialect = "postgres" as const;
+
+  protected placeholder(index: number): string {
+    return `$${index}`;
+  }
+
+  protected compileXorSql(left: string, right: string): string {
+    return `(${left} # ${right})`;
+  }
+
+  protected shiftUpdateWherePlaceholders(whereSql: string, offset: number): string {
+    return whereSql.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + offset}`);
+  }
 
   compileNextSequenceValues(): CompileResult {
     throw new Error("Postgres sequence allocation is not configured for this dialect yet");
@@ -124,21 +137,8 @@ export class PostgresQueryCompiler extends BaseQueryCompiler {
     }
   }
 
-  protected buildJoinClause(join: JoinSpec, mainAlias: string, onSql?: string): string {
-    const kw =
-      join.joinType === "cross"
-        ? "INNER JOIN"
-        : (BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN");
-    if (join.on) {
-      return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${onSql}`;
-    }
-    const on = join.foreignKeys
-      .map(
-        (fk, i) =>
-          `${this.escapeIdentifier(mainAlias)}.${this.escapeIdentifier(fk)} = ${this.escapeIdentifier(join.alias)}.${this.escapeIdentifier(join.targetPkColumns[i] ?? join.targetPkColumns[0])}`,
-      )
-      .join(" AND ");
-    return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${on}`;
+  protected joinKeyword(joinType: JoinType): string {
+    return joinType === "cross" ? "INNER JOIN" : super.joinKeyword(joinType);
   }
 
   protected compileAlterColumn(action: AlterColumnAction, reverse: boolean): string {

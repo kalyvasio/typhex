@@ -42,9 +42,11 @@ describe("dbs/index", () => {
       expect(getColumnDef(def, "postgres")).toBe("SERIAL");
     });
 
-    it("falls back to sqlite then postgres when dialect missing", () => {
+    it("throws when the requested dialect definition is missing", () => {
       const def = { sqlite: "text" };
-      expect(getColumnDef(def, "postgres")).toBe("text");
+      expect(() => getColumnDef(def, "postgres")).toThrow(
+        'No column definition provided for dialect "postgres"',
+      );
     });
   });
 });

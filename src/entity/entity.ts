@@ -4,7 +4,7 @@
  */
 
 import type { Trx } from "../orm/trx.js";
-import type { QueryExecutor } from "../orm/db.js";
+import type { QueryExecutor, ResolvedQueryExecutor } from "../orm/db.js";
 import { getColumnNames } from "../schema/types.js";
 import type { TableDefinition } from "../schema/types.js";
 import { QueryBuilder } from "../orm/query-builder.js";
@@ -27,7 +27,7 @@ import type {
 } from "./relations.js";
 import type { TableDef, EntityBase } from "./types.js";
 import { getDefaultDb, registerEntity, enqueuePendingJunction } from "./global-driver.js";
-import { getActiveTrx } from "../orm/db.js";
+import { getActiveTrx, isResolvedQueryExecutor } from "../orm/db.js";
 import { getPkColumns } from "./pk-columns.js";
 export { getPkColumnsFromSchema } from "./pk-columns.js";
 
@@ -169,6 +169,16 @@ export function Entity<
     return resolved;
   }
 
+  function resolveExecutor(executor?: QueryExecutor): ResolvedQueryExecutor {
+    const resolved = executor ?? resolveDb();
+    if (!isResolvedQueryExecutor(resolved)) {
+      throw new Error(
+        `Entity "${tableName}": QueryExecutor dialect "${resolved.dialect.name}" must provide compiler, migrator, and insert capabilities.`,
+      );
+    }
+    return resolved;
+  }
+
   function resolveRelationTarget(
     rel: RelationDef,
   ): { table: string; pk: string[]; schema: Record<string, string> } | null {
@@ -195,7 +205,7 @@ export function Entity<
     return new QueryState({
       tableName,
       columnNames: cols,
-      qe: executor ?? resolveDb(),
+      qe: resolveExecutor(executor),
       pkColumns: pkCols,
       whereIr: null,
       whereParams: {},

@@ -79,10 +79,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `(NOT ${operandSql})`;
   }
 
-  protected compileXorSql(left: string, right: string): string {
-    if (this.dialect === "postgres") return `(${left} # ${right})`;
-    return `((${left} & ~${right}) | (~${left} & ${right}))`;
-  }
+  protected abstract compileXorSql(left: string, right: string): string;
 
   protected compileBinarySql(op: BinaryOp, left: string, right: string): string {
     if (op === "&&") return `(${left} AND ${right})`;
@@ -452,9 +449,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `"${name.replaceAll('"', '""')}"`;
   }
 
-  protected placeholder(index: number): string {
-    return this.dialect === "postgres" ? `$${index}` : "?";
-  }
+  protected abstract placeholder(index: number): string;
 
   protected abstract expandPlaceholders(
     sql: string,
@@ -713,7 +708,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       })
       .join(", ");
     const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, useFrom);
-    const where = this.renumberUpdateWhereParams(fixedWhere, params.length);
+    const where = this.shiftUpdateWherePlaceholders(fixedWhere, params.length);
     params.push(...whereParams);
     let sql: string;
     if (useFrom) {
@@ -885,7 +880,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected buildJoinClause(join: JoinSpec, mainAlias: string, onSql?: string): string {
-    const kw = BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
+    const kw = this.joinKeyword(join.joinType);
     if (join.on) {
       return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${onSql}`;
     }
@@ -896,6 +891,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       )
       .join(" AND ");
     return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${on}`;
+  }
+
+  protected joinKeyword(joinType: JoinType): string {
+    return BaseQueryCompiler.JOIN_SQL_KEYWORDS[joinType] ?? "LEFT JOIN";
   }
 
   protected appendOnConflict(
@@ -935,10 +934,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return { sql: this.placeholder(paramIndex), params: [value] };
   }
 
-  protected renumberUpdateWhereParams(whereSql: string, offset: number): string {
-    if (this.dialect !== "postgres") return whereSql;
-    return whereSql.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + offset}`);
-  }
+  protected abstract shiftUpdateWherePlaceholders(whereSql: string, offset: number): string;
 
   protected registeredCteNames(plan: QueryPlan): Set<string> {
     return new Set([
