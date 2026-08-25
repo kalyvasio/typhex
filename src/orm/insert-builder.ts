@@ -131,7 +131,7 @@ export class InsertBuilder<C extends AnyEntityClass, R> implements PromiseLike<R
       const rows = (await qe.query(compiled.sql, compiled.params)) as Record<string, unknown>[];
       const raw = rows[0];
       if (raw == null) throw new Error("insert: RETURNING returned no row");
-      return hydrate ? ((await hydrate(raw))) : (raw as EntityInstance<C>);
+      return hydrate ? await hydrate(raw) : (raw as EntityInstance<C>);
     }
 
     const result = await qe.run(compiled.sql, compiled.params);
@@ -160,7 +160,7 @@ export class InsertBuilder<C extends AnyEntityClass, R> implements PromiseLike<R
       if (!hydrate) return returned as EntityInstance<C>[];
       const hydrated: EntityInstance<C>[] = [];
       for (const row of returned) {
-        hydrated.push((await hydrate(row)));
+        hydrated.push(await hydrate(row));
       }
       return hydrated;
     }
