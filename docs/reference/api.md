@@ -477,18 +477,16 @@ await User.query()
 
 Returns the number of rows deleted.
 
-### `.updateAndFetch(data)`
+### `.patch(data)`
 
-Update matching rows and return the updated row (or `null` if no match).
+Partial update: SET the given columns on matching rows and return the updated row (or `null` if no match).
 
 ```ts
 const updated = await Entity.query()
   .where((u) => u.name === "Bob")
-  .updateAndFetch({ age: 26 });
+  .patch({ age: 26 });
 // Returns: EntityInstance | null
 ```
-
-`.patch(data)` remains as a deprecated compatibility alias for `.updateAndFetch(data)`.
 
 ### `.findById(id)`
 

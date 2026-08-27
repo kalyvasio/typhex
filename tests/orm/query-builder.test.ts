@@ -575,7 +575,7 @@ describe("QueryBuilder", () => {
     });
   });
 
-  describe("updateAndFetch", () => {
+  describe("patch", () => {
     it("updates and re-fetches the row", async () => {
       const ir: IrNode = {
         kind: "binary",
@@ -587,7 +587,7 @@ describe("QueryBuilder", () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
         { id: 1, name: "Updated", age: 30 },
       ]);
-      const row = await newBuilder(db).where(where(ir)).updateAndFetch({ name: "Updated" });
+      const row = await newBuilder(db).where(where(ir)).patch({ name: "Updated" });
       expect(row).toEqual({ id: 1, name: "Updated", age: 30 });
       expect(db.run).toHaveBeenCalled();
       expect(db.query).toHaveBeenCalled();
@@ -602,17 +602,8 @@ describe("QueryBuilder", () => {
       };
       (db.run as ReturnType<typeof vi.fn>).mockReturnValueOnce({ lastID: 0, changes: 1 });
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
-      const row = await newBuilder(db).where(where(ir)).updateAndFetch({ name: "Gone" });
+      const row = await newBuilder(db).where(where(ir)).patch({ name: "Gone" });
       expect(row).toBeNull();
-    });
-
-    it("retains patch as a forwarding alias", async () => {
-      const builder = newBuilder(db);
-      const updateAndFetch = vi.spyOn(builder, "updateAndFetch").mockResolvedValue(null);
-
-      await builder.patch({ name: "Updated" });
-
-      expect(updateAndFetch).toHaveBeenCalledWith({ name: "Updated" });
     });
   });
 

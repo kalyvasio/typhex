@@ -526,7 +526,6 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     limit(n: number): this;
     offset(n: number): this;
     orderBy(col: string | ((row: T) => unknown), direction?: OrderDirection): this;
-    // @deprecated (undocumented)
     patch(set: Record<string, unknown>): Promise<EntityInstance<C> | null>;
     // (undocumented)
     protected requirePkColumns(context: string): string[];
@@ -540,7 +539,6 @@ export class QueryBuilder<C extends AnyEntityClass = AnyEntityClass, T = EntityI
     update(set: Record<string, unknown>): Statement<number>;
     // (undocumented)
     update(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Statement<number>;
-    updateAndFetch(set: Record<string, unknown>): Promise<EntityInstance<C> | null>;
     updateReturning(set: Record<string, unknown>): Statement<EntityInstance<C>[]>;
     // (undocumented)
     updateReturning(setFn: HasRegisteredCtes<Ctes> extends true ? (row: EntityInstance<C>, ctes: RegisteredCtes<Ctes>) => Record<string, unknown> : (row: EntityInstance<C>) => Record<string, unknown>): Statement<EntityInstance<C>[]>;

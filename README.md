@@ -109,7 +109,7 @@ await User.query()
   .delete();
 ```
 
-`update()` returns the number of rows changed. `patch()` performs the update and returns the updated row.
+`update()` returns the number of rows changed. `patch()` applies a partial update and returns the updated row.
 
 ## Runtime vs Transformer Mode
 

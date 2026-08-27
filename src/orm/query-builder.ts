@@ -462,11 +462,11 @@ export class QueryBuilder<
     return refs;
   }
 
-  /** Update matching rows with `set`, then re-fetch and return the updated row,
+  /** Partial update: SET the given columns, then re-fetch and return the row,
    *  or null if no matching row is found after the update. */
-  async updateAndFetch(set: Record<string, unknown>): Promise<EntityInstance<C> | null> {
+  async patch(set: Record<string, unknown>): Promise<EntityInstance<C> | null> {
     const query = this.clone();
-    await query.update(set);
+    await query.runUpdate(resolveUpdateSet(set), false);
     const fresh = new QueryBuilder<C, T>({
       ...query.state,
       orderBy: [],
@@ -477,11 +477,6 @@ export class QueryBuilder<
       fromSource: undefined,
     });
     return (await fresh.first()) ?? null;
-  }
-
-  /** @deprecated Use `updateAndFetch()` to make the update-and-re-fetch behavior explicit. */
-  patch(set: Record<string, unknown>): Promise<EntityInstance<C> | null> {
-    return this.updateAndFetch(set);
   }
 
   /** Insert a single row. Awaitable directly, or chain `.onConflict(cols).doUpdate()` / `.doNothing()`. */

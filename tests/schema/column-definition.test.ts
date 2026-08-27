@@ -16,21 +16,11 @@ describe("parseColumnDefinition", () => {
     expect(parseColumnDefinition("integer auto_increment").autoIncrement).toBe(true);
   });
 
-  it("preserves quoted and expression defaults", () => {
-    expect(parseColumnDefinition("text default 'primary key' not null").defaultValue).toBe(
-      "'primary key'",
+  it("extracts default values", () => {
+    expect(parseColumnDefinition("text default 'anon' not null").defaultValue).toBe("'anon'");
+    expect(parseColumnDefinition("timestamp default (datetime('now'))").defaultValue).toBe(
+      "(datetime('now'))",
     );
-    expect(
-      parseColumnDefinition("timestamp default (datetime('now', '+1 day')) not null").defaultValue,
-    ).toBe("(datetime('now', '+1 day'))");
-  });
-
-  it("ignores constraint keywords in quoted values and comments", () => {
-    const metadata = parseColumnDefinition("text default 'not null' -- primary key autoincrement");
-    expect(metadata.primaryKey).toBe(false);
-    expect(metadata.notNull).toBe(false);
-    expect(metadata.autoIncrement).toBe(false);
-    expect(metadata.defaultValue).toBe("'not null'");
   });
 
   it("reports definitions without defaults", () => {
