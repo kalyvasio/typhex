@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as ts from "typescript";
 import { createTyphexTransformer } from "../../src/transformer/index.js";
+import { irSelectToTsLiteral } from "../../src/transformer/ir-emit.js";
 
 vi.mock("../../src/transformer/shared.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/transformer/shared.js")>();
@@ -196,5 +197,15 @@ class Post { static tableName: "posts" = "posts"; static query(): any { return n
 authors.select((a: any) => ({ n: Post.query().where((p: any) => p.authorId === a.id && p.score > c).select(() => count()) }));
 `;
     expect(transformWithChecker(source)).toMatchSnapshot();
+  });
+
+  it("refuses to emit populated relation IR instead of dropping it", () => {
+    expect(() =>
+      irSelectToTsLiteral({
+        param: "u",
+        paths: [],
+        relations: [{ name: "posts", outputKey: "posts" }],
+      }),
+    ).toThrow("transformer cannot emit relation select IR");
   });
 });

@@ -5,7 +5,7 @@
 
 import type * as ESTree from "estree";
 import type { IrNode, IrSelect, IrSelectRelation, IrAggregate } from "../ir/types.js";
-import { RELATION_QUERY_METHODS } from "../arrow/constants.js";
+import { DEFAULT_ROW_PARAM, RELATION_QUERY_METHODS } from "../arrow/constants.js";
 import type { AcornExpr } from "./acorn-types.js";
 import {
   extractArrowBody,
@@ -44,7 +44,7 @@ export function parseArrowToIrSelect(
   const body = extractArrowBody(src);
   if (!body) return null;
 
-  const paramName = inferParamNames(src)[0] ?? "u";
+  const paramName = inferParamNames(src)[0] ?? DEFAULT_ROW_PARAM;
   const fullSrc = normalizeSelectBodySource(body);
 
   let expr: AcornExpr;
@@ -420,7 +420,7 @@ function applyOrderByMethod(
       : "asc";
   result.orderBy = result.orderBy ?? [];
   result.orderBy.push({
-    expr: { kind: "member", param: "u", path: [col] },
+    expr: { kind: "member", param: DEFAULT_ROW_PARAM, path: [col] },
     direction: dir,
   });
   return true;

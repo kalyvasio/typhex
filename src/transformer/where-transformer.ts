@@ -32,7 +32,8 @@ import {
   type ParamBindings,
   type ScopeFrame,
 } from "./shared.js";
-import { ALLOWED_METHODS } from "../arrow/constants.js";
+import { ALLOWED_METHODS, DEFAULT_ROW_PARAM } from "../arrow/constants.js";
+import { buildIrCase, buildIrExists } from "../arrow/index.js";
 
 /** Destructured outer-arrow context. When the surrounding `.select(({ id }) => …)`
  *  arrow uses object destructuring, the inner subquery's WHERE may reference
@@ -257,15 +258,7 @@ function conditionalExprToIr(expr: ts.ConditionalExpression, ctx: WhereCtx): IrC
   const then = exprToIr(expr.whenTrue, ctx);
   const alternate = exprToIr(expr.whenFalse, ctx);
   if (!when || !then || !alternate) return null;
-
-  if (alternate.kind === "case") {
-    return {
-      kind: "case",
-      branches: [{ when, then }, ...alternate.branches],
-      ...(alternate.else !== undefined ? { else: alternate.else } : {}),
-    };
-  }
-  return { kind: "case", branches: [{ when, then }], else: alternate };
+  return buildIrCase(when, then, alternate);
 }
 
 // ---- CallExpression handling -----------------------------------------------
@@ -312,10 +305,13 @@ function tryParseAllowedMethod(
   const receiver = exprToIr(callee.expression, ctx);
   if (!receiver) return null;
 
-  const args = call.arguments.map((a) => exprToIr(a, ctx));
-  if (args.some((a) => a === null)) return null;
-
-  return { kind: "call", method, receiver, args: args as IrNode[] };
+  const args: IrNode[] = [];
+  for (const arg of call.arguments) {
+    const parsed = exprToIr(arg, ctx);
+    if (!parsed) return null;
+    args.push(parsed);
+  }
+  return { kind: "call", method, receiver, args };
 }
 
 /**
@@ -352,14 +348,7 @@ function tryParseSomeEvery(
   });
   if (!innerWhere) return null;
 
-  return {
-    kind: "exists",
-    ...(method === "every" ? { negated: true } : {}),
-    rootParam: receiver.param,
-    relationKey: receiver.path[0],
-    innerParam,
-    innerWhere,
-  };
+  return buildIrExists(method, receiver.param, receiver.path[0], innerParam, innerWhere);
 }
 
 /** Return the first parameter's name if it's a plain identifier; null otherwise. */
@@ -373,9 +362,11 @@ function getFirstParamName(fn: ts.ArrowFunction | ts.FunctionExpression): string
 // Arrow → IR + free-variable collection
 // ---------------------------------------------------------------------------
 
-/** Extract the lambda parameter names as strings; defaults to "u" per slot. */
+/** Extract the lambda parameter names as strings; defaults to the canonical row param per slot. */
 function extractParamNames(fn: ts.ArrowFunction | ts.FunctionExpression): string[] {
-  return fn.parameters.map((p) => (p.name && ts.isIdentifier(p.name) ? p.name.text : "u"));
+  return fn.parameters.map((p) =>
+    p.name && ts.isIdentifier(p.name) ? p.name.text : DEFAULT_ROW_PARAM,
+  );
 }
 
 /**
@@ -410,7 +401,7 @@ function arrowToIr(
   return {
     ir: {
       node: ir,
-      rootParam: paramNames[0] ?? "u",
+      rootParam: paramNames[0] ?? DEFAULT_ROW_PARAM,
       localParamNames: paramNames,
     },
     freeVars: [...freeVars],

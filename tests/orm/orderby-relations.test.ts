@@ -60,20 +60,17 @@ describe("orderBy — lambda and dot-notation support", () => {
 
   describe("lambda parsing", () => {
     it("parses u => u.name as single-segment path", () => {
-      const q = newBuilder(db);
-      q.orderBy((u) => u.name);
+      const q = newBuilder(db).orderBy((u) => u.name);
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
     it("parses u => u.company.name as two-segment path", () => {
-      const q = newBuilder(db);
-      q.orderBy((u) => u.company.name);
+      const q = newBuilder(db).orderBy((u) => u.company.name);
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
     it("throws when ordering by a relation object", async () => {
-      const q = newBuilder(db);
-      q.orderBy((u) => u.company);
+      const q = newBuilder(db).orderBy((u) => u.company);
       await expect(q.toArray()).rejects.toThrow('relation "company" must reference a column');
     });
 
@@ -83,8 +80,7 @@ describe("orderBy — lambda and dot-notation support", () => {
         capturedSql = sql;
         return [];
       });
-      const q = newBuilder(db);
-      q.orderBy((u) => u.name);
+      const q = newBuilder(db).orderBy((u) => u.name);
       await q.toArray();
       expect(capturedSql).toContain('"name"');
     });
@@ -94,10 +90,10 @@ describe("orderBy — lambda and dot-notation support", () => {
       expect(() => q.orderBy((u) => u)).toThrow();
     });
 
-    it("chains and returns this (same reference)", () => {
+    it("chains and returns an independent builder", () => {
       const q = newBuilder(db);
       const result = q.orderBy((u) => u.name);
-      expect(result).toBe(q);
+      expect(result).not.toBe(q);
     });
   });
 
@@ -108,23 +104,21 @@ describe("orderBy — lambda and dot-notation support", () => {
         capturedSql = sql;
         return [];
       });
-      const q = newBuilder(db);
-      q.orderBy("company.name");
+      const q = newBuilder(db).orderBy("company.name");
       await q.toArray();
       expect(capturedSql).toContain('"mock_companies"');
       expect(capturedSql).toMatch(/ORDER BY\s+.+name/i);
     });
 
     it("throws when string orderBy targets a relation object", async () => {
-      const q = newBuilder(db);
-      q.orderBy("company");
+      const q = newBuilder(db).orderBy("company");
       await expect(q.toArray()).rejects.toThrow('relation "company" must reference a column');
     });
 
-    it("chains and returns this (same reference)", () => {
+    it("chains and returns an independent builder", () => {
       const q = newBuilder(db);
       const result = q.orderBy("name", "desc");
-      expect(result).toBe(q);
+      expect(result).not.toBe(q);
     });
   });
 });
@@ -285,8 +279,7 @@ describe("orderBy relation columns — integration", () => {
         return target?.table ? { table: target.table._table, pk: ["id"] } : null;
       },
     };
-    const qb = new QueryBuilder(state);
-    qb.orderBy("company.name", "asc");
+    const qb = new QueryBuilder(state).orderBy("company.name", "asc");
     await qb.toArray();
     expect(capturedSql).toContain("LEFT JOIN");
     expect(capturedSql).toContain('"companies_ob"');

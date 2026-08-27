@@ -5,7 +5,11 @@
 
 import ts from "typescript";
 import type { IrNode, IrAggregate } from "../ir/types.js";
-import { AGGREGATE_FUNCS, toIrFuncName } from "../arrow/aggregates.js";
+import {
+  buildIrAggregate,
+  getAggregateSeparatorArgIndex,
+  toIrAggregateFunc,
+} from "../arrow/aggregates.js";
 import { resolveMemberPath } from "./ts-member.js";
 import { isIdentifierNamed } from "./ts-utils.js";
 
@@ -23,25 +27,14 @@ export function parseTsAggregateCall(
   if (!ts.isIdentifier(callee)) return null;
 
   const rawName = callee.text;
-  const funcName = toIrFuncName(rawName);
-  if (!AGGREGATE_FUNCS.has(funcName)) return null;
+  const func = toIrAggregateFunc(rawName);
+  if (!func) return null;
 
-  const parsedArg = parseTsAggregateArg(
-    call.arguments[0] as ts.Expression | undefined,
-    paramNames,
-    resolveArg,
-  );
+  const parsedArg = parseTsAggregateArg(call.arguments[0], paramNames, resolveArg);
   if (!parsedArg) return null;
   const { arg, distinct } = parsedArg;
-  const separator = parseTsAggregateSeparator(funcName, call);
-
-  const ir: IrAggregate = {
-    kind: "aggregate",
-    func: funcName as IrAggregate["func"],
-    arg,
-    ...(distinct ? { distinct: true } : {}),
-    ...(separator === undefined ? {} : { separator }),
-  };
+  const separator = parseTsAggregateSeparator(func, call);
+  const ir = buildIrAggregate(func, arg, distinct, separator);
   return { ir, rawName };
 }
 
@@ -79,7 +72,7 @@ function parseDistinctWrapperArg(
   paramNames: string[],
   resolveArg: ((expr: ts.Expression) => IrNode | null) | undefined,
 ): { arg: IrNode | null; distinct: boolean } | null {
-  const inner = distinctCall.arguments[0] as ts.Expression | undefined;
+  const inner = distinctCall.arguments[0];
   if (!inner) return { arg: null, distinct: false };
   if (ts.isPropertyAccessExpression(inner)) {
     const resolved = resolveMemberPath(inner, paramNames);
@@ -97,9 +90,13 @@ function parseDistinctWrapperArg(
   return { arg: null, distinct: false };
 }
 
-function parseTsAggregateSeparator(funcName: string, call: ts.CallExpression): string | undefined {
-  if (funcName !== "GROUP_CONCAT" && funcName !== "STRING_AGG") return undefined;
-  const sepExpr = call.arguments[1] as ts.Expression | undefined;
+function parseTsAggregateSeparator(
+  func: IrAggregate["func"],
+  call: ts.CallExpression,
+): string | undefined {
+  const index = getAggregateSeparatorArgIndex(func);
+  if (index === null) return undefined;
+  const sepExpr = call.arguments[index];
   return sepExpr && ts.isStringLiteral(sepExpr) ? sepExpr.text : undefined;
 }
 

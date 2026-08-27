@@ -16,7 +16,6 @@ export type {
   DialectName,
   MigrationFile,
   MigrationRecord,
-  MigrationConfig,
   PendingMigration,
   MigrationDryRun,
   MigrationDb,

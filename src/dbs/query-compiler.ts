@@ -6,7 +6,7 @@
  */
 
 import type {
-  ColumnDef,
+  DialectColumnDef,
   CompileQueryOpts,
   CompileResult,
   CompileSelectOpts,
@@ -28,10 +28,12 @@ import type {
   OrderItem,
   SelectItem,
 } from "../orm/expr.js";
-import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
-import { QueryPlanBuilder } from "../orm/helpers/query-plan/query-plan.js";
-import type { FromSource, QueryState } from "../orm/query-state.js";
-import type { DialectName, WithClause } from "./types.js";
+import type {
+  QueryPlan,
+  QueryPlanCte,
+  QueryPlanFromSource,
+} from "../orm/helpers/query-plan/query-plan.js";
+import type { DialectName } from "./types.js";
 import type { JoinType } from "../ir/types.js";
 
 type AlterColumnAction = Extract<DiffAction, { kind: "alter_column" }>;
@@ -77,10 +79,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `(NOT ${operandSql})`;
   }
 
-  protected compileXorSql(left: string, right: string): string {
-    if (this.dialect === "postgres") return `(${left} # ${right})`;
-    return `((${left} & ~${right}) | (~${left} & ${right}))`;
-  }
+  protected abstract compileXorSql(left: string, right: string): string;
 
   protected compileBinarySql(op: BinaryOp, left: string, right: string): string {
     if (op === "&&") return `(${left} AND ${right})`;
@@ -214,24 +213,13 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     };
   }
 
-  protected compileCteBodies(
-    ctes: WithClause[] | undefined,
-    allowedCteNames: string[] = [],
-  ): CompiledCteBody[] {
+  protected compileCteBodies(ctes: QueryPlanCte[] | undefined): CompiledCteBody[] {
     if (!ctes?.length) return [];
 
     const bodies: CompiledCteBody[] = [];
 
     for (const clause of ctes) {
-      const innerState = clause.inner as QueryState<unknown>;
-      const innerPlan = QueryPlanBuilder.build(innerState, { kind: "select" });
-      const priorNames = [...allowedCteNames, ...bodies.map((c) => c.name)];
-      const allowedForInner =
-        clause.kind === "recursive" ? [...priorNames, clause.name] : priorNames;
-      const body = this.compilePlan(innerPlan, {
-        paramStartIndex: 1,
-        allowedCteNames: allowedForInner,
-      });
+      const body = this.compilePlan(clause.plan, { paramStartIndex: 1 });
       bodies.push({
         name: clause.name,
         bodySql: body.sql,
@@ -247,11 +235,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     plan: {
       tableName: string;
       tableAlias: string;
-      fromSource?: FromSource;
+      fromSource?: QueryPlanFromSource;
     },
-    allowedCteNames: string[],
     paramStartIndex: number,
-    compileOptions: CompileQueryOpts = {},
   ): { fromClause: string; fromParams: unknown[] } {
     const source = plan.fromSource ?? { kind: "table" as const };
     const alias = this.escapeIdentifier(plan.tableAlias);
@@ -268,11 +254,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
           fromParams: [],
         };
       case "subquery": {
-        const innerPlan = QueryPlanBuilder.build(source.state, { kind: "select" });
-        const compiled = this.compilePlan(innerPlan, {
+        const compiled = this.compilePlan(source.plan, {
           wrap: true,
           paramStartIndex,
-          allowedCteNames: compileOptions.allowedCteNames,
         });
         return {
           fromClause: `${compiled.sql} AS ${alias}`,
@@ -283,20 +267,9 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected prepareReadPlan(plan: QueryPlan, options: CompileQueryOpts): PreparedReadPlan {
-    const compiledCteBodies = options.skipCteRender
-      ? []
-      : this.compileCteBodies(plan.ctes, options.allowedCteNames);
-    const allowedCteNames = [
-      ...(options.allowedCteNames ?? []),
-      ...compiledCteBodies.map((c) => c.name),
-    ];
+    const compiledCteBodies = options.skipCteRender ? [] : this.compileCteBodies(plan.ctes);
 
-    const fromResolved = this.resolvePlanFromClause(
-      plan,
-      allowedCteNames,
-      options.paramStartIndex ?? 1,
-      options,
-    );
+    const fromResolved = this.resolvePlanFromClause(plan, options.paramStartIndex ?? 1);
     const { expand, paramStartIndex } = this.createExpander({
       ...options,
       paramStartIndex: (options.paramStartIndex ?? 1) + fromResolved.fromParams.length,
@@ -377,7 +350,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     }
   }
 
-  compileCreateTableIfNotExists(table: string, schema: Record<string, ColumnDef>): string {
+  compileCreateTableIfNotExists(table: string, schema: Record<string, DialectColumnDef>): string {
     return this.compileCreateTable(table, schema, true);
   }
 
@@ -476,9 +449,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return `"${name.replaceAll('"', '""')}"`;
   }
 
-  protected placeholder(index: number): string {
-    return this.dialect === "postgres" ? `$${index}` : "?";
-  }
+  protected abstract placeholder(index: number): string;
 
   protected abstract expandPlaceholders(
     sql: string,
@@ -486,7 +457,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     startIdx?: number,
   ): ExpandPlaceholdersResult;
 
-  protected toColumnDef(def: ColumnDef): string {
+  protected toColumnDef(def: DialectColumnDef): string {
     return getColumnDef(def, this.dialect);
   }
 
@@ -737,7 +708,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       })
       .join(", ");
     const fixedWhere = this.fixMutationWhereAlias(table, whereSql, alias, useFrom);
-    const where = this.renumberUpdateWhereParams(fixedWhere, params.length);
+    const where = this.shiftUpdateWherePlaceholders(fixedWhere, params.length);
     params.push(...whereParams);
     let sql: string;
     if (useFrom) {
@@ -909,7 +880,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
   }
 
   protected buildJoinClause(join: JoinSpec, mainAlias: string, onSql?: string): string {
-    const kw = BaseQueryCompiler.JOIN_SQL_KEYWORDS[join.joinType] ?? "LEFT JOIN";
+    const kw = this.joinKeyword(join.joinType);
     if (join.on) {
       return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${onSql}`;
     }
@@ -920,6 +891,10 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
       )
       .join(" AND ");
     return ` ${kw} ${this.escapeIdentifier(join.targetTable)} AS ${this.escapeIdentifier(join.alias)} ON ${on}`;
+  }
+
+  protected joinKeyword(joinType: JoinType): string {
+    return BaseQueryCompiler.JOIN_SQL_KEYWORDS[joinType] ?? "LEFT JOIN";
   }
 
   protected appendOnConflict(
@@ -959,10 +934,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
     return { sql: this.placeholder(paramIndex), params: [value] };
   }
 
-  protected renumberUpdateWhereParams(whereSql: string, offset: number): string {
-    if (this.dialect !== "postgres") return whereSql;
-    return whereSql.replaceAll(/\$(\d+)/g, (_, n) => `$${Number.parseInt(n, 10) + offset}`);
-  }
+  protected abstract shiftUpdateWherePlaceholders(whereSql: string, offset: number): string;
 
   protected registeredCteNames(plan: QueryPlan): Set<string> {
     return new Set([
@@ -984,7 +956,7 @@ export abstract class BaseQueryCompiler implements QueryCompiler {
 
   protected compileCreateTable(
     table: string,
-    schema: Record<string, ColumnDef>,
+    schema: Record<string, DialectColumnDef>,
     ifNotExists: boolean,
   ): string {
     const cols = Object.entries(schema).map(

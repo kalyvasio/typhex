@@ -48,6 +48,22 @@ describe("Db migration API (integration)", () => {
     expect(written[1]).toMatch(/posts_table\.js$/);
   });
 
+  it("generateMigrations uses an explicit entity collection", async () => {
+    const Owned = Entity("generated_owned", { id: "integer primary key" });
+    Entity("generated_global_only", { id: "integer primary key" });
+    const db = new Db({
+      driver: createSqliteDriver({ path: ":memory:" }),
+      entities: [Owned],
+    });
+
+    const files = await db.generateMigrations(tmpDir);
+
+    expect(files).toHaveLength(1);
+    expect(files[0].name).toMatch(/generated_owned/);
+    expect(files[0].name).not.toMatch(/generated_global_only/);
+    await db.close();
+  });
+
   it("runMigrations applies generated scripts", async () => {
     Entity("accounts", {
       id: "integer primary key autoincrement",

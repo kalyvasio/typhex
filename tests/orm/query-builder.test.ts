@@ -53,8 +53,10 @@ describe("QueryBuilder", () => {
         left: { kind: "member", param: "u", path: ["id"] },
         right: { kind: "const", value: 1 },
       };
-      const q = newBuilder(db).where(where(ir));
+      const base = newBuilder(db);
+      const q = base.where(where(ir));
       expect(q).toBeInstanceOf(QueryBuilder);
+      expect(q).not.toBe(base);
     });
 
     it("accepts arrow and parses to IR", () => {
@@ -62,7 +64,7 @@ describe("QueryBuilder", () => {
       expect(q).toBeInstanceOf(QueryBuilder);
     });
 
-    it("merges params when provided", () => {
+    it("accepts params when provided", () => {
       const q = newBuilder(db).where((u: { country: string }) => u.country === "US", {
         country: "US",
       });
@@ -81,8 +83,10 @@ describe("QueryBuilder", () => {
 
   describe("orderBy", () => {
     it("chains with default asc", () => {
-      const q = newBuilder(db).orderBy("name");
+      const base = newBuilder(db);
+      const q = base.orderBy("name");
       expect(q).toBeInstanceOf(QueryBuilder);
+      expect(q).not.toBe(base);
     });
 
     it("chains with desc", () => {
@@ -100,10 +104,9 @@ describe("QueryBuilder", () => {
         right: { kind: "const", value: 1 },
       };
       const base = newBuilder(db).where(where(ir)).limit(5);
-      const cloned = base.clone();
+      const cloned = base.clone().limit(10);
       expect(cloned).toBeInstanceOf(QueryBuilder);
       expect(cloned).not.toBe(base);
-      cloned.limit(10);
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
       await base.toArray();
       const [sqlBase, paramsBase] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
@@ -117,21 +120,118 @@ describe("QueryBuilder", () => {
   });
 
   describe("limit / offset", () => {
-    it("limit chains and returns this", () => {
+    it("limit returns an independent builder", () => {
       const q = newBuilder(db);
-      expect(q.limit(10)).toBe(q);
+      expect(q.limit(10)).not.toBe(q);
     });
 
-    it("offset chains and returns this", () => {
+    it("offset returns an independent builder", () => {
       const q = newBuilder(db);
-      expect(q.offset(5)).toBe(q);
+      expect(q.offset(5)).not.toBe(q);
+    });
+  });
+
+  describe("immutable clauses", () => {
+    it("keeps branches independent", () => {
+      const base = newBuilder(db);
+      const adults = base.where(
+        where({
+          kind: "binary",
+          op: ">",
+          left: { kind: "member", param: "u", path: ["age"] },
+          right: { kind: "const", value: 18 },
+        }),
+      );
+      const seniors = base.where(
+        where({
+          kind: "binary",
+          op: ">",
+          left: { kind: "member", param: "u", path: ["age"] },
+          right: { kind: "const", value: 65 },
+        }),
+      );
+      const orderedAdults = adults.orderBy("name").limit(5);
+
+      expect(base.toArray().toSql().params).toEqual([]);
+      expect(adults.toArray().toSql().params).toEqual([18]);
+      expect(seniors.toArray().toSql().params).toEqual([65]);
+      expect(adults.toArray().toSql().sql).not.toContain("ORDER BY");
+      expect(orderedAdults.toArray().toSql().sql).toContain("ORDER BY");
+      expect(orderedAdults.toArray().toSql().params).toEqual([18, 5]);
+    });
+
+    it("replaces where params with the predicate", () => {
+      const country = where({
+        kind: "binary",
+        op: "===",
+        left: { kind: "member", param: "u", path: ["country"] },
+        right: { kind: "param", key: "country" },
+      });
+      const name = where({
+        kind: "binary",
+        op: "===",
+        left: { kind: "member", param: "u", path: ["name"] },
+        right: { kind: "param", key: "name" },
+      });
+
+      const byCountry = newBuilder(db).where(country, { country: "US" });
+      const byName = byCountry.where(name, { name: "Alice" });
+
+      expect(byCountry.toArray().toSql().params).toEqual(["US"]);
+      expect(byName.toArray().toSql().params).toEqual(["Alice"]);
+    });
+
+    it("keeps captured subquery params on their branch", () => {
+      const subquery = newBuilder(db)
+        .where(
+          where({
+            kind: "binary",
+            op: ">",
+            left: { kind: "member", param: "u", path: ["age"] },
+            right: { kind: "param", key: "minimumAge" },
+          }),
+          { minimumAge: 21 },
+        )
+        .select(["id"]);
+      const withSubquery = newBuilder(db).where(
+        where({
+          kind: "in",
+          left: { kind: "member", param: "u", path: ["id"] },
+          right: { kind: "subqueryRef", key: "matchingIds" },
+        }),
+        { matchingIds: subquery },
+      );
+      const byName = withSubquery.where(
+        where({
+          kind: "binary",
+          op: "===",
+          left: { kind: "member", param: "u", path: ["name"] },
+          right: { kind: "param", key: "name" },
+        }),
+        { name: "Alice" },
+      );
+
+      expect(withSubquery.toArray().toSql().params).toEqual([21]);
+      expect(byName.toArray().toSql().params).toEqual(["Alice"]);
+    });
+
+    it("returns independent builders from every join clause", () => {
+      const base = newBuilder(db);
+      const on = (joined: InstanceType<typeof MockEntity>, row: InstanceType<typeof MockEntity>) =>
+        joined.id === row.id;
+
+      expect(base.innerJoin(MockEntity, on)).not.toBe(base);
+      expect(base.leftJoin(MockEntity, on)).not.toBe(base);
+      expect(base.rightJoin(MockEntity, on)).not.toBe(base);
+      expect(base.fullJoin(MockEntity, on)).not.toBe(base);
+      expect(base.crossJoin(["relation"])).not.toBe(base);
     });
   });
 
   describe("select", () => {
-    it("accepts column names and returns this", () => {
+    it("accepts column names and returns an independent builder", () => {
       const q = newBuilder(db);
-      expect(q.select(["id", "name"])).toBe(q);
+      expect(q.select(["id", "name"])).not.toBe(q);
     });
 
     it("accepts IrSelect and uses it in SQL", async () => {
@@ -177,6 +277,14 @@ describe("QueryBuilder", () => {
   });
 
   describe("insert", () => {
+    it("does not expose query clauses or select terminals", () => {
+      const insert = newBuilder(db).insert({ name: "Alice" });
+
+      expect(insert).not.toHaveProperty("select");
+      expect(insert).not.toHaveProperty("where");
+      expect(insert).not.toHaveProperty("toArray");
+    });
+
     it("builds INSERT and calls db.run", async () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([
         { id: 1, name: "Alice", age: null, country: null },
@@ -288,6 +396,35 @@ describe("QueryBuilder", () => {
       (db.query as ReturnType<typeof vi.fn>).mockReturnValueOnce([]);
       const row = await newBuilder(db).first();
       expect(row).toBeUndefined();
+    });
+
+    it("does not impose its limit on a reused builder", async () => {
+      const base = newBuilder(db);
+      (db.query as ReturnType<typeof vi.fn>)
+        .mockReturnValueOnce([{ id: 1, name: "a" }])
+        .mockReturnValueOnce([]);
+
+      await base.first();
+      await base.toArray();
+
+      const [firstSql, firstParams] = (db.query as ReturnType<typeof vi.fn>).mock.calls[0];
+      const [reusedSql, reusedParams] = (db.query as ReturnType<typeof vi.fn>).mock.calls[1];
+      expect(firstSql).toContain("LIMIT ?");
+      expect(firstParams).toContain(1);
+      expect(reusedSql).not.toContain("LIMIT");
+      expect(reusedParams).not.toContain(1);
+    });
+  });
+
+  describe("findById", () => {
+    it("does not add a predicate or limit to the reused builder", () => {
+      const base = newBuilder(db);
+      const lookup = base.findById(7).toSql();
+      const reused = base.toArray().toSql();
+
+      expect(lookup.params).toEqual([7, 1]);
+      expect(reused.params).toEqual([]);
+      expect(reused.sql).not.toContain("LIMIT");
     });
   });
 

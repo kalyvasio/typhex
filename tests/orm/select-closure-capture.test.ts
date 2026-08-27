@@ -119,8 +119,7 @@ describe(".select() closure-variable capture", () => {
   });
 
   it("throws a clear error when a referenced param is missing", async () => {
-    const qb = newBuilder(qe);
-    qb.select(
+    const qb = newBuilder(qe).select(
       {
         param: "o",
         paths: [],
@@ -154,8 +153,7 @@ describe(".select() closure-variable capture", () => {
 
   it("throws a clear error when a captured value is non-primitive", async () => {
     const date = new Date();
-    const qb = newBuilder(qe);
-    qb.select(
+    const qb = newBuilder(qe).select(
       {
         param: "o",
         paths: [],

@@ -5,9 +5,15 @@
  */
 
 import type { DialectInfo, Driver, ResolvedDriver, TransactionOptions } from "../driver/types.js";
-import type { DialectName } from "../dbs/types.js";
+import type { Dialect, DialectName } from "../dbs/types.js";
 import { createDriver, CreateDriverOptions } from "../driver/factory.js";
-import { getRegisteredEntities, setDefaultDb } from "../entity/global-driver.js";
+import {
+  clearDefaultDb,
+  finalizeEntityCollection,
+  getRegisteredEntities,
+  setDefaultDb,
+} from "../entity/global-driver.js";
+import type { RegisteredEntity } from "../entity/global-driver.js";
 import { generateMigrationFiles, writeMigrationFiles } from "../migration/generator.js";
 import {
   appliedMigrations as appliedMig,
@@ -34,15 +40,37 @@ export interface QueryExecutor {
   run(sql: string, params?: unknown[]): Promise<{ lastID?: number; changes: number }>;
 }
 
+/** @internal */
+export interface ResolvedQueryExecutor extends QueryExecutor {
+  readonly dialect: Dialect;
+}
+
+/** @internal */
+export function isResolvedQueryExecutor(
+  executor: QueryExecutor,
+): executor is ResolvedQueryExecutor {
+  return (
+    "queryCompiler" in executor.dialect &&
+    "insertCapabilities" in executor.dialect &&
+    "migrator" in executor.dialect
+  );
+}
+
 /** Options passed to the `Db` constructor: either a pre-built driver or dialect + connection details. */
-export type DbOptions =
-  | { driver: Driver; migrationsFolder?: string }
+export type DbOptions = {
+  migrationsFolder?: string;
+  /** Entities owned by this Db for migrate(), validate(), and generateMigrations(). */
+  entities?: readonly RegisteredEntity[];
+  /** Whether this Db becomes the Entity.query() default. Defaults to true. */
+  setAsDefault?: boolean;
+} & (
+  | { driver: Driver }
   | {
       dialect: DialectName;
       database?: string;
       url?: string;
-      migrationsFolder?: string;
-    };
+    }
+);
 
 function isDriver(v: unknown): v is Driver {
   return v != null && typeof v === "object" && "execute" in v && "connect" in v && "close" in v;
@@ -56,6 +84,8 @@ export class Db implements QueryExecutor {
   /** @internal */
   protected _driver: ResolvedDriver;
   private _migrationsFolder: string;
+  private readonly _entityOptions?: readonly RegisteredEntity[];
+  private _resolvedEntities?: readonly RegisteredEntity[];
 
   constructor(options: DbOptions | Driver);
   /** @internal — Trx subclass only */
@@ -70,7 +100,12 @@ export class Db implements QueryExecutor {
     ) as ResolvedDriver;
     this._migrationsFolder =
       (arg as { migrationsFolder?: string }).migrationsFolder ?? "./migrations";
-    if (internal !== INTERNAL) setDefaultDb(this);
+    this._entityOptions = isDriver(arg)
+      ? undefined
+      : (arg as { entities?: readonly RegisteredEntity[] }).entities;
+    const useAsDefault =
+      isDriver(arg) || (arg as { setAsDefault?: boolean }).setAsDefault !== false;
+    if (internal !== INTERNAL && useAsDefault) setDefaultDb(this);
   }
 
   /** Create Db from config file. Loads config and creates driver internally. */
@@ -79,7 +114,12 @@ export class Db implements QueryExecutor {
       configPath: options?.configPath,
       cwd: options?.cwd,
     });
-    return new Db(config);
+    return new Db({
+      dialect: config.dialect,
+      database: config.database,
+      url: config.url,
+      migrationsFolder: config.migrationsFolder,
+    });
   }
 
   /** The SQL dialect used by this `Db` instance. */
@@ -90,6 +130,12 @@ export class Db implements QueryExecutor {
   /** The underlying database driver. */
   get driver(): Driver {
     return this._driver;
+  }
+
+  /** Sets this Db as the fallback used by Entity.query() when no executor is passed. */
+  setAsDefault(): this {
+    setDefaultDb(this);
+    return this;
   }
 
   /** Runs a SQL query and returns all result rows. */
@@ -138,10 +184,10 @@ export class Db implements QueryExecutor {
     return trx;
   }
 
-  /** CREATE TABLE IF NOT EXISTS for all registered entities (ordered by FK deps). */
+  /** CREATE TABLE IF NOT EXISTS for owned entities, or globally registered entities as fallback. */
   async migrate(): Promise<void> {
     const compiler = this._driver.dialect.queryCompiler;
-    const entities = getRegisteredEntities();
+    const entities = this.resolveEntities();
     const deps = parseFkDependencies(entities);
     const names = entities.map((e) => e.table._table);
     const sorted = topoSort(names, deps);
@@ -155,9 +201,9 @@ export class Db implements QueryExecutor {
     }
   }
 
-  /** Validate all registered entities against the database. Throws on mismatch. */
+  /** Validate owned entities, or globally registered entities as fallback. Throws on mismatch. */
   async validate(): Promise<void> {
-    for (const entity of getRegisteredEntities()) {
+    for (const entity of this.resolveEntities()) {
       const { _table: name, _schema: schema } = entity.table;
       const expectedCols = Object.keys(schema);
 
@@ -184,7 +230,7 @@ export class Db implements QueryExecutor {
    * Returns the generated files (also written to disk).
    */
   async generateMigrations(dir = this._migrationsFolder): Promise<MigrationFile[]> {
-    const entities = getRegisteredEntities();
+    const entities = this.resolveEntities();
     const files = await generateMigrationFiles(this._driver, entities);
     if (files.length > 0) writeMigrationFiles(dir, files);
     return files;
@@ -227,7 +273,13 @@ export class Db implements QueryExecutor {
 
   /** Closes the underlying database connection pool. */
   async close(): Promise<void> {
-    setDefaultDb(null);
+    clearDefaultDb(this);
     await this._driver.close();
+  }
+
+  private resolveEntities(): readonly RegisteredEntity[] {
+    if (this._entityOptions === undefined) return getRegisteredEntities();
+    this._resolvedEntities ??= finalizeEntityCollection(this._entityOptions);
+    return this._resolvedEntities;
   }
 }

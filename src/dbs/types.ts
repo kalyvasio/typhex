@@ -18,7 +18,7 @@ import type { QueryPlan } from "../orm/helpers/query-plan/query-plan.js";
 export type { DialectName };
 
 /** Column definition: string (all dialects) or per-dialect map. */
-export type ColumnDef = string | { [K in DialectName]?: string };
+export type DialectColumnDef = string | { [K in DialectName]?: string };
 
 export interface CompileResult {
   sql: string;
@@ -50,29 +50,22 @@ export type ColumnChange =
   | { kind: "primary_key"; from: boolean; to: boolean };
 
 export type DiffAction =
-  | { kind: "add_table"; table: string; schema: Record<string, ColumnDef> }
+  | { kind: "add_table"; table: string; schema: Record<string, DialectColumnDef> }
   | { kind: "drop_table"; table: string; columnInfos: DbColumnInfo[] }
-  | { kind: "add_column"; table: string; column: string; definition: ColumnDef }
+  | { kind: "add_column"; table: string; column: string; definition: DialectColumnDef }
   | { kind: "drop_column"; table: string; column: string; columnInfo: DbColumnInfo }
   | {
       kind: "alter_column";
       table: string;
       column: string;
       oldDef: string;
-      newDef: ColumnDef;
+      newDef: DialectColumnDef;
       columnInfo: DbColumnInfo;
       changes: ColumnChange[];
     };
 
 export type { Connection, ExecuteResult };
 export type { TransactionOptions, Driver };
-
-/** Registered CTE (uncompiled). The authoritative inner shape is `QueryState` from `query-state.ts`. */
-export interface WithClause {
-  name: string;
-  kind: "simple" | "recursive";
-  inner: unknown;
-}
 
 /** Compiled CTE body before prepending to outer SQL. */
 export interface CompiledCteBody {
@@ -140,8 +133,6 @@ export interface CompileQueryOpts {
    *  for use as a subquery. */
   wrap?: boolean;
   paramStartIndex?: number;
-  /** CTE names already defined earlier in the same WITH list (inner body compilation). */
-  allowedCteNames?: string[];
   /** Skip rendering WITH clauses (when compiling a UNION ALL branch). */
   skipCteRender?: boolean;
 }
@@ -199,7 +190,7 @@ export interface QueryCompiler {
   compileResultSize(plan: QueryPlan): CompileResult;
   compileMigrationUp(action: DiffAction): string;
   compileMigrationDown(action: DiffAction): string;
-  compileCreateTableIfNotExists(table: string, schema: Record<string, ColumnDef>): string;
+  compileCreateTableIfNotExists(table: string, schema: Record<string, DialectColumnDef>): string;
   compileTrackingTable(): CompileResult;
   compileAppliedMigrations(): CompileResult;
   compileRecordMigration(name: string): CompileResult;
@@ -210,9 +201,9 @@ export interface QueryCompiler {
 }
 
 /** Resolve column definition for a dialect. */
-export function getColumnDef(def: ColumnDef, dialect: DialectName): string {
+export function getColumnDef(def: DialectColumnDef, dialect: DialectName): string {
   if (typeof def === "string") return def;
-  const resolved = def[dialect] ?? def.sqlite ?? def.postgres;
+  const resolved = def[dialect];
   if (resolved == null) {
     throw new Error(`No column definition provided for dialect "${dialect}"`);
   }

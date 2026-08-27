@@ -78,12 +78,19 @@ See [Composite Primary Keys](/guide/entities-relations#composite-primary-keys) f
 
 ```ts
 new Db(driver: Driver)
-new Db({ driver: Driver, migrationsFolder?: string })
-new Db({ dialect: "sqlite", database: string, migrationsFolder?: string })
-new Db({ dialect: "postgres", url: string, migrationsFolder?: string })
+new Db({ driver: Driver, entities?: EntityClass[], migrationsFolder?: string, setAsDefault?: boolean })
+new Db({ dialect: "sqlite", database: string, entities?: EntityClass[], migrationsFolder?: string, setAsDefault?: boolean })
+new Db({ dialect: "postgres", url: string, entities?: EntityClass[], migrationsFolder?: string, setAsDefault?: boolean })
 ```
 
-Sets the driver as the default for all entities registered in the current process.
+By default, a new `Db` becomes the fallback used by `Entity.query()` when no
+executor is passed. Set `setAsDefault: false` for a secondary database, then
+call `db.setAsDefault()` later if needed. Closing a database clears the default
+only when that same instance is currently the default.
+
+When `entities` is provided, `migrate()`, `validate()`, and
+`generateMigrations()` use that collection. When omitted, they fall back to all
+entities registered in the current process for compatibility.
 
 ### `Db.fromConfig(options?)`
 
@@ -98,7 +105,8 @@ Config fields: `dialect`, `database` for SQLite, `url` for PostgreSQL, `migratio
 
 ### `db.migrate()`
 
-Creates all registered tables that don't exist yet.
+Creates all owned entities that don't exist yet, or all process-registered
+entities when the constructor omitted `entities`.
 
 ```ts
 await db.migrate();
@@ -471,7 +479,7 @@ Returns the number of rows deleted.
 
 ### `.patch(data)`
 
-Update matching rows and return the updated row (or `null` if no match).
+Partial update: SET the given columns on matching rows and return the updated row (or `null` if no match).
 
 ```ts
 const updated = await Entity.query()

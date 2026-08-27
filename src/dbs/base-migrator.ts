@@ -5,7 +5,7 @@
 
 import type {
   ColumnChange,
-  ColumnDef,
+  DialectColumnDef,
   DiffAction,
   DbColumnInfo,
   DbMigrator,
@@ -15,6 +15,7 @@ import type {
 import { getColumnDef } from "./types.js";
 import type { RegisteredEntity } from "../entity/global-driver.js";
 import type { ResolvedDriver } from "../driver/types.js";
+import { parseColumnDefinition } from "../schema/column-definition.js";
 import { extractBaseType } from "../utils.js";
 
 export abstract class BaseMigrator implements DbMigrator {
@@ -55,7 +56,7 @@ export abstract class BaseMigrator implements DbMigrator {
   private async diffColumns(
     driver: ResolvedDriver,
     table: string,
-    schema: Record<string, ColumnDef>,
+    schema: Record<string, DialectColumnDef>,
   ): Promise<DiffAction[]> {
     const actions: DiffAction[] = [];
     const dbCols = await this.getDbColumns(driver, table);
@@ -105,14 +106,9 @@ export abstract class BaseMigrator implements DbMigrator {
     return normalized;
   }
 
-  protected static extractDefault(def: string): string | null {
-    const match =
-      /\bdefault\s+(.+?)(?:\s+not\s+null|\s+primary\s+key|\s+unique|\s+references\b|$)/i.exec(def);
-    return BaseMigrator.normalizeDefault(match?.[1] ?? null);
-  }
-
   protected static computeColumnChanges(dbCol: DbColumnInfo, entityDef: string): ColumnChange[] {
     const changes: ColumnChange[] = [];
+    const metadata = parseColumnDefinition(entityDef);
 
     const dbBaseType = extractBaseType(dbCol.type);
     const entityBaseType = extractBaseType(entityDef);
@@ -121,9 +117,9 @@ export abstract class BaseMigrator implements DbMigrator {
     }
 
     const dbPk = dbCol.pk > 0;
-    const entityPk = /\bprimary\s+key\b/i.test(entityDef);
+    const entityPk = metadata.primaryKey;
     const dbNotNull = dbCol.notnull === 1 || dbPk;
-    const entityNotNull = /\bnot\s+null\b/i.test(entityDef) || entityPk;
+    const entityNotNull = metadata.notNull || entityPk;
     if (dbNotNull !== entityNotNull) {
       changes.push({
         kind: entityNotNull ? "not_null" : "nullable",
@@ -133,7 +129,7 @@ export abstract class BaseMigrator implements DbMigrator {
     }
 
     const dbDefault = BaseMigrator.normalizeDefault(dbCol.dflt_value);
-    const entityDefault = BaseMigrator.extractDefault(entityDef);
+    const entityDefault = BaseMigrator.normalizeDefault(metadata.defaultValue);
     if (dbDefault !== entityDefault) {
       changes.push({ kind: "default", from: dbDefault, to: entityDefault });
     }

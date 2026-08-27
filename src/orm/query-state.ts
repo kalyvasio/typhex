@@ -2,7 +2,6 @@
  * Shared query-builder state and cloning helpers.
  */
 
-import type { WithClause } from "../dbs/types.js";
 import type {
   IrHaving,
   IrNode,
@@ -14,14 +13,20 @@ import type {
 } from "../ir/types.js";
 import type { AnyEntityClass } from "../entity/entity.js";
 import type { RelationsMap, RelationDef } from "../entity/relations.js";
-import type { QueryExecutor } from "./db.js";
+import type { ResolvedQueryExecutor } from "./db.js";
 
 /** @internal — captured inline subquery state */
 export interface CapturedSubquery {
   state: QueryState<unknown>;
 }
 
-export type FromSource =
+export interface QueryStateWithClause {
+  name: string;
+  kind: "simple" | "recursive";
+  inner: QueryState<unknown>;
+}
+
+export type QueryStateFromSource =
   | { kind: "table" }
   | { kind: "cte"; name: string }
   | { kind: "subquery"; state: QueryState<unknown> };
@@ -30,7 +35,7 @@ export type FromSource =
 export interface QueryStateInit<T = unknown> {
   tableName: string;
   columnNames: string[];
-  qe: QueryExecutor;
+  qe: ResolvedQueryExecutor;
   pkColumns: string[];
   whereIr: IrWhere | null;
   whereParams: Record<string, unknown>;
@@ -53,10 +58,10 @@ export interface QueryStateInit<T = unknown> {
   entity?: AnyEntityClass;
   /** UNION ALL branch appended to this SELECT (anchor.unionAll(recursive)). */
   unionAll?: QueryState<unknown>;
-  ctes?: WithClause[];
+  ctes?: QueryStateWithClause[];
   /** Registered sibling CTE names in scope (bodies built via `withCte` callback). */
   inScopeRegisteredCteNames?: string[];
-  fromSource?: FromSource | null;
+  fromSource?: QueryStateFromSource | null;
   /** Parsed SET column IR for UPDATE (set before plan; not cloned by default). */
   updateSetIr?: Record<string, IrNode>;
   /** Parsed VALUES column IR for INSERT / upsert (reserved; set before plan when supported). */
@@ -67,7 +72,7 @@ export interface QueryStateInit<T = unknown> {
 export class QueryState<T = unknown> implements QueryStateInit<T> {
   tableName: string;
   columnNames: string[];
-  qe: QueryExecutor;
+  qe: ResolvedQueryExecutor;
   pkColumns: string[];
   whereIr: IrWhere | null;
   whereParams: Record<string, unknown>;
@@ -88,9 +93,9 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
   havingParams: Record<string, unknown>;
   entity?: AnyEntityClass;
   unionAll?: QueryState<unknown>;
-  ctes?: WithClause[];
+  ctes?: QueryStateWithClause[];
   inScopeRegisteredCteNames?: string[];
-  fromSource?: FromSource | null;
+  fromSource?: QueryStateFromSource | null;
   updateSetIr?: Record<string, IrNode>;
   insertIr?: Record<string, IrNode>;
 
@@ -159,7 +164,7 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
       ctes: this.ctes?.map((c) => ({
         name: c.name,
         kind: c.kind,
-        inner: (c.inner as QueryState<unknown>).clone(),
+        inner: c.inner.clone(),
       })),
       inScopeRegisteredCteNames: this.inScopeRegisteredCteNames
         ? [...this.inScopeRegisteredCteNames]
@@ -168,7 +173,9 @@ export class QueryState<T = unknown> implements QueryStateInit<T> {
     });
   }
 
-  private static cloneFromSource(source: FromSource | null | undefined): FromSource | undefined {
+  private static cloneFromSource(
+    source: QueryStateFromSource | null | undefined,
+  ): QueryStateFromSource | undefined {
     if (!source) return undefined;
     if (source.kind === "subquery") {
       return { kind: "subquery", state: source.state.clone() };

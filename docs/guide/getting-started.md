@@ -33,9 +33,16 @@ TypeScript infers the row type from the schema — no separate interface needed.
 ## Connect and Migrate
 
 ```ts
-const db = new Db(createSqliteDriver({ path: "./app.db" }));
+const db = new Db({
+  driver: createSqliteDriver({ path: "./app.db" }),
+  entities: [User],
+});
 await db.migrate(); // creates tables that don't exist yet
 ```
+
+Passing `entities` makes schema ownership explicit: `migrate()`, `validate()`, and
+`generateMigrations()` use only that collection. Omitting it keeps the
+process-global entity registry fallback for compatibility.
 
 Use `":memory:"` for tests and one-off scripts.
 
@@ -227,7 +234,7 @@ SELECT COUNT(*) AS c FROM (
 ) AS "_count"                                        -- params: ["US"]
 ```
 
-## Update, Patch, and Delete
+## Update and Delete
 
 ```ts
 const updated = await User.query()
@@ -241,7 +248,7 @@ UPDATE users SET age = ? WHERE name = ?
 ```
 
 ```ts
-const patched = await User.query()
+const updatedRow = await User.query()
   .where((u) => u.name === "Bob")
   .patch({ age: 26 });
 // Same UPDATE as above, then a SELECT ... WHERE name = ? LIMIT 1 to return the row

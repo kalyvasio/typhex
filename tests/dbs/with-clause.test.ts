@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
 import { postgresQueryCompiler } from "../../src/dbs/postgres/query-compiler.js";
 import { sqliteQueryCompiler } from "../../src/dbs/sqlite/query-compiler.js";
+import { selectPlan } from "./compiler-plan-fixtures.js";
+
+function filteredPlan(value: number) {
+  return selectPlan("users", {
+    columnNames: ["id", "age"],
+    selectAll: true,
+    where: {
+      kind: "binary",
+      op: ">=",
+      left: { kind: "column", alias: "t0", column: ["age"] },
+      right: { kind: "const", value },
+    },
+  });
+}
 
 describe("compileWithClause", () => {
   it("Postgres: merges CTE params before outer params and renumbers placeholders", () => {
@@ -77,4 +91,45 @@ describe("compileWithClause", () => {
     );
     expect(sql.startsWith("WITH RECURSIVE")).toBe(true);
   });
+
+  it.each([
+    ["Postgres", postgresQueryCompiler, "$1", "$2"],
+    ["SQLite", sqliteQueryCompiler, "?", "?"],
+  ] as const)(
+    "%s: compiles plan-valued CTE bodies with CTE params first",
+    (_dialect, compiler, innerPlaceholder, outerPlaceholder) => {
+      const plan = {
+        ...filteredPlan(65),
+        ctes: [{ name: "adults", kind: "simple" as const, plan: filteredPlan(21) }],
+        fromSource: { kind: "cte" as const, name: "adults" },
+      };
+
+      const { sql, params } = compiler.compilePlan(plan);
+
+      expect(params).toEqual([21, 65]);
+      expect(sql).toContain(`"t0"."age" >= ${innerPlaceholder}`);
+      expect(sql).toContain(`FROM "adults" AS "t0"`);
+      expect(sql).toContain(`"t0"."age" >= ${outerPlaceholder}`);
+    },
+  );
+
+  it.each([
+    ["Postgres", postgresQueryCompiler, "$1", "$2"],
+    ["SQLite", sqliteQueryCompiler, "?", "?"],
+  ] as const)(
+    "%s: compiles plan-valued inline FROM subqueries before outer params",
+    (_dialect, compiler, innerPlaceholder, outerPlaceholder) => {
+      const plan = {
+        ...filteredPlan(65),
+        fromSource: { kind: "subquery" as const, plan: filteredPlan(21) },
+      };
+
+      const { sql, params } = compiler.compilePlan(plan);
+
+      expect(params).toEqual([21, 65]);
+      expect(sql).toContain(`FROM (SELECT`);
+      expect(sql).toContain(`"t0"."age" >= ${innerPlaceholder}`);
+      expect(sql).toContain(`"t0"."age" >= ${outerPlaceholder}`);
+    },
+  );
 });

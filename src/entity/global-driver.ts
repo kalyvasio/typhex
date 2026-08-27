@@ -1,7 +1,7 @@
 /**
  * Global default Db and entity registry.
  * - Db: set by Db constructor, fallback when entities don't have a per-entity Db.
- * - Registry: populated by Entity(), used by Db.migrate() / Db.validate().
+ * - Registry: populated by Entity(), used by schema operations when Db has no explicit entities.
  */
 
 import type { Db } from "../orm/db.js";
@@ -18,11 +18,15 @@ export function setDefaultDb(db: Db | null): void {
   defaultDb = db;
 }
 
+export function clearDefaultDb(db: Db): void {
+  if (defaultDb === db) defaultDb = null;
+}
+
 /** Minimal view of an entity class as held in the global registry. */
 export interface RegisteredEntity {
   /** Table name and schema, used for migrations and validation. */
   table: { _table: string; _schema: Record<string, string> };
-  /** Called once after registration to wire up many-to-many junction relations. */
+  /** Wires up many-to-many junction relations. */
   _registerJunctions?: () => void;
 }
 
@@ -33,16 +37,26 @@ export interface PendingJunction {
   options: JunctionOptions;
   resolveTarget: () => { table: string; pk: string[]; schema: Record<string, string> } | null;
   /** Materialize the junction entity given a fully-built schema. Captured at enqueue time so finalize doesn't need to import Entity (avoids cycle). */
-  materialize: (junctionSchema: Record<string, string>) => void;
+  materialize: (junctionSchema: Record<string, string>) => RegisteredEntity;
 }
 
 const entityRegistry: RegisteredEntity[] = [];
 
 class JunctionRegistry {
   private pending: PendingJunction[] = [];
+  private materialized = new Set<RegisteredEntity>();
   private draining = false;
 
   enqueue(p: PendingJunction): void {
+    if (
+      this.pending.some(
+        (existing) =>
+          existing.sourceTable === p.sourceTable &&
+          existing.options.junction === p.options.junction,
+      )
+    ) {
+      return;
+    }
     this.pending.push(p);
   }
 
@@ -79,7 +93,54 @@ class JunctionRegistry {
 
   clear(): void {
     this.pending = [];
+    this.materialized.clear();
     this.draining = false;
+  }
+
+  finalizeFor(entities: readonly RegisteredEntity[]): readonly RegisteredEntity[] {
+    const resolved = new Map(entities.map((entity) => [entity.table._table, entity]));
+    for (const entity of entities) entity._registerJunctions?.();
+
+    const remaining: PendingJunction[] = [];
+    for (const pending of this.pending) {
+      if (!resolved.has(pending.sourceTable)) {
+        remaining.push(pending);
+        continue;
+      }
+
+      const target = pending.resolveTarget();
+      if (!target) {
+        throw new Error(
+          `manyToMany: cannot finalize junction "${pending.options.junction}" for explicit Db entities: ` +
+            `target entity for "${pending.sourceTable}" is not available.`,
+        );
+      }
+      if (!resolved.has(target.table)) {
+        throw new Error(
+          `manyToMany: explicit Db entities must include target entity "${target.table}" ` +
+            `for junction "${pending.options.junction}".`,
+        );
+      }
+
+      const existing =
+        resolved.get(pending.options.junction) ??
+        [...this.materialized].find((entity) => entity.table._table === pending.options.junction);
+      const registered = entityRegistry.find(
+        (entity) => entity.table._table === pending.options.junction,
+      );
+      if (!existing && registered) {
+        throw new Error(
+          `manyToMany: explicit Db entities must include junction entity ` +
+            `"${pending.options.junction}" because it was defined explicitly.`,
+        );
+      }
+      const junction = existing ?? pending.materialize(buildJunctionSchema(pending, target));
+      if (!existing) this.materialized.add(junction);
+      resolved.set(junction.table._table, junction);
+    }
+    this.pending = remaining;
+
+    return [...resolved.values()];
   }
 
   private tryMaterialize(p: PendingJunction): boolean {
@@ -87,7 +148,7 @@ class JunctionRegistry {
     const target = p.resolveTarget();
     if (!target) return false;
     const schema = buildJunctionSchema(p, target);
-    p.materialize(schema);
+    this.materialized.add(p.materialize(schema));
     return true;
   }
 }
@@ -145,6 +206,12 @@ export function getRegisteredEntities(): readonly RegisteredEntity[] {
   junctionRegistry.drain();
   junctionRegistry.assertAllResolved();
   return entityRegistry;
+}
+
+export function finalizeEntityCollection(
+  entities: readonly RegisteredEntity[],
+): readonly RegisteredEntity[] {
+  return junctionRegistry.finalizeFor(entities);
 }
 
 export function getEntityByTableName(tableName: string): RegisteredEntity | undefined {

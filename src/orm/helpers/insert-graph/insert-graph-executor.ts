@@ -1,4 +1,4 @@
-import type { QueryExecutor } from "../../db.js";
+import type { ResolvedQueryExecutor } from "../../db.js";
 import type { InsertGraphPlan, PlannedNode } from "./insert-graph-planner.js";
 
 export abstract class InsertGraphExecutor {
@@ -21,7 +21,7 @@ export abstract class InsertGraphExecutor {
     }
   }
 
-  protected async insertSingleNode(qe: QueryExecutor, node: PlannedNode): Promise<void> {
+  protected async insertSingleNode(qe: ResolvedQueryExecutor, node: PlannedNode): Promise<void> {
     const inserted = (await node.entity.query(qe).insert(node.scalarData)) as Record<
       string,
       unknown
@@ -49,5 +49,8 @@ export abstract class InsertGraphExecutor {
     }
   }
 
-  protected abstract insertReadyNodes(qe: QueryExecutor, nodes: PlannedNode[]): Promise<void>;
+  protected abstract insertReadyNodes(
+    qe: ResolvedQueryExecutor,
+    nodes: PlannedNode[],
+  ): Promise<void>;
 }

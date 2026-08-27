@@ -55,6 +55,36 @@ describe("dbs/postgres", () => {
       expect(result.sql).toContain("$1");
       expect(result.params).toEqual([18]);
     });
+
+    it("compiles XOR with the Postgres operator", () => {
+      const expr: Expr = {
+        kind: "binary",
+        op: "^",
+        left: { kind: "column", alias: "t0", column: ["left"] },
+        right: { kind: "column", alias: "t0", column: ["right"] },
+      };
+      expect(postgresQueryCompiler.compileWhereExpr(expr).sql).toBe('("t0"."left" # "t0"."right")');
+    });
+
+    it("compilePlan select preserves INNER JOIN for Postgres cross joins", () => {
+      const result = postgresQueryCompiler.compilePlan(
+        selectPlan("contacts", {
+          columnNames: ["id", "companyId"],
+          joins: [
+            {
+              joinType: "cross",
+              targetTable: "companies",
+              alias: "t1",
+              foreignKeys: ["companyId"],
+              targetPkColumns: ["id"],
+            },
+          ],
+        }),
+      );
+      expect(result.sql).toContain(" INNER JOIN ");
+      expect(result.sql).not.toContain(" CROSS JOIN ");
+    });
+
     it("compilePlan insertMany produces multi-row INSERT with RETURNING * and sequential $N placeholders", () => {
       const { sql, params, returningRow } = postgresQueryCompiler.compilePlan(
         insertManyPlan(
@@ -205,30 +235,16 @@ describe("dbs/postgres", () => {
     });
 
     it("compileResultSize with WITH merges and renumbers placeholders", () => {
-      const innerState = {
-        tableName: "users",
+      const innerPlan = selectPlan("users", {
         columnNames: ["id", "age"],
-        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
-        pkColumns: ["id"],
-        whereIr: {
-          node: {
-            kind: "binary",
-            op: ">=",
-            left: { kind: "member", param: "u", path: ["age"] },
-            right: { kind: "const", value: 19 },
-          },
-          rootParam: "u",
-          localParamNames: ["u"],
+        selectAll: true,
+        where: {
+          kind: "binary",
+          op: ">=",
+          left: { kind: "column", alias: "t0", column: ["age"] },
+          right: { kind: "const", value: 19 },
         },
-        whereParams: {},
-        subqueryParams: {},
-        orderBy: [],
-        havingIr: null,
-        havingParams: {},
-        limitNum: null,
-        offsetNum: null,
-        selectIr: null,
-      };
+      });
       const { sql, params } = postgresQueryCompiler.compileResultSize({
         ...resultSizePlan("filtered", {
           kind: "binary",
@@ -237,7 +253,7 @@ describe("dbs/postgres", () => {
           right: { kind: "const", value: 30 },
         }),
         fromSource: { kind: "cte", name: "filtered" },
-        ctes: [{ name: "filtered", kind: "simple", inner: innerState }],
+        ctes: [{ name: "filtered", kind: "simple", plan: innerPlan }],
       });
       expect(sql).toContain("SELECT COUNT(*) AS c");
       expect(sql).toContain('FROM "filtered"');
@@ -245,43 +261,28 @@ describe("dbs/postgres", () => {
     });
 
     it("compilePlan with two CTEs keeps sequential $N placeholders", () => {
-      const adultsState = {
-        tableName: "users",
+      const adultsPlan = selectPlan("users", {
         columnNames: ["id", "age"],
-        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
-        pkColumns: ["id"],
-        whereIr: {
-          node: {
-            kind: "binary",
-            op: ">=",
-            left: { kind: "member", param: "u", path: ["age"] },
-            right: { kind: "const", value: 19 },
-          },
-          rootParam: "u",
-          localParamNames: ["u"],
+        selectAll: true,
+        where: {
+          kind: "binary",
+          op: ">=",
+          left: { kind: "column", alias: "t0", column: ["age"] },
+          right: { kind: "const", value: 19 },
         },
-        whereParams: {},
-        subqueryParams: {},
-        orderBy: [],
-        havingIr: null,
-        havingParams: {},
-        limitNum: null,
-        offsetNum: null,
-        selectIr: null,
-      };
-      const workingState = {
-        ...adultsState,
+      });
+      const workingPlan = {
+        ...selectPlan("users", {
+          columnNames: ["id", "age"],
+          selectAll: true,
+          where: {
+            kind: "binary" as const,
+            op: "<" as const,
+            left: { kind: "column" as const, alias: "t0", column: ["age"] },
+            right: { kind: "const" as const, value: 65 },
+          },
+        }),
         fromSource: { kind: "cte", name: "adults" },
-        whereIr: {
-          node: {
-            kind: "binary",
-            op: "<",
-            left: { kind: "member", param: "u", path: ["age"] },
-            right: { kind: "const", value: 65 },
-          },
-          rootParam: "u",
-          localParamNames: ["u"],
-        },
       };
       const { sql, params } = postgresQueryCompiler.compilePlan({
         ...selectPlan("working", {
@@ -296,8 +297,8 @@ describe("dbs/postgres", () => {
         }),
         fromSource: { kind: "cte", name: "working" },
         ctes: [
-          { name: "adults", kind: "simple", inner: adultsState },
-          { name: "working", kind: "simple", inner: workingState },
+          { name: "adults", kind: "simple", plan: adultsPlan },
+          { name: "working", kind: "simple", plan: workingPlan },
         ],
       });
       expect(params).toEqual([19, 65, 25]);
@@ -310,30 +311,16 @@ describe("dbs/postgres", () => {
     });
 
     it("compilePlan subquery FROM with limit uses correct placeholder after from params", () => {
-      const innerState = {
-        tableName: "users",
+      const innerPlan = selectPlan("users", {
         columnNames: ["id", "age"],
-        qe: { dialect: { queryCompiler: postgresQueryCompiler } },
-        pkColumns: ["id"],
-        whereIr: {
-          node: {
-            kind: "binary",
-            op: ">=",
-            left: { kind: "member", param: "u", path: ["age"] },
-            right: { kind: "const", value: 19 },
-          },
-          rootParam: "u",
-          localParamNames: ["u"],
+        selectAll: true,
+        where: {
+          kind: "binary",
+          op: ">=",
+          left: { kind: "column", alias: "t0", column: ["age"] },
+          right: { kind: "const", value: 19 },
         },
-        whereParams: {},
-        subqueryParams: {},
-        orderBy: [],
-        havingIr: null,
-        havingParams: {},
-        limitNum: null,
-        offsetNum: null,
-        selectIr: null,
-      };
+      });
       const { sql, params } = postgresQueryCompiler.compilePlan(
         {
           ...selectPlan("users", {
@@ -347,7 +334,7 @@ describe("dbs/postgres", () => {
             },
             limitNum: 10,
           }),
-          fromSource: { kind: "subquery", state: innerState },
+          fromSource: { kind: "subquery", plan: innerPlan },
         },
         { paramStartIndex: 5 },
       );

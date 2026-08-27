@@ -10,8 +10,12 @@ import type { IrSelectRelation } from "../../../ir/types.js";
 import { whereAnd, makeCompositeKey, buildRelationFetchWhereIr } from "../../query-helpers.js";
 import { getEntityByTableName } from "../../../entity/global-driver.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
-import type { RelationFetchSql } from "../../query-builder.js";
+import type { RelationFetchSql } from "../../statement.js";
 import { groupBy } from "../../../utils.js";
+
+function unsupportedRelationType(value: never): never {
+  throw new Error(`[typhex] Unsupported relation type: ${String(value)}`);
+}
 
 /** Build the WHERE IN query for one relation fetch; shared by the runtime and `toSql()` paths. */
 function buildRelationFetchQuery(
@@ -27,9 +31,13 @@ function buildRelationFetchQuery(
 
   const whereIr = rel?.whereIr ? whereAnd(baseWhere, rel.whereIr) : baseWhere;
   let chain = entity.query(qe).where(whereIr, rel?.whereParams ?? {});
-  for (const o of rel?.orderBy ?? []) {
-    const col = o.expr.kind === "member" ? (o.expr.path[0] ?? "") : "";
-    chain = chain.orderBy(col, o.direction);
+  for (const order of rel?.orderBy ?? []) {
+    if (order.expr.kind !== "member" || order.expr.path.length === 0) {
+      throw new Error(
+        `[typhex] relation "${rel?.name ?? "<unknown>"}" orderBy expects a column member expression`,
+      );
+    }
+    chain = chain.orderBy(order.expr.path.join("."), order.direction);
   }
   if (rel?.limitNum != null) chain = chain.limit(rel.limitNum);
   if (rel?.offsetNum != null) chain = chain.offset(rel.offsetNum);
@@ -71,8 +79,11 @@ export class RelationFetcher {
         return this.fetchManyToMany(meta);
       case "one-to-many":
         return this.fetchOneToMany(meta);
-      default:
+      case "one-to-one":
+      case "many-to-one":
         return this.fetchOneToOne(meta);
+      default:
+        return unsupportedRelationType(meta.relationType);
     }
   }
 
@@ -231,7 +242,8 @@ export class RelationFetchCompiler {
           meta.relation,
           label,
         );
-      default:
+      case "one-to-one":
+      case "many-to-one":
         return this.compileFetchRows(
           meta.fkColumns,
           meta.targetPkColumns,
@@ -239,6 +251,8 @@ export class RelationFetchCompiler {
           meta.relation,
           label,
         );
+      default:
+        return unsupportedRelationType(meta.relationType);
     }
   }
 

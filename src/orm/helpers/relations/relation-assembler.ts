@@ -8,6 +8,10 @@ import { makeCompositeKey } from "../../query-helpers.js";
 
 export type RelationFetchedData = Map<string, Map<string, unknown> | Map<string, unknown[]>>;
 
+function unsupportedRelationType(value: never): never {
+  throw new Error(`[typhex] Unsupported relation type: ${String(value)}`);
+}
+
 /** Attaches JOIN-projected and separately fetched relation data onto result rows. */
 export class RelationAssembler {
   constructor(private readonly rows: Record<string, unknown>[]) {}
@@ -38,10 +42,17 @@ export class RelationAssembler {
       if (skip.has(meta.relation.name)) continue;
       const data = fetched.get(meta.relation.name);
       if (!data) continue;
-      if (meta.relationType === "one-to-many" || meta.relationType === "many-to-many") {
-        this.attachToManyRelation(meta, data as Map<string, unknown[]>);
-      } else {
-        this.attachToOneRelation(meta, data as Map<string, unknown>);
+      switch (meta.relationType) {
+        case "one-to-many":
+        case "many-to-many":
+          this.attachToManyRelation(meta, data as Map<string, unknown[]>);
+          break;
+        case "one-to-one":
+        case "many-to-one":
+          this.attachToOneRelation(meta, data as Map<string, unknown>);
+          break;
+        default:
+          unsupportedRelationType(meta.relationType);
       }
     }
   }

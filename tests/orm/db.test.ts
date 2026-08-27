@@ -28,6 +28,18 @@ describe("Db", () => {
       expect(getDefaultDb()).toBe(db);
       await db.close();
     });
+
+    it("can opt out of becoming the default and become default explicitly", async () => {
+      const current = new Db(freshDriver());
+      const secondary = new Db({ driver: freshDriver(), setAsDefault: false });
+
+      expect(getDefaultDb()).toBe(current);
+      expect(secondary.setAsDefault()).toBe(secondary);
+      expect(getDefaultDb()).toBe(secondary);
+
+      await current.close();
+      await secondary.close();
+    });
   });
 
   describe("driver", () => {
@@ -44,6 +56,17 @@ describe("Db", () => {
       const db = new Db(freshDriver());
       expect(getDefaultDb()).not.toBeNull();
       await db.close();
+      expect(getDefaultDb()).toBeNull();
+    });
+
+    it("does not clear a different Db that became the default", async () => {
+      const first = new Db(freshDriver());
+      const second = new Db(freshDriver());
+
+      await first.close();
+      expect(getDefaultDb()).toBe(second);
+
+      await second.close();
       expect(getDefaultDb()).toBeNull();
     });
   });
@@ -71,6 +94,92 @@ describe("Db", () => {
       await db.migrate();
       await User.query().insert({ name: "Alice" });
       expect(await User.query().count()).toBe(1);
+      await db.close();
+    });
+
+    it("uses an explicit entity collection instead of the global registry", async () => {
+      const Owned = Entity("mig_owned", { id: "integer primary key" });
+      Entity("mig_global_only", { id: "integer primary key" });
+      const db = new Db({ driver: freshDriver(), entities: [Owned] });
+
+      await db.migrate();
+
+      const rows = (await db.query(
+        `SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`,
+      )) as Array<{ name: string }>;
+      expect(rows.map((row) => row.name)).toContain("mig_owned");
+      expect(rows.map((row) => row.name)).not.toContain("mig_global_only");
+      await db.close();
+    });
+
+    it("auto-registers junctions for explicit entity collections", async () => {
+      const Tag = Entity("mig_explicit_tags", { id: "integer primary key" });
+      const Post = Entity(
+        "mig_explicit_posts",
+        { id: "integer primary key" },
+        {
+          tags: rel.manyToMany(() => Tag, {
+            junction: "mig_explicit_post_tags",
+            foreignKey: "postId",
+            referenceKey: "tagId",
+          }),
+        },
+      );
+      const db = new Db({ driver: freshDriver(), entities: [Post, Tag] });
+
+      await db.migrate();
+
+      const rows = await db.query(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'mig_explicit_post_tags'`,
+      );
+      expect(rows).toHaveLength(1);
+      await db.close();
+    });
+
+    it("requires many-to-many targets in an explicit entity collection", async () => {
+      const Tag = Entity("mig_boundary_tags", { id: "integer primary key" });
+      const Post = Entity(
+        "mig_boundary_posts",
+        { id: "integer primary key" },
+        {
+          tags: rel.manyToMany(() => Tag, {
+            junction: "mig_boundary_post_tags",
+            foreignKey: "postId",
+            referenceKey: "tagId",
+          }),
+        },
+      );
+      const db = new Db({ driver: freshDriver(), entities: [Post] });
+
+      await expect(db.migrate()).rejects.toThrow(
+        'explicit Db entities must include target entity "mig_boundary_tags"',
+      );
+      await db.close();
+    });
+
+    it("requires explicitly defined junctions in the entity collection", async () => {
+      const Tag = Entity("mig_custom_tags", { id: "integer primary key" });
+      Entity("mig_custom_post_tags", {
+        postId: "integer not null",
+        tagId: "integer not null",
+        addedAt: "text",
+      });
+      const Post = Entity(
+        "mig_custom_posts",
+        { id: "integer primary key" },
+        {
+          tags: rel.manyToMany(() => Tag, {
+            junction: "mig_custom_post_tags",
+            foreignKey: "postId",
+            referenceKey: "tagId",
+          }),
+        },
+      );
+      const db = new Db({ driver: freshDriver(), entities: [Post, Tag] });
+
+      await expect(db.migrate()).rejects.toThrow(
+        'explicit Db entities must include junction entity "mig_custom_post_tags"',
+      );
       await db.close();
     });
   });
@@ -499,6 +608,17 @@ describe("Db", () => {
       });
       const db = new Db(driver);
       await expect(db.validate()).rejects.toThrow('column "name"');
+      await db.close();
+    });
+
+    it("validates only an explicit entity collection", async () => {
+      const Owned = Entity("val_explicit_owned", { id: "integer primary key" });
+      Entity("val_explicit_global_only", { id: "integer primary key" });
+      const db = new Db({ driver: freshDriver(), entities: [Owned] });
+
+      await db.migrate();
+
+      await expect(db.validate()).resolves.not.toThrow();
       await db.close();
     });
 

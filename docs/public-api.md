@@ -19,7 +19,6 @@ Public runtime exports:
 - `InsertBuilder`
 - `Entity`
 - `rel`
-- `getPkColumnsFromSchema`
 - `createDriver`
 - `createSqliteDriver`
 - `createPostgresDriver`
@@ -54,17 +53,18 @@ Public type exports:
 **Driver/config types:**
 `Driver`, `Connection`, `ExecuteResult`, `TransactionOptions`,
 `SqliteDriverOptions`, `CreateDriverOptions`, `PostgresDriverOptions`,
-`ColumnDef`, `TyphexConfig`, `LoadConfigOptions`
+`DialectColumnDef`, `TyphexConfig`, `LoadConfigOptions`
 
 **Migration types:**
-`DiffAction`, `DialectName`, `MigrationFile`, `MigrationRecord`, `MigrationResult`
+`DiffAction`, `DialectName`, `MigrationFile`, `MigrationRecord`, `MigrationResult`,
+`PendingMigration`, `MigrationDryRun`, `MigrationDb`
 
 The IR types (`IrNode`, `IrOrderBy`, `IrSelect`), parser helpers
 (`parseArrowToIr`, `parseArrowToIrSelect`), and `QueryState` are stripped
 from the published `.d.ts` via TypeScript's `stripInternal` and the
 `@internal` JSDoc tag — they're an internal protocol between the TypeScript
-transformer and the runtime query builder. The internal QB helpers
-(`expandWithSentinels`, `logSql`, `isDebugSqlEnabled`) are also stripped.
+transformer and the runtime query builder. Query execution context helpers are
+also internal.
 
 ### `typhex/transformer`
 

@@ -263,6 +263,10 @@ function parseSelectObjectProperty(
     const parsed = parseTsAggregateCall(value, [pb.paramName], resolveArg);
     if (parsed) return { kind: "aggregate", aggregate: { ...parsed.ir, alias: keyName } };
 
+    // Relation query chains are runtime-parser territory: it emits the canonical
+    // IrSelectRelation shape, while Entity.query() scalar queries remain subquery refs.
+    if (isDeclaredRelationQueryChain(value, pb)) return null;
+
     if (isTyphexQueryChain(value, checker)) {
       return {
         kind: "subquery",
@@ -274,6 +278,20 @@ function parseSelectObjectProperty(
   const expr = parseExpressionToIr(value, [pb.paramName], freeVars);
   if (!expr || expr.kind === "member" || expr.kind === "param") return null;
   return { kind: "expression", expr };
+}
+
+function isDeclaredRelationQueryChain(value: ts.CallExpression, pb: ParamBindings): boolean {
+  let current: ts.Expression = value;
+  while (ts.isCallExpression(current) && ts.isPropertyAccessExpression(current.expression)) {
+    const callee = current.expression;
+    if (callee.name.text === "query") {
+      if (!ts.isPropertyAccessExpression(callee.expression)) return false;
+      const path = memberPath(callee.expression, pb.paramName);
+      return path?.length === 1;
+    }
+    current = callee.expression;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

@@ -182,11 +182,13 @@ describe("Aggregations", () => {
       expect(sql).toContain('"category"');
     });
 
-    it("groupBy returns the same QueryBuilder (mutates in place)", () => {
+    it("groupBy returns an independent QueryBuilder", () => {
       const base = newBuilder(qe);
       const q = base.groupBy("category");
       expect(q).toBeInstanceOf(QueryBuilder);
-      expect(q).toBe(base);
+      expect(q).not.toBe(base);
+      expect(base.toArray().toSql().sql).not.toContain("GROUP BY");
+      expect(q.toArray().toSql().sql).toContain("GROUP BY");
     });
   });
 
@@ -218,7 +220,7 @@ describe("Aggregations", () => {
       expect(sql).toContain("GROUP BY");
     });
 
-    it("having returns the same QueryBuilder (mutates in place)", () => {
+    it("having returns an independent QueryBuilder", () => {
       const havingIr = having({
         kind: "binary" as const,
         op: ">" as const,
@@ -228,7 +230,30 @@ describe("Aggregations", () => {
       const base = newBuilder(qe);
       const q = base.having(havingIr);
       expect(q).toBeInstanceOf(QueryBuilder);
-      expect(q).toBe(base);
+      expect(q).not.toBe(base);
+      expect(base.toArray().toSql().sql).not.toContain("HAVING");
+      expect(q.toArray().toSql().sql).toContain("HAVING");
+    });
+
+    it("replaces having params with the predicate", () => {
+      const minimum = having({
+        kind: "binary",
+        op: ">",
+        left: { kind: "aggregate", func: "COUNT", arg: null },
+        right: { kind: "param", key: "minimum" },
+      });
+      const maximum = having({
+        kind: "binary",
+        op: "<",
+        left: { kind: "aggregate", func: "COUNT", arg: null },
+        right: { kind: "param", key: "maximum" },
+      });
+
+      const aboveMinimum = newBuilder(qe).groupBy("category").having(minimum, { minimum: 2 });
+      const belowMaximum = aboveMinimum.having(maximum, { maximum: 10 });
+
+      expect(aboveMinimum.toArray().toSql().params).toEqual([2]);
+      expect(belowMaximum.toArray().toSql().params).toEqual([10]);
     });
   });
 

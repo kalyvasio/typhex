@@ -81,7 +81,9 @@ SELECT id, userId, bio FROM user_profiles WHERE userId IN (?, ?, ...)
 
 ## Many-to-Many Relations
 
-A `manyToMany` relation works through a junction table that you manage directly in SQL (Typhex doesn't auto-migrate junction tables):
+A `manyToMany` relation works through a junction table. Typhex derives the
+junction column types from the two entities' primary keys and auto-registers
+the junction for migration:
 
 ```ts
 import { Entity, rel, type ManyToMany } from "typhex";
@@ -102,11 +104,18 @@ export class Post extends Entity(
 }
 ```
 
-Create the junction table manually (once):
+Include both relation endpoints when using an explicit `Db` entity collection.
+The derived junction entity is added automatically:
 
 ```ts
-await db.run("CREATE TABLE post_tags (postId INTEGER NOT NULL, tagId INTEGER NOT NULL)");
+const db = new Db({ driver, entities: [Post, Tag] });
+await db.migrate(); // also creates post_tags
 ```
+
+If the junction needs extra columns or constraints, define it with `Entity()`
+and include that entity in the collection. An explicit collection that omits a
+many-to-many target is rejected because Typhex cannot finalize the junction
+schema safely.
 
 Then use it like any other relation in `select()`:
 

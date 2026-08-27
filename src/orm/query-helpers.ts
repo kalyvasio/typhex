@@ -5,8 +5,7 @@
 
 import type { IrNode, IrWhere } from "../ir/types.js";
 import { isRecord } from "../utils.js";
-
-const DEFAULT_ROW_PARAM = "u";
+import { DEFAULT_ROW_PARAM } from "../arrow/constants.js";
 
 /** Build IR for: column === value. Used for PK lookups, etc. */
 export function whereColumnEq(column: string, value: unknown, param = DEFAULT_ROW_PARAM): IrWhere {
