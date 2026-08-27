@@ -366,59 +366,6 @@ Nested transactions use savepoints. Transaction options include isolation level,
 
 See the [Transactions guide](docs/guide/transactions.md).
 
-## Compiling to SQL
-
-Terminal methods (`toArray`, `first`, `findById`, `count`, `update`,
-`updateReturning`, `delete`, `deleteReturning`, `insert`, `insertMany`, and
-`onConflict(...).doNothing()` / `.doUpdate()`) return lazy statements: `await` one
-to execute it, or call `.toSql()` on it to get the SQL and bound parameters without
-executing anything:
-
-```ts
-const users = await User.query()
-  .where((u) => u.age > 18)
-  .toArray(); // executes
-
-const { sql, params } = User.query()
-  .where((u) => u.age > 18)
-  .toArray()
-  .toSql(); // compiles only
-// sql:    SELECT * FROM users WHERE age > ?
-// params: [18]
-
-User.query()
-  .where((u) => u.age > 18)
-  .first()
-  .toSql(); // SELECT … LIMIT 1
-User.query()
-  .where((u) => u.age > 18)
-  .count()
-  .toSql(); // the COUNT
-User.query()
-  .where((u) => u.age > 18)
-  .delete()
-  .toSql(); // the DELETE
-User.query().insert({ name: "Alice" }).toSql(); // the INSERT
-```
-
-When a SELECT eager-loads relations, `toSql()` also returns the secondary WHERE IN
-fetch queries under `relationFetches`. Parent key values are unknown until execution,
-so they appear as `«column»` sentinels in `params`:
-
-```ts
-const { sql, params, relationFetches } = User.query()
-  .select((u) => ({ id: u.id, posts: u.posts }))
-  .toArray()
-  .toSql();
-// sql: main SELECT on users
-// relationFetches[0].sql: SELECT ... FROM posts WHERE authorId IN (?)
-// relationFetches[0].params: ["«id»"]
-```
-
-Compilation is synchronous and never touches the database. For tooling that only
-extracts SQL (editors, CI checks), set `TYPHEX_COMPILE_ONLY=1`: drivers then skip
-opening real connections entirely — `toSql()` works, while executing any query throws.
-
 ## Debugging
 
 Set `TYPHEX_DEBUG=1` to log SQL and parameters:
