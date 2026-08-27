@@ -41,7 +41,7 @@ export type {
 } from "./driver/types.js";
 export type { SqliteDriverOptions, CreateDriverOptions } from "./driver/index.js";
 export type { PostgresDriverOptions } from "./dbs/index.js";
-export type { ColumnDef, DialectColumnDef, ColumnChange, DbColumnInfo } from "./dbs/types.js";
+export type { DialectColumnDef, ColumnChange, DbColumnInfo } from "./dbs/types.js";
 
 // Entity machinery
 export type {

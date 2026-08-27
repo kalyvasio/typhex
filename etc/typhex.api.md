@@ -38,9 +38,6 @@ export type ColumnChange = {
     to: boolean;
 };
 
-// @public @deprecated (undocumented)
-export type ColumnDef = DialectColumnDef;
-
 // @public
 export interface Connection<TDialect extends DialectInfo = DialectInfo> {
     readonly dialect: TDialect;

@@ -53,7 +53,7 @@ Public type exports:
 **Driver/config types:**
 `Driver`, `Connection`, `ExecuteResult`, `TransactionOptions`,
 `SqliteDriverOptions`, `CreateDriverOptions`, `PostgresDriverOptions`,
-`DialectColumnDef`, `ColumnDef` (compatibility alias), `TyphexConfig`, `LoadConfigOptions`
+`DialectColumnDef`, `TyphexConfig`, `LoadConfigOptions`
 
 **Migration types:**
 `DiffAction`, `DialectName`, `MigrationFile`, `MigrationRecord`, `MigrationResult`,

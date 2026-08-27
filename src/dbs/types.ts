@@ -19,8 +19,6 @@ export type { DialectName };
 
 /** Column definition: string (all dialects) or per-dialect map. */
 export type DialectColumnDef = string | { [K in DialectName]?: string };
-/** @deprecated Use `DialectColumnDef`. */
-export type ColumnDef = DialectColumnDef;
 
 export interface CompileResult {
   sql: string;

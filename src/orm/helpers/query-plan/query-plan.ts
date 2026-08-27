@@ -49,7 +49,7 @@
  * compiles to a SQL subquery referencing `t0.id`.
  */
 
-import { type IrSelectRelation, type JoinHint } from "../../../ir/types.js";
+import { type IrSelectRelation } from "../../../ir/types.js";
 import type { RelationType } from "../../../entity/relations.js";
 import type { AnyEntityClass } from "../../../entity/entity.js";
 import type { QueryCompiler, QueryOperation } from "../../../dbs/types.js";
@@ -837,7 +837,3 @@ function toJoinSpec(j: RelationJoinMeta): JoinSpec {
     joinType: j.joinType,
   };
 }
-
-/** Re-export so the legacy `import type { JoinHint } from "./query-plan"` path
- *  keeps working for any consumer that still does it. */
-export type { JoinHint };
