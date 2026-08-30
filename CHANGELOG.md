@@ -7,6 +7,17 @@ Typhex follows semantic versioning for the documented public API. During the
 
 ## Unreleased
 
+## 0.1.0-alpha.2 - 2026-08-30
+
+- Query terminals (`toArray`, `first`, `count`, `findById`, `update`, `delete`, and inserts) now return a lazy `Statement`: `await` to execute, `.toSql()` to compile without running.
+- Add `TYPHEX_COMPILE_ONLY` to compile queries without a live database.
+- Query builder chains are immutable.
+- Nested queries are planned before SQL compilation.
+- `Db` can own an explicit `entities` collection for migrate/validate/generate; the process registry remains the fallback.
+- Keep `update()` and `patch()` as distinct operations.
+- Remove pre-release compatibility aliases.
+- Bump `better-sqlite3`, `pg`, and `acorn`.
+
 ## 0.1.0-alpha.1 - 2026-06-15
 
 - Switch release workflow to npm Trusted Publishing (OIDC) instead of `NPM_TOKEN`.
