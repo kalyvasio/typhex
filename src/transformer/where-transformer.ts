@@ -19,6 +19,7 @@ import {
   captureSubqueryRef as captureSubqueryRefShared,
   isTyphexQueryChain,
   type CapturedSubquery,
+  type CapturedValue,
 } from "./subquery-transformer.js";
 import {
   getArrowExpressionBody,
@@ -54,6 +55,7 @@ interface WhereCtx {
   paramNames: string[];
   freeVars: Set<string>;
   capturedSubqueries: CapturedSubquery[];
+  capturedValues: CapturedValue[];
   checker?: ts.TypeChecker;
   outerDestructured?: OuterDestructured;
   /** Stack of enclosing arrow ScopeFrames (paramName + optional destructured
@@ -191,7 +193,17 @@ function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNod
       }
     }
   }
-  return null;
+  return captureClosureValue(expr, ctx);
+}
+
+function captureClosureValue(expr: ts.Expression, ctx: WhereCtx): IrNode {
+  const source = expr.getText();
+  const existing = ctx.capturedValues.find((value) => value.source === source);
+  if (existing) return { kind: "param", key: existing.key };
+
+  const key = `@capture:${ctx.capturedValues.length}`;
+  ctx.capturedValues.push({ key, source, expr });
+  return { kind: "param", key };
 }
 
 /**
@@ -339,11 +351,11 @@ function tryParseSomeEvery(
   const innerExpr = getArrowExpressionBody(innerFn);
   if (!innerExpr) return null;
 
-  // Inner free-vars are intentionally discarded — subquery scope is self-contained.
   const innerWhere = exprToIr(innerExpr, {
     paramNames: [innerParam],
-    freeVars: new Set(),
-    capturedSubqueries: [],
+    freeVars: ctx.freeVars,
+    capturedSubqueries: ctx.capturedSubqueries,
+    capturedValues: ctx.capturedValues,
     checker: ctx.checker,
   });
   if (!innerWhere) return null;
@@ -380,18 +392,25 @@ function arrowToIr(
   extraParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
   outerScope?: ScopeFrame[],
-): { ir: IrWhere; freeVars: string[]; capturedSubqueries: CapturedSubquery[] } | null {
+): {
+  ir: IrWhere;
+  freeVars: string[];
+  capturedSubqueries: CapturedSubquery[];
+  capturedValues: CapturedValue[];
+} | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
 
   const paramNames = [...extractParamNames(fn), ...extraParamNames];
   const freeVars = new Set<string>();
   const capturedSubqueries: CapturedSubquery[] = [];
+  const capturedValues: CapturedValue[] = [];
 
   const ir = exprToIr(expr, {
     paramNames,
     freeVars,
     capturedSubqueries,
+    capturedValues,
     checker,
     outerDestructured,
     outerScope,
@@ -406,6 +425,7 @@ function arrowToIr(
     },
     freeVars: [...freeVars],
     capturedSubqueries,
+    capturedValues,
   };
 }
 
@@ -436,7 +456,7 @@ function transformArrowCall(
 
   const args: ts.Expression[] = [
     irWhereToTsLiteral(result.ir),
-    buildParamsLiteral(result.freeVars, result.capturedSubqueries),
+    buildParamsLiteral(result.freeVars, result.capturedSubqueries, result.capturedValues),
   ];
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
@@ -471,6 +491,7 @@ export function parseExpressionToIr(
     paramNames,
     freeVars,
     capturedSubqueries: [],
+    capturedValues: [],
     checker,
   });
 }

@@ -46,6 +46,19 @@ describe("parser/parse-arrow", () => {
     }
   });
 
+  it("requires runtime closure properties to be passed as leaf params", () => {
+    const item = { id: 7 };
+    const propertyFn = (u: { id: number }) => u.id === item.id;
+    expect(() => parseArrowToIr(propertyFn, { paramNames: ["u"], paramKeys: ["item"] })).toThrow(
+      "Unsupported member expression",
+    );
+
+    const itemId = item.id;
+    const paramFn = (u: { id: number }) => u.id === itemId;
+    const ir = parseArrowToIr(paramFn, { paramNames: ["u"], paramKeys: ["itemId"] });
+    expect(ir.kind === "binary" && ir.right).toEqual({ kind: "param", key: "itemId" });
+  });
+
   it("parses not expression", () => {
     const fn = (u: { active: boolean }) => !u.active;
     const ir = parseArrowToIr(fn);

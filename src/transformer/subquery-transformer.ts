@@ -13,6 +13,12 @@ export interface CapturedSubquery {
   expr: ts.Expression;
 }
 
+export interface CapturedValue {
+  key: string;
+  source: string;
+  expr: ts.Expression;
+}
+
 export function isTyphexQueryChain(expr: ts.Expression, checker: ts.TypeChecker): boolean {
   return findQueryCall(expr, checker) !== null;
 }
@@ -29,6 +35,7 @@ export function captureSubqueryRef(
 export function buildParamsLiteral(
   freeVars: string[],
   capturedSubqueries: CapturedSubquery[],
+  capturedValues: CapturedValue[] = [],
 ): ts.ObjectLiteralExpression {
   const f = ts.factory;
   const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
@@ -36,6 +43,9 @@ export function buildParamsLiteral(
   );
   for (const sub of capturedSubqueries) {
     props.push(f.createPropertyAssignment(sub.key, sub.expr));
+  }
+  for (const value of capturedValues) {
+    props.push(f.createPropertyAssignment(f.createStringLiteral(value.key), value.expr));
   }
   return f.createObjectLiteralExpression(props);
 }
