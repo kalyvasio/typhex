@@ -18,7 +18,7 @@ import {
   buildParamsLiteral,
   captureSubqueryRef as captureSubqueryRefShared,
   isTyphexQueryChain,
-  type CapturedSubquery,
+  type CapturedExpression,
 } from "./subquery-transformer.js";
 import {
   getArrowExpressionBody,
@@ -53,7 +53,7 @@ export function toOuterDestructured(pb: ParamBindings): OuterDestructured | unde
 interface WhereCtx {
   paramNames: string[];
   freeVars: Set<string>;
-  capturedSubqueries: CapturedSubquery[];
+  capturedExpressions: CapturedExpression[];
   checker?: ts.TypeChecker;
   outerDestructured?: OuterDestructured;
   /** Stack of enclosing arrow ScopeFrames (paramName + optional destructured
@@ -140,7 +140,7 @@ function tryExtractSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRe
 }
 
 function captureSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRef {
-  return captureSubqueryRefShared(expr, ctx.capturedSubqueries);
+  return captureSubqueryRefShared(expr, ctx.capturedExpressions);
 }
 
 /** Handle `!<expr>` / `~<expr>` — `!` wraps inner IR; `~` emits bitwise NOT. */
@@ -191,7 +191,22 @@ function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNod
       }
     }
   }
-  return null;
+  return captureClosureExpression(expr, ctx);
+}
+
+function captureClosureExpression(expr: ts.Expression, ctx: WhereCtx): IrNode {
+  const source = expr.getText();
+  const existing = ctx.capturedExpressions.find(
+    (captured) => captured.key.startsWith("@capture:") && captured.expr.getText() === source,
+  );
+  if (existing) return { kind: "param", key: existing.key };
+
+  const index = ctx.capturedExpressions.filter((captured) =>
+    captured.key.startsWith("@capture:"),
+  ).length;
+  const key = `@capture:${index}`;
+  ctx.capturedExpressions.push({ key, expr });
+  return { kind: "param", key };
 }
 
 /**
@@ -339,11 +354,10 @@ function tryParseSomeEvery(
   const innerExpr = getArrowExpressionBody(innerFn);
   if (!innerExpr) return null;
 
-  // Inner free-vars are intentionally discarded — subquery scope is self-contained.
   const innerWhere = exprToIr(innerExpr, {
     paramNames: [innerParam],
-    freeVars: new Set(),
-    capturedSubqueries: [],
+    freeVars: ctx.freeVars,
+    capturedExpressions: ctx.capturedExpressions,
     checker: ctx.checker,
   });
   if (!innerWhere) return null;
@@ -380,18 +394,22 @@ function arrowToIr(
   extraParamNames: string[] = [],
   outerDestructured?: OuterDestructured,
   outerScope?: ScopeFrame[],
-): { ir: IrWhere; freeVars: string[]; capturedSubqueries: CapturedSubquery[] } | null {
+): {
+  ir: IrWhere;
+  freeVars: string[];
+  capturedExpressions: CapturedExpression[];
+} | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
 
   const paramNames = [...extractParamNames(fn), ...extraParamNames];
   const freeVars = new Set<string>();
-  const capturedSubqueries: CapturedSubquery[] = [];
+  const capturedExpressions: CapturedExpression[] = [];
 
   const ir = exprToIr(expr, {
     paramNames,
     freeVars,
-    capturedSubqueries,
+    capturedExpressions,
     checker,
     outerDestructured,
     outerScope,
@@ -405,7 +423,7 @@ function arrowToIr(
       localParamNames: paramNames,
     },
     freeVars: [...freeVars],
-    capturedSubqueries,
+    capturedExpressions,
   };
 }
 
@@ -436,7 +454,7 @@ function transformArrowCall(
 
   const args: ts.Expression[] = [
     irWhereToTsLiteral(result.ir),
-    buildParamsLiteral(result.freeVars, result.capturedSubqueries),
+    buildParamsLiteral(result.freeVars, result.capturedExpressions),
   ];
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
@@ -470,7 +488,7 @@ export function parseExpressionToIr(
   return exprToIr(expr, {
     paramNames,
     freeVars,
-    capturedSubqueries: [],
+    capturedExpressions: [],
     checker,
   });
 }

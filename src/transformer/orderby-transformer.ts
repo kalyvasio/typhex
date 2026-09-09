@@ -11,7 +11,7 @@ import {
   buildParamsLiteral,
   captureSubqueryRef,
   isTyphexQueryChain,
-  type CapturedSubquery,
+  type CapturedExpression,
 } from "./subquery-transformer.js";
 
 type Direction = "asc" | "desc";
@@ -32,17 +32,17 @@ export function transformOrderByCall(
   const paramName = getFirstIdentifierParamName(fn);
   if (!paramName) return null;
 
-  const capturedSubqueries: CapturedSubquery[] = [];
+  const capturedExpressions: CapturedExpression[] = [];
   const freeVars = new Set<string>();
-  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedSubqueries, freeVars);
+  const expr = extractOrderByExpr(fn.body, paramName, checker, capturedExpressions, freeVars);
   if (!expr) return null;
 
   const direction = parseDirectionArg(call.arguments);
   if (direction === null) return null;
 
   const args: ts.Expression[] = [irOrderByToTsLiteral({ expr, direction })];
-  if (capturedSubqueries.length > 0 || freeVars.size > 0) {
-    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
+  if (capturedExpressions.length > 0 || freeVars.size > 0) {
+    args.push(buildParamsLiteral([...freeVars], capturedExpressions));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
@@ -53,14 +53,14 @@ function extractOrderByExpr(
   body: ts.ConciseBody,
   paramName: string,
   checker: ts.TypeChecker,
-  capturedSubqueries: CapturedSubquery[],
+  capturedExpressions: CapturedExpression[],
   freeVars: Set<string>,
 ): IrNode | null {
   const path = extractColumnPath(body, paramName);
   if (path) return { kind: "member", param: paramName, path };
   if (ts.isExpression(body)) {
     if (isTyphexQueryChain(body, checker)) {
-      return captureSubqueryRef(body, capturedSubqueries);
+      return captureSubqueryRef(body, capturedExpressions);
     }
     const ir = parseExpressionToIr(body, [paramName], freeVars);
     if (ir && ir.kind !== "member" && ir.kind !== "param") return ir;

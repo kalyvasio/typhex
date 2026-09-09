@@ -20,7 +20,7 @@ import {
   buildParamsLiteral,
   captureSubqueryRef,
   isTyphexQueryChain,
-  type CapturedSubquery,
+  type CapturedExpression,
 } from "./subquery-transformer.js";
 
 // ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ function arrowToIrSelect(
   fn: ts.ArrowFunction | ts.FunctionExpression,
   pb: ParamBindings,
   checker: ts.TypeChecker,
-  capturedSubqueries: CapturedSubquery[],
+  capturedExpressions: CapturedExpression[],
   freeVars: Set<string>,
 ): IrSelect | null {
   if (!ts.isBlock(fn.body)) {
@@ -46,7 +46,7 @@ function arrowToIrSelect(
 
   const obj = extractReturnedObjectLiteral(fn);
   if (!obj) return null;
-  return parseSelectObjectLiteral(obj, pb, checker, capturedSubqueries, freeVars);
+  return parseSelectObjectLiteral(obj, pb, checker, capturedExpressions, freeVars);
 }
 
 /**
@@ -143,7 +143,7 @@ function parseSelectObjectLiteral(
   obj: ts.ObjectLiteralExpression,
   pb: ParamBindings,
   checker: ts.TypeChecker,
-  capturedSubqueries: CapturedSubquery[],
+  capturedExpressions: CapturedExpression[],
   freeVars: Set<string>,
 ): IrSelect | null {
   const paths: string[][] = [];
@@ -168,7 +168,7 @@ function parseSelectObjectLiteral(
       keyName,
       pb,
       checker,
-      capturedSubqueries,
+      capturedExpressions,
       freeVars,
     );
     if (!handled) return null;
@@ -236,7 +236,7 @@ function parseSelectObjectProperty(
   keyName: string,
   pb: ParamBindings,
   checker: ts.TypeChecker,
-  capturedSubqueries: CapturedSubquery[],
+  capturedExpressions: CapturedExpression[],
   freeVars: Set<string>,
 ): PropertyResult | null {
   if (ts.isShorthandPropertyAssignment(prop)) {
@@ -270,7 +270,7 @@ function parseSelectObjectProperty(
     if (isTyphexQueryChain(value, checker)) {
       return {
         kind: "subquery",
-        subquery: captureSubqueryRef(value, capturedSubqueries),
+        subquery: captureSubqueryRef(value, capturedExpressions),
       };
     }
   }
@@ -307,14 +307,14 @@ export function transformSelectCall(
   if (!arrow) return null;
 
   const pb = getParamBindings(arrow.parameters[0]?.name);
-  const capturedSubqueries: CapturedSubquery[] = [];
+  const capturedExpressions: CapturedExpression[] = [];
   const freeVars = new Set<string>();
-  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedSubqueries, freeVars);
+  const irSelect = arrowToIrSelect(arrow, pb, checker, capturedExpressions, freeVars);
   if (!irSelect) return null;
 
   const args: ts.Expression[] = [irSelectToTsLiteral(irSelect)];
-  if (capturedSubqueries.length > 0 || freeVars.size > 0) {
-    args.push(buildParamsLiteral([...freeVars], capturedSubqueries));
+  if (capturedExpressions.length > 0 || freeVars.size > 0) {
+    args.push(buildParamsLiteral([...freeVars], capturedExpressions));
   }
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }

@@ -8,7 +8,7 @@ import * as ts from "typescript";
 import type { IrSubqueryRef } from "../ir/types.js";
 import { isTyphexType } from "./shared.js";
 
-export interface CapturedSubquery {
+export interface CapturedExpression {
   key: string;
   expr: ts.Expression;
 }
@@ -19,23 +19,25 @@ export function isTyphexQueryChain(expr: ts.Expression, checker: ts.TypeChecker)
 
 export function captureSubqueryRef(
   expr: ts.Expression,
-  capturedSubqueries: CapturedSubquery[],
+  capturedExpressions: CapturedExpression[],
 ): IrSubqueryRef {
-  const key = `_sub${capturedSubqueries.length}`;
-  capturedSubqueries.push({ key, expr });
+  const index = capturedExpressions.filter((captured) => captured.key.startsWith("_sub")).length;
+  const key = `_sub${index}`;
+  capturedExpressions.push({ key, expr });
   return { kind: "subqueryRef", key };
 }
 
 export function buildParamsLiteral(
   freeVars: string[],
-  capturedSubqueries: CapturedSubquery[],
+  capturedExpressions: CapturedExpression[],
 ): ts.ObjectLiteralExpression {
   const f = ts.factory;
   const props: ts.ObjectLiteralElementLike[] = freeVars.map((v) =>
     f.createShorthandPropertyAssignment(f.createIdentifier(v)),
   );
-  for (const sub of capturedSubqueries) {
-    props.push(f.createPropertyAssignment(sub.key, sub.expr));
+  for (const captured of capturedExpressions) {
+    const key = captured.key.startsWith("@") ? f.createStringLiteral(captured.key) : captured.key;
+    props.push(f.createPropertyAssignment(key, captured.expr));
   }
   return f.createObjectLiteralExpression(props);
 }

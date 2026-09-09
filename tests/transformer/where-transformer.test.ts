@@ -47,6 +47,50 @@ describe("where transformer", () => {
     ).toMatchSnapshot();
   });
 
+  it("captures property access on a closure value", () => {
+    const output = transform("const item = { id: 7 }; users.where((u) => u.id === item.id);");
+    expect(output).toContain('key: "@capture:0"');
+    expect(output).toContain('"@capture:0": item.id');
+  });
+
+  it("captures nested and optional property access", () => {
+    const output = transform(
+      "const item = { owner: { id: 7 } }; users.where((u) => u.id === item?.owner?.id);",
+    );
+    expect(output).toContain('key: "@capture:0"');
+    expect(output).toContain('"@capture:0": item?.owner?.id');
+  });
+
+  it("deduplicates repeated property captures", () => {
+    const output = transform(
+      "const item = { id: 7 }; users.where((u) => u.id === item.id || u.parentId === item.id);",
+    );
+    expect(output.match(/key: "@capture:0"/g)).toHaveLength(2);
+    expect(output.match(/"@capture:0": item\.id/g)).toHaveLength(1);
+  });
+
+  it("keeps generated capture keys separate from closure variables", () => {
+    const output = transform(
+      "const item = { id: 7 }; const _capture0 = 3; users.where((u) => u.id === item.id && u.rank === _capture0);",
+    );
+    expect(output).toContain('key: "@capture:0"');
+    expect(output).toContain('key: "_capture0"');
+    expect(output).toContain('{ _capture0, "@capture:0": item.id }');
+  });
+
+  it("keeps generated capture keys separate from subquery captures", () => {
+    const source = `
+class Post { static tableName: "posts" = "posts"; static query(): any { return null as any; } }
+const item = { id: 7 };
+authors.where((a: any) => (a.postId in Post.query().select((p: any) => p.id)) && a.id === item.id);
+`;
+    const output = transformWithChecker(source);
+    expect(output).toContain('kind: "subqueryRef"');
+    expect(output).toContain('key: "_sub0"');
+    expect(output).toContain('key: "@capture:0"');
+    expect(output).toContain('"@capture:0": item.id');
+  });
+
   it('transforms (u) => u.name.startsWith("A")', () => {
     expect(transform('users.where((u) => u.name.startsWith("A"));')).toMatchSnapshot();
   });
@@ -71,6 +115,14 @@ describe("where transformer", () => {
     expect(
       transform("depts.where((d) => d.employees.some((e) => e.name === 'Alice'));"),
     ).toMatchSnapshot();
+  });
+
+  it("captures closure properties inside relation predicates", () => {
+    const output = transform(
+      "const item = { name: 'Alice' }; depts.where((d) => d.employees.some((e) => e.name === item.name));",
+    );
+    expect(output).toContain('key: "@capture:0"');
+    expect(output).toContain('"@capture:0": item.name');
   });
 
   it("preserves negated exists for relation.every()", () => {
