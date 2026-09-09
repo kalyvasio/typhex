@@ -18,8 +18,7 @@ import {
   buildParamsLiteral,
   captureSubqueryRef as captureSubqueryRefShared,
   isTyphexQueryChain,
-  type CapturedSubquery,
-  type CapturedValue,
+  type CapturedExpression,
 } from "./subquery-transformer.js";
 import {
   getArrowExpressionBody,
@@ -54,8 +53,7 @@ export function toOuterDestructured(pb: ParamBindings): OuterDestructured | unde
 interface WhereCtx {
   paramNames: string[];
   freeVars: Set<string>;
-  capturedSubqueries: CapturedSubquery[];
-  capturedValues: CapturedValue[];
+  capturedExpressions: CapturedExpression[];
   checker?: ts.TypeChecker;
   outerDestructured?: OuterDestructured;
   /** Stack of enclosing arrow ScopeFrames (paramName + optional destructured
@@ -142,7 +140,7 @@ function tryExtractSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRe
 }
 
 function captureSubqueryRef(expr: ts.Expression, ctx: WhereCtx): IrSubqueryRef {
-  return captureSubqueryRefShared(expr, ctx.capturedSubqueries);
+  return captureSubqueryRefShared(expr, ctx.capturedExpressions);
 }
 
 /** Handle `!<expr>` / `~<expr>` — `!` wraps inner IR; `~` emits bitwise NOT. */
@@ -193,16 +191,21 @@ function memberExprToIr(expr: ts.PropertyAccessExpression, ctx: WhereCtx): IrNod
       }
     }
   }
-  return captureClosureValue(expr, ctx);
+  return captureClosureExpression(expr, ctx);
 }
 
-function captureClosureValue(expr: ts.Expression, ctx: WhereCtx): IrNode {
+function captureClosureExpression(expr: ts.Expression, ctx: WhereCtx): IrNode {
   const source = expr.getText();
-  const existing = ctx.capturedValues.find((value) => value.source === source);
+  const existing = ctx.capturedExpressions.find(
+    (captured) => captured.key.startsWith("@capture:") && captured.expr.getText() === source,
+  );
   if (existing) return { kind: "param", key: existing.key };
 
-  const key = `@capture:${ctx.capturedValues.length}`;
-  ctx.capturedValues.push({ key, source, expr });
+  const index = ctx.capturedExpressions.filter((captured) =>
+    captured.key.startsWith("@capture:"),
+  ).length;
+  const key = `@capture:${index}`;
+  ctx.capturedExpressions.push({ key, expr });
   return { kind: "param", key };
 }
 
@@ -354,8 +357,7 @@ function tryParseSomeEvery(
   const innerWhere = exprToIr(innerExpr, {
     paramNames: [innerParam],
     freeVars: ctx.freeVars,
-    capturedSubqueries: ctx.capturedSubqueries,
-    capturedValues: ctx.capturedValues,
+    capturedExpressions: ctx.capturedExpressions,
     checker: ctx.checker,
   });
   if (!innerWhere) return null;
@@ -395,22 +397,19 @@ function arrowToIr(
 ): {
   ir: IrWhere;
   freeVars: string[];
-  capturedSubqueries: CapturedSubquery[];
-  capturedValues: CapturedValue[];
+  capturedExpressions: CapturedExpression[];
 } | null {
   const expr = getArrowExpressionBody(fn);
   if (!expr) return null;
 
   const paramNames = [...extractParamNames(fn), ...extraParamNames];
   const freeVars = new Set<string>();
-  const capturedSubqueries: CapturedSubquery[] = [];
-  const capturedValues: CapturedValue[] = [];
+  const capturedExpressions: CapturedExpression[] = [];
 
   const ir = exprToIr(expr, {
     paramNames,
     freeVars,
-    capturedSubqueries,
-    capturedValues,
+    capturedExpressions,
     checker,
     outerDestructured,
     outerScope,
@@ -424,8 +423,7 @@ function arrowToIr(
       localParamNames: paramNames,
     },
     freeVars: [...freeVars],
-    capturedSubqueries,
-    capturedValues,
+    capturedExpressions,
   };
 }
 
@@ -456,7 +454,7 @@ function transformArrowCall(
 
   const args: ts.Expression[] = [
     irWhereToTsLiteral(result.ir),
-    buildParamsLiteral(result.freeVars, result.capturedSubqueries, result.capturedValues),
+    buildParamsLiteral(result.freeVars, result.capturedExpressions),
   ];
   return ts.factory.updateCallExpression(call, call.expression, call.typeArguments, args);
 }
@@ -490,8 +488,7 @@ export function parseExpressionToIr(
   return exprToIr(expr, {
     paramNames,
     freeVars,
-    capturedSubqueries: [],
-    capturedValues: [],
+    capturedExpressions: [],
     checker,
   });
 }
