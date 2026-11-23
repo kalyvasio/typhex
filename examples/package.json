@@ -6,7 +6,7 @@
     "typhex": "file:.."
   },
   "devDependencies": {
-    "ts-patch": "^3.3.0",
+    "ts-patch": "^4.0.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },
